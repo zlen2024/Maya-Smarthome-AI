@@ -29,12 +29,12 @@ WebSocketsClient webSocket;
 // Hardcoded device id option A
 const char* DEVICE_ID = "esp32-9f83b1c1";
 
-// BLE UUIDs
+// BLE UUIDs - matching mobile app
 #define SERVICE_UUID        "12345678-1234-1234-1234-123456789000"
 #define SSID_UUID           "12345678-1234-1234-1234-123456789001"
-#define PASS_UUID           "12345678-1234-1234-123456789002"
-#define WSURL_UUID          "12345678-1234-1234-1234-123456789003"
-#define PIN_UUID            "12345678-1234-1234-1234-123456789004"
+#define PASS_UUID           "12345678-1234-1234-1234-123456789002"
+#define WSURL_UUID          "12345678-1234-1234-1234-123456789004"
+#define PIN_UUID            "12345678-1234-1234-1234-123456789003"
 #define CMD_UUID            "12345678-1234-1234-1234-123456789005" // optional ack
 
 // runtime settings (loaded/saved)
@@ -101,22 +101,24 @@ void loadSettings() {
 class GenericWriteCallback : public BLECharacteristicCallbacks {
   public:
     void onWrite(BLECharacteristic *pChar) {
-      std::string val = pChar->getValue();
-      String s = String(val.c_str());
+      String val = pChar->getValue();
+      String s = val;
       String uuid = pChar->getUUID().toString().c_str();
-      if (pChar == ssidChar) {
+      Serial.printf("BLE write to UUID: %s = %s\n", uuid.c_str(), s.c_str());
+      
+      if (uuid == SSID_UUID) {
         recvSSID = s; haveSSID = true;
         Serial.printf("BLE got SSID: %s\n", recvSSID.c_str());
-      } else if (pChar == passChar) {
+      } else if (uuid == PASS_UUID) {
         recvPASS = s; havePASS = true;
         Serial.printf("BLE got PASS: %s\n", recvPASS.c_str());
-      } else if (pChar == wsChar) {
+      } else if (uuid == WSURL_UUID) {
         recvWS = s; haveWS = true;
         Serial.printf("BLE got WSURL: %s\n", recvWS.c_str());
-      } else if (pChar == pinChar) {
+      } else if (uuid == PIN_UUID) {
         recvPIN = s; havePIN = true;
         Serial.printf("BLE got PIN: %s\n", recvPIN.c_str());
-      } else if (pChar == cmdChar) {
+      } else if (uuid == CMD_UUID) {
         Serial.printf("BLE CMD char written: %s\n", s.c_str());
       }
     }
@@ -184,6 +186,10 @@ void startBLEProvisioning() {
       wifi_pass = recvPASS;
       ws_url = recvWS;
       Serial.println("Provisioning accepted. Storing values...");
+      Serial.printf("  SSID: %s\n", wifi_ssid.c_str());
+      Serial.printf("  PASS: %s\n", wifi_pass.c_str());
+      Serial.printf("  URL:  %s\n", ws_url.c_str());
+      Serial.printf("  PIN:  %s\n", recvPIN.c_str());
       saveSettings();
 
       // Stop BLE advertising & free BLE resources
@@ -279,6 +285,21 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
         // execute commands
         if (root.containsKey("cmd")) {
           String cmd = root["cmd"].as<const char*>();
+          
+          // Check PIN if provided
+          if (root.containsKey("pin")) {
+            String providedPin = root["pin"].as<const char*>();
+            if (providedPin != ble_pin) {
+              Serial.println("[WS] PIN mismatch! Rejecting command.");
+              StaticJsonDocument<256> err;
+              err["id"] = DEVICE_ID;
+              err["status"] = "pin_mismatch";
+              err["error"] = "PIN mismatch";
+              char b[256]; size_t s = serializeJson(err, b); webSocket.sendTXT(b, s);
+              return;
+            }
+          }
+          
           if (cmd.equalsIgnoreCase("led_on")) {
             digitalWrite(LED_PIN, HIGH);
             Serial.println("LED ON");

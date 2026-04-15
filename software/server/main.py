@@ -1,14 +1,14 @@
 import json
-import asyncio
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends
 from sqlalchemy.orm import Session
 from database import engine, Base, get_db
-from models import Heartbeat
+from models import Heartbeat, DeviceState
 
 # Create tables
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+
 
 class ConnectionManager:
     def __init__(self):
@@ -44,7 +44,52 @@ class ConnectionManager:
         self.active_connections[client_id] = websocket
         print(f"Client {client_id} identified and registered")
 
+
 manager = ConnectionManager()
+
+
+@app.get("/device/{device_id}/status")
+async def get_device_status(device_id: str, db: Session = Depends(get_db)):
+    """Get current LED status for a device"""
+    device_state = (
+        db.query(DeviceState).filter(DeviceState.device_id == device_id).first()
+    )
+    if device_state:
+        return {
+            "device_id": device_id,
+            "led_status": device_state.led_status,
+            "updated_at": device_state.updated_at,
+        }
+    return {"device_id": device_id, "led_status": "unknown"}
+
+
+@app.get("/db")
+async def get_all_data(db: Session = Depends(get_db)):
+    """Get all database records"""
+    heartbeats = db.query(Heartbeat).all()
+    device_states = db.query(DeviceState).all()
+    return {
+        "heartbeats": [
+            {
+                "id": h.id,
+                "device_id": h.device_id,
+                "uptime_ms": h.uptime_ms,
+                "ip_address": h.ip_address,
+                "timestamp": h.timestamp.isoformat() if h.timestamp else None,
+            }
+            for h in heartbeats
+        ],
+        "device_states": [
+            {
+                "id": d.id,
+                "device_id": d.device_id,
+                "led_status": d.led_status,
+                "updated_at": d.updated_at.isoformat() if d.updated_at else None,
+            }
+            for d in device_states
+        ],
+    }
+
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)):
@@ -88,13 +133,23 @@ async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)
 
                 # Handle command routing (e.g. from Mobile app to ESP32)
                 elif "cmd" in json_data:
-                    target_id = json_data.get("target_id", device_id) # if mobile sends target_id, else assume direct
+                    target_id = json_data.get(
+                        "target_id", device_id
+                    )  # if mobile sends target_id, else assume direct
 
                     if target_id != device_id:
                         print(f"Routing command to {target_id}: {json_data}")
-                        # If routing to another device, ensure it contains 'id' for the target device
-                        cmd_payload = json.dumps({"id": target_id, "cmd": json_data["cmd"]})
-                        success = await manager.send_personal_message(cmd_payload, target_id)
+                        # Include PIN in command payload
+                        cmd_payload = json.dumps(
+                            {
+                                "id": target_id,
+                                "cmd": json_data["cmd"],
+                                "pin": json_data.get("pin", ""),
+                            }
+                        )
+                        success = await manager.send_personal_message(
+                            cmd_payload, target_id
+                        )
                         if not success:
                             print(f"Target device {target_id} not connected")
                     else:
@@ -102,8 +157,24 @@ async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)
 
                 # Handle ack from ESP32 back to mobile
                 elif json_data.get("status") == "ok":
-                    # For now, just log acks
                     print(f"Ack from {device_id}: {json_data}")
+
+                    # Update LED status in DB if present
+                    if "led" in json_data:
+                        led_state = (
+                            db.query(DeviceState)
+                            .filter(DeviceState.device_id == device_id)
+                            .first()
+                        )
+                        if led_state:
+                            led_state.led_status = json_data["led"]
+                        else:
+                            led_state = DeviceState(
+                                device_id=device_id, led_status=json_data["led"]
+                            )
+                            db.add(led_state)
+                        db.commit()
+                        print(f"Updated LED status: {json_data['led']}")
 
             except json.JSONDecodeError:
                 print(f"Failed to parse JSON: {data}")
