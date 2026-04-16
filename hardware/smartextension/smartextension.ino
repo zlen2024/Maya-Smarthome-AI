@@ -97,7 +97,23 @@ void loadSettings() {
   Serial.printf("Loaded settings: ssid='%s', ws='%s', pin='%s'\n", wifi_ssid.c_str(), ws_url.c_str(), ble_pin.c_str());
 }
 
+
+bool deviceConnected = false;
+
+class MyServerCallbacks: public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) {
+      deviceConnected = true;
+      Serial.println("BLE Client Connected");
+    };
+
+    void onDisconnect(BLEServer* pServer) {
+      deviceConnected = false;
+      Serial.println("BLE Client Disconnected");
+    }
+};
+
 // BLE callbacks to collect written values
+
 class GenericWriteCallback : public BLECharacteristicCallbacks {
   public:
     void onWrite(BLECharacteristic *pChar) {
@@ -129,14 +145,16 @@ void startBLEProvisioning() {
   Serial.println("Starting BLE provisioning mode. Advertising as 'MyIoT-Setup'...");
 
   BLEDevice::init("MyIoT-Setup");
+  BLEDevice::setMTU(512);
   pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
   pService = pServer->createService(SERVICE_UUID);
 
-  ssidChar = pService->createCharacteristic(SSID_UUID, BLECharacteristic::PROPERTY_WRITE);
-  passChar = pService->createCharacteristic(PASS_UUID, BLECharacteristic::PROPERTY_WRITE);
-  wsChar   = pService->createCharacteristic(WSURL_UUID, BLECharacteristic::PROPERTY_WRITE);
-  pinChar  = pService->createCharacteristic(PIN_UUID, BLECharacteristic::PROPERTY_WRITE);
-  cmdChar  = pService->createCharacteristic(CMD_UUID, BLECharacteristic::PROPERTY_WRITE);
+  ssidChar = pService->createCharacteristic(SSID_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
+  passChar = pService->createCharacteristic(PASS_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
+  wsChar   = pService->createCharacteristic(WSURL_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
+  pinChar  = pService->createCharacteristic(PIN_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
+  cmdChar  = pService->createCharacteristic(CMD_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
 
   GenericWriteCallback* cb = new GenericWriteCallback();
   ssidChar->setCallbacks(cb);
@@ -191,6 +209,13 @@ void startBLEProvisioning() {
       Serial.printf("  URL:  %s\n", ws_url.c_str());
       Serial.printf("  PIN:  %s\n", recvPIN.c_str());
       saveSettings();
+
+      // Wait for device to disconnect or wait briefly to allow acks
+      Serial.println("Waiting briefly for BLE client to disconnect or acknowledge...");
+      unsigned long waitStart = millis();
+      while(deviceConnected && (millis() - waitStart < 2000)) {
+         delay(50);
+      }
 
       // Stop BLE advertising & free BLE resources
       BLEDevice::stopAdvertising();
