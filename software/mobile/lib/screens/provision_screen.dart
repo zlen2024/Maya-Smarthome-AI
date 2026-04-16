@@ -5,11 +5,11 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-const String SERVICE_UUID = "12345678-1234-1234-1234-123456789000";
-const String SSID_UUID = "12345678-1234-1234-1234-123456789001";
-const String PASS_UUID = "12345678-1234-1234-1234-123456789002";
-const String WSURL_UUID = "12345678-1234-1234-1234-123456789004";
-const String PIN_UUID = "12345678-1234-1234-1234-123456789003";
+const String SERVICE_UUID = "12345678-1234-1234-1234-1234567890A0";
+const String SSID_UUID = "12345678-1234-1234-1234-1234567890A1";
+const String PASS_UUID = "12345678-1234-1234-1234-1234567890A2";
+const String WSURL_UUID = "12345678-1234-1234-1234-1234567890A4";
+const String PIN_UUID = "12345678-1234-1234-1234-1234567890A3";
 
 class ProvisionScreen extends StatefulWidget {
   const ProvisionScreen({super.key});

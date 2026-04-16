@@ -14,6 +14,7 @@
 
 #include <WiFi.h>
 #include <Preferences.h>
+#include <nvs_flash.h>
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
@@ -30,12 +31,12 @@ WebSocketsClient webSocket;
 const char* DEVICE_ID = "esp32-9f83b1c1";
 
 // BLE UUIDs - matching mobile app
-#define SERVICE_UUID        "12345678-1234-1234-1234-123456789000"
-#define SSID_UUID           "12345678-1234-1234-1234-123456789001"
-#define PASS_UUID           "12345678-1234-1234-1234-123456789002"
-#define WSURL_UUID          "12345678-1234-1234-1234-123456789004"
-#define PIN_UUID            "12345678-1234-1234-1234-123456789003"
-#define CMD_UUID            "12345678-1234-1234-1234-123456789005" // optional ack
+#define SERVICE_UUID        "12345678-1234-1234-1234-1234567890A0"
+#define SSID_UUID           "12345678-1234-1234-1234-1234567890A1"
+#define PASS_UUID           "12345678-1234-1234-1234-1234567890A2"
+#define WSURL_UUID          "12345678-1234-1234-1234-1234567890A4"
+#define PIN_UUID            "12345678-1234-1234-1234-1234567890A3"
+#define CMD_UUID            "12345678-1234-1234-1234-1234567890A5" // optional ack
 
 // runtime settings (loaded/saved)
 String wifi_ssid = "";
@@ -148,7 +149,7 @@ void startBLEProvisioning() {
   BLEDevice::setMTU(512);
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
-  pService = pServer->createService(SERVICE_UUID);
+  pService = pServer->createService(BLEUUID(SERVICE_UUID), 30, 0);
 
   ssidChar = pService->createCharacteristic(SSID_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
   passChar = pService->createCharacteristic(PASS_UUID, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
@@ -421,6 +422,17 @@ void ensureWebSocketConnected() {
 
 void setup() {
   Serial.begin(115200);
+
+  // Initialize NVS
+  esp_err_t err = nvs_flash_init();
+  if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    // NVS partition was truncated and needs to be erased
+    // Retry nvs_flash_init
+    ESP_ERROR_CHECK(nvs_flash_erase());
+    err = nvs_flash_init();
+  }
+  ESP_ERROR_CHECK(err);
+
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
 
