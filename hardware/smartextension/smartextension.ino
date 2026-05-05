@@ -26,6 +26,14 @@ WebSocketsClient webSocket;
 
 #define LED_PIN 2
 
+String sanitizeBleText(String s) {
+  s.replace("\r", "");
+  s.replace("\n", "");
+  s.replace("\0", "");
+  s.trim();
+  return s;
+}
+
 // Hardcoded device id option A
 const char* DEVICE_ID = "esp32-9f83b1c1";
 
@@ -94,15 +102,20 @@ void loadSettings() {
   ws_url = prefs.getString("ws", "");
   ble_pin = prefs.getString("pin", "0000"); // default PIN
   prefs.end();
-  Serial.printf("Loaded settings: ssid='%s', ws='%s', pin='%s'\n", wifi_ssid.c_str(), ws_url.c_str(), ble_pin.c_str());
+  wifi_ssid = sanitizeBleText(wifi_ssid);
+  wifi_pass = sanitizeBleText(wifi_pass);
+  ws_url = sanitizeBleText(ws_url);
+  ble_pin = sanitizeBleText(ble_pin);
+  Serial.printf("Loaded settings: ssid='%s', ws='%s', pin_len=%d\n", wifi_ssid.c_str(), ws_url.c_str(), (int)ble_pin.length());
 }
 
 // BLE callbacks to collect written values
 class GenericWriteCallback : public BLECharacteristicCallbacks {
   public:
     void onWrite(BLECharacteristic *pChar) {
-      String val = pChar->getValue();
-      String s = val;
+      std::string v = pChar->getValue();
+      String s(v.c_str());
+      s = sanitizeBleText(s);
       String uuid = pChar->getUUID().toString().c_str();
       Serial.printf("BLE write to UUID: %s = %s\n", uuid.c_str(), s.c_str());
       
@@ -111,13 +124,13 @@ class GenericWriteCallback : public BLECharacteristicCallbacks {
         Serial.printf("BLE got SSID: %s\n", recvSSID.c_str());
       } else if (uuid == PASS_UUID) {
         recvPASS = s; havePASS = true;
-        Serial.printf("BLE got PASS: %s\n", recvPASS.c_str());
+        Serial.printf("BLE got PASS (len=%d)\n", (int)recvPASS.length());
       } else if (uuid == WSURL_UUID) {
         recvWS = s; haveWS = true;
         Serial.printf("BLE got WSURL: %s\n", recvWS.c_str());
       } else if (uuid == PIN_UUID) {
         recvPIN = s; havePIN = true;
-        Serial.printf("BLE got PIN: %s\n", recvPIN.c_str());
+        Serial.printf("BLE got PIN (len=%d)\n", (int)recvPIN.length());
       } else if (uuid == CMD_UUID) {
         Serial.printf("BLE CMD char written: %s\n", s.c_str());
       }
@@ -128,15 +141,16 @@ class GenericWriteCallback : public BLECharacteristicCallbacks {
 void startBLEProvisioning() {
   Serial.println("Starting BLE provisioning mode. Advertising as 'MyIoT-Setup'...");
 
+  BLEDevice::setMTU(517);
   BLEDevice::init("MyIoT-Setup");
   pServer = BLEDevice::createServer();
   pService = pServer->createService(SERVICE_UUID);
 
-  ssidChar = pService->createCharacteristic(SSID_UUID, BLECharacteristic::PROPERTY_WRITE);
-  passChar = pService->createCharacteristic(PASS_UUID, BLECharacteristic::PROPERTY_WRITE);
-  wsChar   = pService->createCharacteristic(WSURL_UUID, BLECharacteristic::PROPERTY_WRITE);
-  pinChar  = pService->createCharacteristic(PIN_UUID, BLECharacteristic::PROPERTY_WRITE);
-  cmdChar  = pService->createCharacteristic(CMD_UUID, BLECharacteristic::PROPERTY_WRITE);
+  ssidChar = pService->createCharacteristic(SSID_UUID, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  passChar = pService->createCharacteristic(PASS_UUID, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  wsChar   = pService->createCharacteristic(WSURL_UUID, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  pinChar  = pService->createCharacteristic(PIN_UUID, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  cmdChar  = pService->createCharacteristic(CMD_UUID, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
 
   GenericWriteCallback* cb = new GenericWriteCallback();
   ssidChar->setCallbacks(cb);
@@ -168,7 +182,7 @@ void startBLEProvisioning() {
         // first time: adopt provided PIN (but only if non-empty)
         if (recvPIN.length() > 0) {
           ble_pin = recvPIN;
-          Serial.printf("No previous PIN found. Setting device PIN to '%s'\n", ble_pin.c_str());
+          Serial.printf("No previous PIN found. Setting device PIN (len=%d)\n", (int)ble_pin.length());
         }
       } else {
         // check provided pin matches stored pin
@@ -187,9 +201,9 @@ void startBLEProvisioning() {
       ws_url = recvWS;
       Serial.println("Provisioning accepted. Storing values...");
       Serial.printf("  SSID: %s\n", wifi_ssid.c_str());
-      Serial.printf("  PASS: %s\n", wifi_pass.c_str());
       Serial.printf("  URL:  %s\n", ws_url.c_str());
-      Serial.printf("  PIN:  %s\n", recvPIN.c_str());
+      Serial.printf("  PASS_LEN: %d\n", (int)wifi_pass.length());
+      Serial.printf("  PIN_LEN:  %d\n", (int)recvPIN.length());
       saveSettings();
 
       // Stop BLE advertising & free BLE resources
@@ -216,6 +230,12 @@ bool connectToWiFiOnce() {
     Serial.println("No saved SSID. Cannot connect.");
     return false;
   }
+  wifi_ssid = sanitizeBleText(wifi_ssid);
+  wifi_pass = sanitizeBleText(wifi_pass);
+  WiFi.persistent(false);
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect(true);
+  delay(150);
   Serial.printf("Connecting to WiFi '%s' ...\n", wifi_ssid.c_str());
   WiFi.begin(wifi_ssid.c_str(), wifi_pass.c_str());
 
@@ -233,7 +253,7 @@ bool connectToWiFiOnce() {
     wifiFailCycles = 0;
     return true;
   } else {
-    Serial.println("WiFi connection failed.");
+    Serial.printf("WiFi connection failed. status=%d\n", (int)WiFi.status());
     wifiConnected = false;
     return false;
   }

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -93,6 +94,11 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
 
     try {
       await device.connect();
+      if (Platform.isAndroid) {
+        try {
+          await device.requestMtu(512);
+        } catch (_) {}
+      }
       setState(() {
         _connectedDevice = device;
         _statusLog = "Connected! Discovering Services...";
@@ -132,32 +138,52 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
     setState(() => _statusLog = "Sending data...");
 
     try {
+      final ssid = _ssidController.text.trim();
+      final pass = _passController.text;
+      final wsUrl = _urlController.text.trim();
+      final pin = _pinController.text.trim();
       if (_ssidChar != null) {
-        await _ssidChar!.write(utf8.encode(_ssidController.text));
+        await _ssidChar!.write(
+          utf8.encode(ssid),
+          withoutResponse: false,
+          allowLongWrite: true,
+        );
         setState(() => _statusLog = "Sent SSID...");
         await Future.delayed(const Duration(milliseconds: 200));
       }
 
       if (_passChar != null) {
-        await _passChar!.write(utf8.encode(_passController.text));
+        await _passChar!.write(
+          utf8.encode(pass),
+          withoutResponse: false,
+          allowLongWrite: true,
+        );
         setState(() => _statusLog = "Sent PASS...");
         await Future.delayed(const Duration(milliseconds: 200));
       }
 
       if (_urlChar != null) {
-        await _urlChar!.write(utf8.encode(_urlController.text));
+        await _urlChar!.write(
+          utf8.encode(wsUrl),
+          withoutResponse: false,
+          allowLongWrite: true,
+        );
         setState(() => _statusLog = "Sent URL...");
         await Future.delayed(const Duration(milliseconds: 200));
       }
 
       if (_pinChar != null) {
-        await _pinChar!.write(utf8.encode(_pinController.text));
+        await _pinChar!.write(
+          utf8.encode(pin),
+          withoutResponse: false,
+          allowLongWrite: true,
+        );
         setState(() => _statusLog = "Sent PIN! Waiting for ESP32...");
       }
 
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('ws_url', _urlController.text);
-      await prefs.setString('device_pin', _pinController.text);
+      await prefs.setString('ws_url', wsUrl);
+      await prefs.setString('device_pin', pin);
       await prefs.setString('device_id', 'esp32-9f83b1c1');
 
       setState(() => _statusLog = "Provisioned! Settings saved.");
