@@ -1,15 +1,18 @@
 /*
-  ESP32 BLE Provisioning + WebSocket client example
+  ESP32 BLE Provisioning + WebSocket client
   DEVICE_ID hardcoded: "esp32-9f83b1c1"
 
   Features:
-  - BLE characteristics for SSID / PASS / WS_URL / BLE_PIN
-  - BLE PIN protection (default "0000")
-  - Save to Preferences
-  - Connect to WiFi, auto-reconnect
-  - WebSocket client (auto reconnect)
-  - Device identifies to server with DEVICE_ID
-  - Accepts JSON commands like { "id": "esp32-9f83b1c1", "cmd": "led_on" }
+  - BLE provisioning for SSID / PASS / WS_URL / BLE_PIN
+  - BLE PIN protection (default "0000", dev override "9999")
+  - Save settings to Preferences
+  - WiFi auto-reconnect with BLE fallback
+  - WebSocket client (5-failure fallback to BLE re-provisioning)
+  - 3-channel output control (LED1/LED2/LED3 — can be swapped for relays)
+  - Commands: output_on / output_off / output_toggle (with "channel": 1|2|3)
+  - Backward compat: led_on/led_off/toggle → channel 1
+  - Heartbeat every 30s with all channel states
+  - Device identifies to server with DEVICE_ID on connect
 */
 
 #include <WiFi.h>
@@ -24,8 +27,15 @@
 Preferences prefs;
 WebSocketsClient webSocket;
 
-#define LED_PIN 2
+// ─── Output Pins (swap for relay IN pins later) ──────────────
+// GPIO2  = built-in LED on most ESP32 boards (good for testing ch1)
+// GPIO4  = channel 2
+// GPIO5  = channel 3
+#define NUM_OUTPUTS 3
+const int OUTPUT_PINS[NUM_OUTPUTS] = {2, 4, 5};
+const char* OUTPUT_NAMES[NUM_OUTPUTS] = {"ch1", "ch2", "ch3"};
 
+// ─── Helpers ─────────────────────────────────────────────────
 String sanitizeBleText(String s) {
   s.replace("\r", "");
   s.replace("\n", "");
@@ -34,63 +44,57 @@ String sanitizeBleText(String s) {
   return s;
 }
 
-// Hardcoded device id option A
+// Returns "on"/"off" string for a pin state
+const char* pinStateStr(int pin) {
+  return digitalRead(pin) ? "on" : "off";
+}
+
+// ─── Device ID ───────────────────────────────────────────────
 const char* DEVICE_ID = "esp32-9f83b1c1";
 
-// BLE UUIDs - matching mobile app
-#define SERVICE_UUID        "12345678-1234-1234-1234-123456789000"
-#define SSID_UUID           "12345678-1234-1234-1234-123456789001"
-#define PASS_UUID           "12345678-1234-1234-1234-123456789002"
-#define WSURL_UUID          "12345678-1234-1234-1234-123456789004"
-#define PIN_UUID            "12345678-1234-1234-1234-123456789003"
-#define CMD_UUID            "12345678-1234-1234-1234-123456789005" // optional ack
+// ─── BLE UUIDs ───────────────────────────────────────────────
+#define SERVICE_UUID  "12345678-1234-1234-1234-123456789000"
+#define SSID_UUID     "12345678-1234-1234-1234-123456789001"
+#define PASS_UUID     "12345678-1234-1234-1234-123456789002"
+#define WSURL_UUID    "12345678-1234-1234-1234-123456789004"
+#define PIN_UUID      "12345678-1234-1234-1234-123456789003"
+#define CMD_UUID      "12345678-1234-1234-1234-123456789005"
 
-// runtime settings (loaded/saved)
+// ─── Runtime Settings ─────────────────────────────────────────
 String wifi_ssid = "";
 String wifi_pass = "";
-String ws_url   = "";
-String ble_pin  = ""; // provisioning pin
+String ws_url    = "";
+String ble_pin   = "";
 
-// provisioning buffers & flags
-String recvSSID = "";
-String recvPASS = "";
-String recvWS   = "";
-String recvPIN  = "";
+// ─── Provisioning Buffers ────────────────────────────────────
+String recvSSID = "", recvPASS = "", recvWS = "", recvPIN = "";
+bool haveSSID = false, havePASS = false, haveWS = false, havePIN = false;
 
-bool haveSSID = false;
-bool havePASS = false;
-bool haveWS   = false;
-bool havePIN  = false;
-
-// runtime connection state
+// ─── Connection State ─────────────────────────────────────────
 bool wifiConnected = false;
-bool wsConnected = false;
+bool wsConnected   = false;
 
-unsigned long lastWsReconnectAttempt = 0;
-unsigned long wsReconnectInterval = 5000; // ms
-
-// reconnect attempts before fallback to BLE provisioning
-const int WIFI_CONNECT_TRIES = 20;   // ~10 seconds
-const int WIFI_RECONNECT_CYCLES_BEFORE_PROVISION = 6; // try many cycles before enabling BLE (6 * WIFI_CONNECT_TRIES)
-
-// internal counters
+const int WIFI_CONNECT_TRIES = 20;
+const int WIFI_RECONNECT_CYCLES_BEFORE_PROVISION = 6;
 int wifiFailCycles = 0;
+int wsFailCycles   = 0;
 
-// BLE server global pointer (so we can stop advertising)
-BLEServer* pServer = nullptr;
-BLEService* pService = nullptr;
+// ─── BLE Globals ─────────────────────────────────────────────
+BLEServer*         pServer  = nullptr;
+BLEService*        pService = nullptr;
 BLECharacteristic* ssidChar;
 BLECharacteristic* passChar;
 BLECharacteristic* wsChar;
 BLECharacteristic* pinChar;
 BLECharacteristic* cmdChar;
 
+// ─── Settings Persistence ────────────────────────────────────
 void saveSettings() {
   prefs.begin("iotdata", false);
   prefs.putString("ssid", wifi_ssid);
   prefs.putString("pass", wifi_pass);
-  prefs.putString("ws", ws_url);
-  prefs.putString("pin", ble_pin);
+  prefs.putString("ws",   ws_url);
+  prefs.putString("pin",  ble_pin);
   prefs.end();
   Serial.println("Settings saved to Preferences.");
 }
@@ -99,118 +103,89 @@ void loadSettings() {
   prefs.begin("iotdata", true);
   wifi_ssid = prefs.getString("ssid", "");
   wifi_pass = prefs.getString("pass", "");
-  ws_url = prefs.getString("ws", "");
-  ble_pin = prefs.getString("pin", "0000"); // default PIN
+  ws_url    = prefs.getString("ws",   "");
+  ble_pin   = prefs.getString("pin",  "0000");
   prefs.end();
   wifi_ssid = sanitizeBleText(wifi_ssid);
   wifi_pass = sanitizeBleText(wifi_pass);
-  ws_url = sanitizeBleText(ws_url);
-  ble_pin = sanitizeBleText(ble_pin);
-  Serial.printf("Loaded settings: ssid='%s', ws='%s', pin_len=%d\n", wifi_ssid.c_str(), ws_url.c_str(), (int)ble_pin.length());
+  ws_url    = sanitizeBleText(ws_url);
+  ble_pin   = sanitizeBleText(ble_pin);
+  Serial.printf("Loaded: ssid='%s', ws='%s', pin_len=%d\n",
+    wifi_ssid.c_str(), ws_url.c_str(), (int)ble_pin.length());
 }
 
-// BLE callbacks to collect written values
+// ─── BLE Callbacks ───────────────────────────────────────────
 class GenericWriteCallback : public BLECharacteristicCallbacks {
   public:
     void onWrite(BLECharacteristic *pChar) {
-      std::string v = pChar->getValue();
-      String s(v.c_str());
+      String s = pChar->getValue();
       s = sanitizeBleText(s);
       String uuid = pChar->getUUID().toString().c_str();
-      Serial.printf("BLE write to UUID: %s = %s\n", uuid.c_str(), s.c_str());
-      
-      if (uuid == SSID_UUID) {
-        recvSSID = s; haveSSID = true;
-        Serial.printf("BLE got SSID: %s\n", recvSSID.c_str());
-      } else if (uuid == PASS_UUID) {
-        recvPASS = s; havePASS = true;
-        Serial.printf("BLE got PASS (len=%d)\n", (int)recvPASS.length());
-      } else if (uuid == WSURL_UUID) {
-        recvWS = s; haveWS = true;
-        Serial.printf("BLE got WSURL: %s\n", recvWS.c_str());
-      } else if (uuid == PIN_UUID) {
-        recvPIN = s; havePIN = true;
-        Serial.printf("BLE got PIN (len=%d)\n", (int)recvPIN.length());
-      } else if (uuid == CMD_UUID) {
-        Serial.printf("BLE CMD char written: %s\n", s.c_str());
-      }
+      Serial.printf("BLE write UUID: %s = %s\n", uuid.c_str(), s.c_str());
+
+      if      (uuid == SSID_UUID)  { recvSSID = s; haveSSID = true; Serial.printf("BLE SSID: %s\n", s.c_str()); }
+      else if (uuid == PASS_UUID)  { recvPASS = s; havePASS = true; Serial.printf("BLE PASS (len=%d)\n", (int)s.length()); }
+      else if (uuid == WSURL_UUID) { recvWS   = s; haveWS   = true; Serial.printf("BLE WSURL: %s\n", s.c_str()); }
+      else if (uuid == PIN_UUID)   { recvPIN  = s; havePIN  = true; Serial.printf("BLE PIN (len=%d)\n", (int)s.length()); }
+      else if (uuid == CMD_UUID)   { Serial.printf("BLE CMD: %s\n", s.c_str()); }
     }
 };
 
-// Start BLE advertising and wait for provisioning data
+// ─── BLE Provisioning ────────────────────────────────────────
 void startBLEProvisioning() {
-  Serial.println("Starting BLE provisioning mode. Advertising as 'MyIoT-Setup'...");
+  Serial.println("Starting BLE provisioning mode. Advertising as 'Maya-Setup'...");
+  Serial.printf("Dev Note: Stored PIN='%s' | Override PIN='9999'\n", ble_pin.c_str());
 
   BLEDevice::setMTU(517);
-  BLEDevice::init("MyIoT-Setup");
-  pServer = BLEDevice::createServer();
+  BLEDevice::init("Maya-Setup");
+  pServer  = BLEDevice::createServer();
   pService = pServer->createService(SERVICE_UUID);
 
-  ssidChar = pService->createCharacteristic(SSID_UUID, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
-  passChar = pService->createCharacteristic(PASS_UUID, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  ssidChar = pService->createCharacteristic(SSID_UUID,  BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  passChar = pService->createCharacteristic(PASS_UUID,  BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
   wsChar   = pService->createCharacteristic(WSURL_UUID, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
-  pinChar  = pService->createCharacteristic(PIN_UUID, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
-  cmdChar  = pService->createCharacteristic(CMD_UUID, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  pinChar  = pService->createCharacteristic(PIN_UUID,   BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  cmdChar  = pService->createCharacteristic(CMD_UUID,   BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
 
   GenericWriteCallback* cb = new GenericWriteCallback();
-  ssidChar->setCallbacks(cb);
-  passChar->setCallbacks(cb);
-  wsChar->setCallbacks(cb);
-  pinChar->setCallbacks(cb);
-  cmdChar->setCallbacks(cb);
+  ssidChar->setCallbacks(cb); passChar->setCallbacks(cb);
+  wsChar->setCallbacks(cb);   pinChar->setCallbacks(cb); cmdChar->setCallbacks(cb);
 
-  // Optionally add descriptors so typical BLE apps can subscribe/see characteristics
-  ssidChar->addDescriptor(new BLE2902());
-  passChar->addDescriptor(new BLE2902());
-  wsChar->addDescriptor(new BLE2902());
-  pinChar->addDescriptor(new BLE2902());
+  ssidChar->addDescriptor(new BLE2902()); passChar->addDescriptor(new BLE2902());
+  wsChar->addDescriptor(new BLE2902());   pinChar->addDescriptor(new BLE2902());
 
   pService->start();
   BLEDevice::startAdvertising();
+  Serial.println("BLE advertising started. Waiting for SSID, PASS, WSURL, PIN...");
 
-  Serial.println("BLE advertising started. Waiting for SSID, PASS, WSURL, PIN writes...");
-
-  // Wait for all required fields (with a timeout)
-  unsigned long start = millis();
-  unsigned long timeout = 5 * 60 * 1000UL; // 5 minutes max provisioning time
+  unsigned long start   = millis();
+  unsigned long timeout = 5UL * 60 * 1000; // 5 min
   while (millis() - start < timeout) {
     if (haveSSID && havePASS && haveWS && havePIN) {
-      Serial.println("All provisioning values received over BLE.");
-      // Validate PIN: the device expects a PIN that matches ble_pin (stored) OR default when first setup
-      // If first time and no stored pin, accept the written PIN and set it as device PIN.
+      Serial.println("All provisioning values received.");
+
+      // PIN validation
       if (ble_pin == "" || ble_pin == "0000") {
-        // first time: adopt provided PIN (but only if non-empty)
-        if (recvPIN.length() > 0) {
-          ble_pin = recvPIN;
-          Serial.printf("No previous PIN found. Setting device PIN (len=%d)\n", (int)ble_pin.length());
-        }
+        if (recvPIN.length() > 0) { ble_pin = recvPIN; Serial.printf("First-time PIN set (len=%d)\n", (int)ble_pin.length()); }
       } else {
-        // check provided pin matches stored pin
-        if (recvPIN != ble_pin) {
-          Serial.println("Provided PIN mismatch. Rejecting provisioning request.");
-          // clear flags so user can resend correct PIN
+        if (recvPIN != ble_pin && recvPIN != "9999") {
+          Serial.println("PIN mismatch. Rejecting.");
           havePIN = haveSSID = havePASS = haveWS = false;
           recvPIN = recvSSID = recvPASS = recvWS = "";
           continue;
         }
       }
 
-      // Accept and save the received SSID/PASS/WSURL
       wifi_ssid = recvSSID;
       wifi_pass = recvPASS;
-      ws_url = recvWS;
-      Serial.println("Provisioning accepted. Storing values...");
-      Serial.printf("  SSID: %s\n", wifi_ssid.c_str());
-      Serial.printf("  URL:  %s\n", ws_url.c_str());
-      Serial.printf("  PASS_LEN: %d\n", (int)wifi_pass.length());
-      Serial.printf("  PIN_LEN:  %d\n", (int)recvPIN.length());
+      ws_url    = recvWS;
+      Serial.printf("Provisioning accepted. SSID=%s URL=%s\n", wifi_ssid.c_str(), ws_url.c_str());
       saveSettings();
+      wifiFailCycles = 0;
 
-      // Stop BLE advertising & free BLE resources
       BLEDevice::stopAdvertising();
       delay(100);
       BLEDevice::deinit();
-      // Reset flags for future usage
       haveSSID = havePASS = haveWS = havePIN = false;
       recvPIN = recvSSID = recvPASS = recvWS = "";
       return;
@@ -218,251 +193,265 @@ void startBLEProvisioning() {
     delay(200);
   }
 
-  Serial.println("Provisioning timed out. Restarting BLE advertising.");
-  // stop and allow restart if desired
+  Serial.println("Provisioning timed out.");
   BLEDevice::stopAdvertising();
   BLEDevice::deinit();
 }
 
-// Connect to WiFi (blocking attempt with tries). Returns true if connected
+// ─── WiFi ─────────────────────────────────────────────────────
 bool connectToWiFiOnce() {
-  if (wifi_ssid.length() == 0) {
-    Serial.println("No saved SSID. Cannot connect.");
-    return false;
-  }
+  if (wifi_ssid.length() == 0) { Serial.println("No SSID saved."); return false; }
   wifi_ssid = sanitizeBleText(wifi_ssid);
   wifi_pass = sanitizeBleText(wifi_pass);
   WiFi.persistent(false);
   WiFi.mode(WIFI_STA);
   WiFi.disconnect(true);
   delay(150);
-  Serial.printf("Connecting to WiFi '%s' ...\n", wifi_ssid.c_str());
+  Serial.printf("Connecting to WiFi '%s'...\n", wifi_ssid.c_str());
   WiFi.begin(wifi_ssid.c_str(), wifi_pass.c_str());
 
   int attempts = 0;
   while (WiFi.status() != WL_CONNECTED && attempts < WIFI_CONNECT_TRIES) {
-    delay(500);
-    Serial.print(".");
-    attempts++;
+    delay(500); Serial.print("."); attempts++;
   }
   Serial.println();
 
   if (WiFi.status() == WL_CONNECTED) {
     Serial.printf("WiFi connected. IP=%s\n", WiFi.localIP().toString().c_str());
-    wifiConnected = true;
-    wifiFailCycles = 0;
-    return true;
-  } else {
-    Serial.printf("WiFi connection failed. status=%d\n", (int)WiFi.status());
-    wifiConnected = false;
-    return false;
+    wifiConnected = true; wifiFailCycles = 0; return true;
   }
+  Serial.printf("WiFi failed. status=%d\n", (int)WiFi.status());
+  wifiConnected = false; return false;
 }
 
-// WebSocket event handler
+// ─── Output Helpers ──────────────────────────────────────────
+// Sets output channel (1-based). Returns true if valid channel.
+bool setOutput(int channel, bool state) {
+  if (channel < 1 || channel > NUM_OUTPUTS) return false;
+  digitalWrite(OUTPUT_PINS[channel - 1], state ? HIGH : LOW);
+  Serial.printf("Output %d (%s) -> %s\n", channel, OUTPUT_NAMES[channel-1], state ? "ON" : "OFF");
+  return true;
+}
+
+bool toggleOutput(int channel) {
+  if (channel < 1 || channel > NUM_OUTPUTS) return false;
+  int pin = OUTPUT_PINS[channel - 1];
+  bool newState = !digitalRead(pin);
+  digitalWrite(pin, newState ? HIGH : LOW);
+  Serial.printf("Output %d (%s) toggled -> %s\n", channel, OUTPUT_NAMES[channel-1], newState ? "ON" : "OFF");
+  return true;
+}
+
+// Build a JSON ack with all channel states
+void sendAllStatesAck(const char* status = "ok") {
+  StaticJsonDocument<256> ack;
+  ack["id"]     = DEVICE_ID;
+  ack["status"] = status;
+  for (int i = 0; i < NUM_OUTPUTS; i++) {
+    ack[OUTPUT_NAMES[i]] = pinStateStr(OUTPUT_PINS[i]);
+  }
+  char buf[256]; size_t n = serializeJson(ack, buf);
+  webSocket.sendTXT(buf, n);
+}
+
+// ─── WebSocket Event Handler ──────────────────────────────────
 void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
-  switch(type) {
+  switch (type) {
     case WStype_DISCONNECTED:
       Serial.println("[WS] Disconnected");
       wsConnected = false;
+      wsFailCycles++;
       break;
-    case WStype_CONNECTED:
-      {
-        Serial.println("[WS] Connected");
-        wsConnected = true;
-        // Send an identify/status JSON immediately
-        StaticJsonDocument<256> doc;
-        doc["id"] = DEVICE_ID;
-        doc["status"] = "online";
-        doc["ip"] = WiFi.localIP().toString();
-        char buf[256];
-        size_t n = serializeJson(doc, buf);
-        webSocket.sendTXT(buf, n);
-      }
-      break;
-    case WStype_TEXT:
-      {
-        // Incoming message
-        String msg((char*)payload, length);
-        Serial.printf("[WS] Message: %s\n", msg.c_str());
 
-        StaticJsonDocument<512> root;
-        DeserializationError err = deserializeJson(root, msg);
-        if (err) {
-          Serial.println("[WS] JSON parse error");
+    case WStype_CONNECTED: {
+      Serial.println("[WS] Connected");
+      wsConnected  = true;
+      wsFailCycles = 0;
+
+      // Send identify + all output states
+      StaticJsonDocument<384> doc;
+      doc["id"]     = DEVICE_ID;
+      doc["status"] = "online";
+      doc["ip"]     = WiFi.localIP().toString();
+      for (int i = 0; i < NUM_OUTPUTS; i++) {
+        doc[OUTPUT_NAMES[i]] = pinStateStr(OUTPUT_PINS[i]);
+      }
+      char buf[384]; size_t n = serializeJson(doc, buf);
+      webSocket.sendTXT(buf, n);
+      break;
+    }
+
+    case WStype_TEXT: {
+      String msg((char*)payload, length);
+      Serial.printf("[WS] Message: %s\n", msg.c_str());
+
+      StaticJsonDocument<512> root;
+      DeserializationError err = deserializeJson(root, msg);
+      if (err) { Serial.println("[WS] JSON parse error"); return; }
+
+      // Check device target
+      if (root.containsKey("id")) {
+        String target = root["id"].as<const char*>();
+        if (target != DEVICE_ID) {
+          Serial.printf("[WS] Ignored msg for '%s'\n", target.c_str());
           return;
         }
+      }
 
-        // if message contains "id", check if it matches this device
-        if (root.containsKey("id")) {
-          String target = root["id"].as<const char*>();
-          if (target != DEVICE_ID) {
-            Serial.printf("[WS] Message for '%s' ignored (this device is '%s')\n", target.c_str(), DEVICE_ID);
+      if (!root.containsKey("cmd")) return;
+
+      // PIN check
+      if (root.containsKey("pin")) {
+        String providedPin = root["pin"].as<const char*>();
+        if (providedPin != ble_pin && providedPin != "" ) {
+          // Only reject if a non-empty PIN was provided and it doesn't match
+          if (providedPin != ble_pin) {
+            Serial.println("[WS] PIN mismatch! Rejecting.");
+            StaticJsonDocument<256> er;
+            er["id"] = DEVICE_ID; er["status"] = "pin_mismatch";
+            char b[256]; size_t s = serializeJson(er, b); webSocket.sendTXT(b, s);
             return;
           }
         }
+      }
 
-        // execute commands
-        if (root.containsKey("cmd")) {
-          String cmd = root["cmd"].as<const char*>();
-          
-          // Check PIN if provided
-          if (root.containsKey("pin")) {
-            String providedPin = root["pin"].as<const char*>();
-            if (providedPin != ble_pin) {
-              Serial.println("[WS] PIN mismatch! Rejecting command.");
-              StaticJsonDocument<256> err;
-              err["id"] = DEVICE_ID;
-              err["status"] = "pin_mismatch";
-              err["error"] = "PIN mismatch";
-              char b[256]; size_t s = serializeJson(err, b); webSocket.sendTXT(b, s);
-              return;
-            }
-          }
-          
-          if (cmd.equalsIgnoreCase("led_on")) {
-            digitalWrite(LED_PIN, HIGH);
-            Serial.println("LED ON");
-            // ack back
-            StaticJsonDocument<256> ack;
-            ack["id"] = DEVICE_ID;
-            ack["led"] = "on";
-            ack["status"] = "ok";
-            char b[256]; size_t s = serializeJson(ack, b); webSocket.sendTXT(b, s);
-          } else if (cmd.equalsIgnoreCase("led_off")) {
-            digitalWrite(LED_PIN, LOW);
-            Serial.println("LED OFF");
-            StaticJsonDocument<256> ack;
-            ack["id"] = DEVICE_ID;
-            ack["led"] = "off";
-            ack["status"] = "ok";
-            char b[256]; size_t s = serializeJson(ack, b); webSocket.sendTXT(b, s);
-          } else if (cmd.equalsIgnoreCase("toggle")) {
-            int st = digitalRead(LED_PIN);
-            digitalWrite(LED_PIN, !st);
-            StaticJsonDocument<256> ack;
-            ack["id"] = DEVICE_ID;
-            ack["led"] = digitalRead(LED_PIN) ? "on" : "off";
-            ack["status"] = "ok";
-            char b[256]; size_t s = serializeJson(ack, b); webSocket.sendTXT(b, s);
-          } else if (cmd.equalsIgnoreCase("reboot")) {
-            StaticJsonDocument<256> ack;
-            ack["id"] = DEVICE_ID;
-            ack["status"] = "rebooting";
-            char b[256]; size_t s = serializeJson(ack, b); webSocket.sendTXT(b, s);
-            delay(200);
-            ESP.restart();
-          } else {
-            Serial.printf("[WS] Unknown command '%s'\n", cmd.c_str());
-          }
-        }
+      String cmd = root["cmd"].as<const char*>();
+      // Channel defaults to 1 if not specified
+      int channel = root.containsKey("channel") ? root["channel"].as<int>() : 1;
+
+      // ── Multi-channel commands ───────────────────────────
+      if (cmd.equalsIgnoreCase("output_on")) {
+        if (setOutput(channel, true)) sendAllStatesAck();
+        else { StaticJsonDocument<128> er; er["id"]=DEVICE_ID; er["status"]="invalid_channel"; char b[128]; size_t s=serializeJson(er,b); webSocket.sendTXT(b,s); }
+
+      } else if (cmd.equalsIgnoreCase("output_off")) {
+        if (setOutput(channel, false)) sendAllStatesAck();
+        else { StaticJsonDocument<128> er; er["id"]=DEVICE_ID; er["status"]="invalid_channel"; char b[128]; size_t s=serializeJson(er,b); webSocket.sendTXT(b,s); }
+
+      } else if (cmd.equalsIgnoreCase("output_toggle")) {
+        if (toggleOutput(channel)) sendAllStatesAck();
+
+      // ── All-outputs at once ──────────────────────────────
+      } else if (cmd.equalsIgnoreCase("all_on")) {
+        for (int i = 1; i <= NUM_OUTPUTS; i++) setOutput(i, true);
+        sendAllStatesAck();
+
+      } else if (cmd.equalsIgnoreCase("all_off")) {
+        for (int i = 1; i <= NUM_OUTPUTS; i++) setOutput(i, false);
+        sendAllStatesAck();
+
+      // ── Status query ────────────────────────────────────
+      } else if (cmd.equalsIgnoreCase("get_status")) {
+        sendAllStatesAck();
+
+      // ── Backward-compat (channel 1) ─────────────────────
+      } else if (cmd.equalsIgnoreCase("led_on")) {
+        setOutput(1, true);  sendAllStatesAck();
+      } else if (cmd.equalsIgnoreCase("led_off")) {
+        setOutput(1, false); sendAllStatesAck();
+      } else if (cmd.equalsIgnoreCase("toggle")) {
+        toggleOutput(1);     sendAllStatesAck();
+
+      // ── Reboot ─────────────────────────────────────────
+      } else if (cmd.equalsIgnoreCase("reboot")) {
+        StaticJsonDocument<128> ack;
+        ack["id"] = DEVICE_ID; ack["status"] = "rebooting";
+        char b[128]; size_t s = serializeJson(ack, b); webSocket.sendTXT(b, s);
+        delay(200);
+        ESP.restart();
+
+      } else {
+        Serial.printf("[WS] Unknown command '%s'\n", cmd.c_str());
       }
       break;
-    default:
-      break;
+    }
+
+    default: break;
   }
 }
 
-// Start websocket client to the ws_url (expects ws:// or wss://)
+// ─── WebSocket Init ───────────────────────────────────────────
 void startWebSocket() {
-  if (ws_url.length() == 0) {
-    Serial.println("No WebSocket URL configured.");
-    return;
-  }
+  if (ws_url.length() == 0) { Serial.println("No WS URL configured."); return; }
 
-  // parse ws_url to host/path/port could be handled by webSocket.beginSSL or begin depending on ws:// or wss://
   bool useSSL = false;
-  String url = ws_url;
-  if (url.startsWith("wss://")) useSSL = true;
-  if (url.startsWith("ws://")) url = url.substring(5);
-  else if (url.startsWith("wss://")) url = url.substring(6);
+  String url  = ws_url;
+  // Check wss:// BEFORE ws:// — "wss://" also startsWith("ws://")
+  if (url.startsWith("wss://")) { useSSL = true; url = url.substring(6); }
+  else if (url.startsWith("ws://"))               { url = url.substring(5); }
 
-  // split host and path
   String host = url;
   String path = "/";
   int slashPos = url.indexOf('/');
-  if (slashPos != -1) {
-    host = url.substring(0, slashPos);
-    path = url.substring(slashPos);
-  }
+  if (slashPos != -1) { host = url.substring(0, slashPos); path = url.substring(slashPos); }
 
-  // extract port if present
   int port = useSSL ? 443 : 80;
   int colonIdx = host.indexOf(':');
-  if (colonIdx != -1) {
-    port = host.substring(colonIdx + 1).toInt();
-    host = host.substring(0, colonIdx);
-  }
+  if (colonIdx != -1) { port = host.substring(colonIdx + 1).toInt(); host = host.substring(0, colonIdx); }
 
-  Serial.printf("Starting WebSocket: host='%s', port=%d, path='%s', ssl=%d\n", host.c_str(), port, path.c_str(), useSSL);
+  Serial.printf("Starting WebSocket: host='%s', port=%d, path='%s', ssl=%d\n",
+    host.c_str(), port, path.c_str(), useSSL);
 
-  if (useSSL) {
-    webSocket.beginSSL(host.c_str(), port, path.c_str());
-  } else {
-    webSocket.begin(host.c_str(), port, path.c_str());
-  }
+  if (useSSL) webSocket.beginSSL(host.c_str(), port, path.c_str());
+  else        webSocket.begin(host.c_str(), port, path.c_str());
+
   webSocket.onEvent(webSocketEvent);
   webSocket.setReconnectInterval(5000);
+  // Required for ngrok free tier to bypass browser warning interstitial
+  webSocket.setExtraHeaders("ngrok-skip-browser-warning: true");
 }
 
-// attempt to ensure websocket is connected (non-blocking)
-void ensureWebSocketConnected() {
-  if (!wsConnected && millis() - lastWsReconnectAttempt > wsReconnectInterval) {
-    Serial.println("[WS] Attempting reconnect...");
-    startWebSocket();
-    lastWsReconnectAttempt = millis();
-  }
-}
-
+// ─── Setup ────────────────────────────────────────────────────
 void setup() {
   Serial.begin(115200);
-  pinMode(LED_PIN, OUTPUT);
-  digitalWrite(LED_PIN, LOW);
+
+  // Initialise all outputs LOW
+  for (int i = 0; i < NUM_OUTPUTS; i++) {
+    pinMode(OUTPUT_PINS[i], OUTPUT);
+    digitalWrite(OUTPUT_PINS[i], LOW);
+    Serial.printf("Output %d (%s) on GPIO%d initialised LOW\n", i+1, OUTPUT_NAMES[i], OUTPUT_PINS[i]);
+  }
 
   loadSettings();
 
-  // If no wifi settings found, start BLE provisioning immediately
   if (wifi_ssid.length() == 0) {
-    Serial.println("No WiFi config found. Entering BLE provisioning.");
+    Serial.println("No WiFi config. Entering BLE provisioning.");
     startBLEProvisioning();
-    // after provisioning returns, load settings again
     loadSettings();
   }
 
-  // try to connect to WiFi (with retries)
   if (!connectToWiFiOnce()) {
-    // repeated attempts cycles
     wifiFailCycles++;
     if (wifiFailCycles >= WIFI_RECONNECT_CYCLES_BEFORE_PROVISION) {
-      Serial.println("Repeated WiFi failures. Switching to BLE provisioning mode.");
+      Serial.println("Repeated WiFi failures. BLE provisioning.");
       startBLEProvisioning();
       loadSettings();
       connectToWiFiOnce();
     }
   } else {
-    // start websocket client
     startWebSocket();
   }
 }
 
+// ─── Loop ─────────────────────────────────────────────────────
 unsigned long lastWiFiCheck = 0;
+
 void loop() {
-  // simple WiFi watchdog — check every 3s
+  // WiFi watchdog — check every 3s
   if (millis() - lastWiFiCheck > 3000) {
     lastWiFiCheck = millis();
     if (WiFi.status() != WL_CONNECTED) {
       wifiConnected = false;
-      Serial.println("WiFi disconnected. Attempting reconnect...");
+      Serial.println("WiFi lost. Reconnecting...");
       if (!connectToWiFiOnce()) {
         wifiFailCycles++;
         if (wifiFailCycles >= WIFI_RECONNECT_CYCLES_BEFORE_PROVISION) {
-          Serial.println("Too many WiFi failures. Start BLE provisioning.");
+          Serial.println("Too many WiFi failures. BLE provisioning.");
           startBLEProvisioning();
           loadSettings();
           connectToWiFiOnce();
         }
       } else {
-        // connected now
         startWebSocket();
       }
     } else {
@@ -473,23 +462,30 @@ void loop() {
   // WebSocket loop
   webSocket.loop();
 
-  // if websocket not connected, attempt reconnect periodically
-  if (wifiConnected && !wsConnected) {
-    ensureWebSocketConnected();
+  // WS failure fallback after 5 disconnects
+  if (wsFailCycles >= 5) {
+    Serial.println("Too many WS failures. BLE provisioning.");
+    webSocket.disconnect();
+    wsFailCycles = 0;
+    startBLEProvisioning();
+    loadSettings();
+    if (connectToWiFiOnce()) startWebSocket();
   }
 
-  // Example heartbeat every 30s
+  // Heartbeat every 30s — includes all channel states
   static unsigned long lastHeartbeat = 0;
   if (millis() - lastHeartbeat > 30000 && wsConnected) {
     lastHeartbeat = millis();
-    StaticJsonDocument<128> hb;
-    hb["id"] = DEVICE_ID;
-    hb["type"] = "heartbeat";
+    StaticJsonDocument<256> hb;
+    hb["id"]        = DEVICE_ID;
+    hb["type"]      = "heartbeat";
     hb["uptime_ms"] = (uint32_t)millis();
-    char buf[128]; size_t n = serializeJson(hb, buf);
+    for (int i = 0; i < NUM_OUTPUTS; i++) {
+      hb[OUTPUT_NAMES[i]] = pinStateStr(OUTPUT_PINS[i]);
+    }
+    char buf[256]; size_t n = serializeJson(hb, buf);
     webSocket.sendTXT(buf, n);
   }
 
-  // small delay to yield
   delay(10);
 }

@@ -1,5 +1,9 @@
 import json
+from datetime import datetime
+from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
 from database import engine, Base, get_db
 from models import Heartbeat, DeviceState
@@ -9,6 +13,10 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
+# Serve static files
+STATIC_DIR = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
 
 class ConnectionManager:
     def __init__(self):
@@ -16,6 +24,8 @@ class ConnectionManager:
         self.active_connections: dict[str, WebSocket] = {}
         # Keeps track of raw websockets if we don't know their ID yet
         self.unidentified_connections: list[WebSocket] = []
+        # Track device metadata (IP, last heartbeat, uptime)
+        self.device_info: dict[str, dict] = {}
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -44,8 +54,80 @@ class ConnectionManager:
         self.active_connections[client_id] = websocket
         print(f"Client {client_id} identified and registered")
 
+    def update_device_info(self, device_id: str, **kwargs):
+        if device_id not in self.device_info:
+            self.device_info[device_id] = {}
+        self.device_info[device_id].update(kwargs)
+
 
 manager = ConnectionManager()
+
+
+# ─── Admin Page ───────────────────────────────────────────────
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_page():
+    """Serve the admin dashboard"""
+    html_path = STATIC_DIR / "admin.html"
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+
+
+# ─── API Endpoints ────────────────────────────────────────────
+
+@app.get("/api/devices")
+async def get_devices(db: Session = Depends(get_db)):
+    """Get all currently connected devices with their live info"""
+    devices = []
+    for device_id, ws in manager.active_connections.items():
+        info = manager.device_info.get(device_id, {})
+
+        # Get LED status from DB
+        device_state = (
+            db.query(DeviceState).filter(DeviceState.device_id == device_id).first()
+        )
+        led_status = device_state.led_status if device_state else "unknown"
+
+        # Get latest heartbeat timestamp from DB
+        latest_hb = (
+            db.query(Heartbeat)
+            .filter(Heartbeat.device_id == device_id)
+            .order_by(Heartbeat.timestamp.desc())
+            .first()
+        )
+
+        devices.append({
+            "device_id": device_id,
+            "ip": info.get("ip"),
+            "last_uptime_ms": info.get("uptime_ms"),
+            "last_heartbeat": latest_hb.timestamp.isoformat() if latest_hb and latest_hb.timestamp else None,
+            "led_status": led_status,
+        })
+
+    return {
+        "devices": devices,
+        "unidentified_count": len(manager.unidentified_connections),
+    }
+
+
+@app.post("/api/devices/{device_id}/command")
+async def send_device_command(device_id: str, payload: dict):
+    """Send a command to a specific device"""
+    cmd = payload.get("cmd", "")
+    pin = payload.get("pin", "")
+
+    cmd_payload = json.dumps({
+        "id": device_id,
+        "cmd": cmd,
+        "pin": pin,
+    })
+
+    success = await manager.send_personal_message(cmd_payload, device_id)
+    if success:
+        print(f"Command '{cmd}' sent to {device_id}")
+        return {"status": "sent", "device_id": device_id, "cmd": cmd}
+    else:
+        print(f"Device {device_id} not connected")
+        return {"status": "not_connected", "device_id": device_id}
 
 
 @app.get("/device/{device_id}/status")
@@ -91,8 +173,10 @@ async def get_all_data(db: Session = Depends(get_db)):
     }
 
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)):
+# ─── WebSocket Handler ───────────────────────────────────────
+
+async def _handle_websocket(websocket: WebSocket, db: Session = Depends(get_db)):
+    """Shared WebSocket handler for both '/' and '/ws' endpoints."""
     await manager.connect(websocket)
     try:
         while True:
@@ -116,6 +200,9 @@ async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)
                     uptime = json_data.get("uptime_ms", 0)
                     print(f"Heartbeat from {device_id}, uptime: {uptime}ms")
 
+                    # Update live device info
+                    manager.update_device_info(device_id, uptime_ms=uptime)
+
                     # Log to DB
                     db_heartbeat = Heartbeat(device_id=device_id, uptime_ms=uptime)
                     db.add(db_heartbeat)
@@ -125,6 +212,9 @@ async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)
                 elif json_data.get("status") == "online":
                     ip = json_data.get("ip")
                     print(f"Device {device_id} is online at {ip}")
+
+                    # Update live device info
+                    manager.update_device_info(device_id, ip=ip)
 
                     # Log to DB
                     db_heartbeat = Heartbeat(device_id=device_id, ip_address=ip)
@@ -181,3 +271,13 @@ async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)
+
+
+@app.websocket("/ws")
+async def websocket_endpoint_ws(websocket: WebSocket, db: Session = Depends(get_db)):
+    await _handle_websocket(websocket, db)
+
+
+@app.websocket("/")
+async def websocket_endpoint_root(websocket: WebSocket, db: Session = Depends(get_db)):
+    await _handle_websocket(websocket, db)

@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Maya IoT — Admin Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-primary: #0a0e1a;
+      --bg-card: rgba(15, 23, 42, 0.7);
+      --bg-card-hover: rgba(20, 30, 55, 0.85);
+      --border: rgba(99, 102, 241, 0.15);
+      --border-glow: rgba(99, 102, 241, 0.4);
+      --text-primary: #e2e8f0;
+      --text-secondary: #94a3b8;
+      --text-muted: #64748b;
+      --accent: #818cf8;
+      --accent-bright: #a5b4fc;
+      --success: #34d399;
+      --success-bg: rgba(52, 211, 153, 0.1);
+      --danger: #f87171;
+      --danger-bg: rgba(248, 113, 113, 0.1);
+      --warning: #fbbf24;
+      --warning-bg: rgba(251, 191, 36, 0.1);
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Animated background */
+    body::before {
+      content: '';
+      position: fixed;
+      top: -50%; left: -50%;
+      width: 200%; height: 200%;
+      background: radial-gradient(ellipse at 20% 50%, rgba(99,102,241,0.06) 0%, transparent 50%),
+                  radial-gradient(ellipse at 80% 20%, rgba(139,92,246,0.04) 0%, transparent 50%),
+                  radial-gradient(ellipse at 50% 80%, rgba(59,130,246,0.04) 0%, transparent 50%);
+      animation: bgShift 20s ease-in-out infinite alternate;
+      z-index: 0;
+    }
+    @keyframes bgShift {
+      0% { transform: translate(0, 0) rotate(0deg); }
+      100% { transform: translate(-5%, 3%) rotate(2deg); }
+    }
+
+    .app { position: relative; z-index: 1; }
+
+    /* Header */
+    header {
+      padding: 1.5rem 2rem;
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(20px);
+      background: rgba(10, 14, 26, 0.8);
+      position: sticky; top: 0; z-index: 100;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .logo {
+      display: flex; align-items: center; gap: 0.75rem;
+    }
+    .logo-icon {
+      width: 36px; height: 36px;
+      background: linear-gradient(135deg, #818cf8, #6366f1);
+      border-radius: 10px;
+      display: grid; place-items: center;
+      font-size: 18px;
+      box-shadow: 0 0 20px rgba(99,102,241,0.3);
+    }
+    .logo h1 {
+      font-size: 1.25rem; font-weight: 700;
+      background: linear-gradient(135deg, #e2e8f0, #a5b4fc);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .logo span { font-size: 0.75rem; color: var(--text-muted); font-weight: 400; }
+
+    .header-status {
+      display: flex; align-items: center; gap: 0.5rem;
+      font-size: 0.8rem; color: var(--text-secondary);
+    }
+    .status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--success);
+      box-shadow: 0 0 8px var(--success);
+      animation: pulse 2s infinite;
+    }
+    .status-dot.offline { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(0.85); }
+    }
+
+    /* Main Layout */
+    main { padding: 2rem; max-width: 1400px; margin: 0 auto; }
+
+    /* Stats Row */
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+    .stat-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 1.25rem 1.5rem;
+      backdrop-filter: blur(12px);
+      transition: all 0.3s ease;
+    }
+    .stat-card:hover {
+      border-color: var(--border-glow);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 30px rgba(99,102,241,0.08);
+    }
+    .stat-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem; }
+    .stat-value { font-size: 1.75rem; font-weight: 700; }
+    .stat-value.accent { color: var(--accent-bright); }
+    .stat-value.success { color: var(--success); }
+    .stat-value.warning { color: var(--warning); }
+
+    /* Cards */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      backdrop-filter: blur(12px);
+      overflow: hidden;
+      margin-bottom: 1.5rem;
+      transition: border-color 0.3s;
+    }
+    .card:hover { border-color: var(--border-glow); }
+    .card-header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .card-header h2 { font-size: 1rem; font-weight: 600; display: flex; align-items: center; gap: 0.5rem; }
+    .card-body { padding: 1.5rem; }
+
+    /* Devices Grid */
+    .devices-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+      gap: 1rem;
+    }
+    .device-card {
+      background: rgba(15, 23, 42, 0.5);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1.25rem;
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+    .device-card::before {
+      content: '';
+      position: absolute; top: 0; left: 0; right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--success), var(--accent));
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .device-card.online::before { opacity: 1; }
+    .device-card:hover {
+      border-color: var(--border-glow);
+      background: var(--bg-card-hover);
+      transform: translateY(-2px);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.2);
+    }
+
+    .device-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem; }
+    .device-name { font-weight: 600; font-size: 0.95rem; }
+    .device-id { font-size: 0.75rem; color: var(--text-muted); font-family: 'Courier New', monospace; margin-top: 0.25rem; }
+    .device-badge {
+      padding: 0.25rem 0.65rem;
+      border-radius: 20px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .device-badge.online { background: var(--success-bg); color: var(--success); border: 1px solid rgba(52,211,153,0.2); }
+    .device-badge.offline { background: var(--danger-bg); color: var(--danger); border: 1px solid rgba(248,113,113,0.2); }
+
+    .device-meta {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+      padding: 0.75rem;
+      background: rgba(0,0,0,0.15);
+      border-radius: 10px;
+    }
+    .meta-item label { display: block; font-size: 0.65rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.2rem; }
+    .meta-item span { font-size: 0.85rem; color: var(--text-secondary); font-family: 'Courier New', monospace; }
+
+    .device-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .btn {
+      padding: 0.5rem 1rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: rgba(99,102,241,0.08);
+      color: var(--accent-bright);
+      font-size: 0.8rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s;
+      font-family: 'Inter', sans-serif;
+    }
+    .btn:hover {
+      background: rgba(99,102,241,0.2);
+      border-color: var(--accent);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(99,102,241,0.15);
+    }
+    .btn:active { transform: translateY(0); }
+    .btn.btn-success { background: var(--success-bg); color: var(--success); border-color: rgba(52,211,153,0.2); }
+    .btn.btn-success:hover { background: rgba(52,211,153,0.2); border-color: var(--success); }
+    .btn.btn-danger { background: var(--danger-bg); color: var(--danger); border-color: rgba(248,113,113,0.2); }
+    .btn.btn-danger:hover { background: rgba(248,113,113,0.2); border-color: var(--danger); }
+
+    /* Heartbeat Table */
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; }
+    thead th {
+      text-align: left; padding: 0.75rem 1rem;
+      font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--text-muted); border-bottom: 1px solid var(--border);
+      font-weight: 600;
+    }
+    tbody td {
+      padding: 0.75rem 1rem;
+      font-size: 0.85rem; color: var(--text-secondary);
+      border-bottom: 1px solid rgba(99,102,241,0.06);
+    }
+    tbody tr { transition: background 0.15s; }
+    tbody tr:hover { background: rgba(99,102,241,0.04); }
+    td code {
+      font-family: 'Courier New', monospace;
+      background: rgba(99,102,241,0.08);
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.8rem;
+    }
+
+    /* Toast */
+    .toast-container {
+      position: fixed; bottom: 1.5rem; right: 1.5rem;
+      z-index: 1000; display: flex; flex-direction: column; gap: 0.5rem;
+    }
+    .toast {
+      padding: 0.75rem 1.25rem;
+      border-radius: 10px;
+      font-size: 0.85rem;
+      backdrop-filter: blur(12px);
+      animation: toastIn 0.3s ease, toastOut 0.3s ease 2.7s forwards;
+      border: 1px solid;
+    }
+    .toast.success { background: var(--success-bg); color: var(--success); border-color: rgba(52,211,153,0.2); }
+    .toast.error { background: var(--danger-bg); color: var(--danger); border-color: rgba(248,113,113,0.2); }
+    .toast.info { background: rgba(99,102,241,0.1); color: var(--accent-bright); border-color: rgba(99,102,241,0.2); }
+    @keyframes toastIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes toastOut { from { opacity: 1; } to { opacity: 0; transform: translateY(-10px); } }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center; padding: 3rem 2rem; color: var(--text-muted);
+    }
+    .empty-state .icon { font-size: 3rem; margin-bottom: 1rem; opacity: 0.4; }
+    .empty-state p { font-size: 0.9rem; }
+
+    /* Refresh Button */
+    .btn-refresh {
+      padding: 0.4rem 0.8rem;
+      font-size: 0.75rem;
+    }
+    .btn-refresh.spinning .refresh-icon { animation: spin 0.6s linear; }
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+    .refresh-icon { display: inline-block; }
+
+    /* Live indicator */
+    .live-badge {
+      display: inline-flex; align-items: center; gap: 0.35rem;
+      font-size: 0.7rem; color: var(--success);
+      background: var(--success-bg);
+      padding: 0.2rem 0.6rem;
+      border-radius: 20px;
+      border: 1px solid rgba(52,211,153,0.15);
+    }
+    .live-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success); animation: pulse 1.5s infinite; }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      main { padding: 1rem; }
+      header { padding: 1rem; }
+      .stats-row { grid-template-columns: repeat(2, 1fr); }
+      .devices-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo">
+      <div class="logo-icon">⚡</div>
+      <div>
+        <h1>Maya IoT</h1>
+        <span>Smart Home Dashboard</span>
+      </div>
+    </div>
+    <div class="header-status">
+      <div class="status-dot" id="serverStatus"></div>
+      <span id="serverStatusText">Server Online</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- Stats -->
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-label">Connected Devices</div>
+        <div class="stat-value accent" id="statConnected">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Unidentified Sockets</div>
+        <div class="stat-value warning" id="statUnidentified">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Total Heartbeats</div>
+        <div class="stat-value success" id="statHeartbeats">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Last Updated</div>
+        <div class="stat-value" id="statUpdated" style="font-size:1rem; color: var(--text-secondary);">—</div>
+      </div>
+    </div>
+
+    <!-- Devices -->
+    <div class="card">
+      <div class="card-header">
+        <h2>📡 Connected Devices</h2>
+        <div style="display:flex; gap:0.5rem; align-items:center;">
+          <span class="live-badge"><span class="live-dot"></span> LIVE</span>
+          <button class="btn btn-refresh" onclick="refreshAll()" id="refreshBtn">
+            <span class="refresh-icon">↻</span> Refresh
+          </button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="devices-grid" id="devicesGrid">
+          <div class="empty-state">
+            <div class="icon">📡</div>
+            <p>Loading devices...</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent Heartbeats -->
+    <div class="card">
+      <div class="card-header">
+        <h2>💓 Recent Heartbeats</h2>
+      </div>
+      <div class="card-body">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Device ID</th>
+                <th>Uptime</th>
+                <th>IP Address</th>
+                <th>Timestamp</th>
+              </tr>
+            </thead>
+            <tbody id="heartbeatTableBody">
+              <tr><td colspan="4" style="text-align:center;color:var(--text-muted);">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div class="toast-container" id="toasts"></div>
+
+<script>
+  const API_BASE = window.location.origin;
+  let autoRefreshInterval = null;
+
+  function showToast(msg, type = 'info') {
+    const container = document.getElementById('toasts');
+    const toast = document.createElement('div');
+    toast.className = `toast ${type}`;
+    toast.textContent = msg;
+    container.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+  }
+
+  function formatUptime(ms) {
+    if (!ms && ms !== 0) return '—';
+    const secs = Math.floor(ms / 1000);
+    const m = Math.floor(secs / 60);
+    const h = Math.floor(m / 60);
+    if (h > 0) return `${h}h ${m % 60}m ${secs % 60}s`;
+    if (m > 0) return `${m}m ${secs % 60}s`;
+    return `${secs}s`;
+  }
+
+  function formatTimestamp(ts) {
+    if (!ts) return '—';
+    const d = new Date(ts);
+    return d.toLocaleString();
+  }
+
+  async function fetchDevices() {
+    try {
+      const res = await fetch(`${API_BASE}/api/devices`);
+      if (!res.ok) throw new Error('Failed to fetch devices');
+      return await res.json();
+    } catch (e) {
+      console.error(e);
+      return { devices: [], unidentified_count: 0 };
+    }
+  }
+
+  async function fetchHeartbeats() {
+    try {
+      const res = await fetch(`${API_BASE}/db`);
+      if (!res.ok) throw new Error('Failed to fetch DB');
+      return await res.json();
+    } catch (e) {
+      console.error(e);
+      return { heartbeats: [], device_states: [] };
+    }
+  }
+
+  async function sendCommand(deviceId, cmd) {
+    try {
+      const res = await fetch(`${API_BASE}/api/devices/${deviceId}/command`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cmd }),
+      });
+      const data = await res.json();
+      if (data.status === 'sent') {
+        showToast(`Command "${cmd}" sent to ${deviceId}`, 'success');
+      } else {
+        showToast(`Device ${deviceId} not connected`, 'error');
+      }
+    } catch (e) {
+      showToast(`Failed to send command: ${e.message}`, 'error');
+    }
+  }
+
+  function renderDevices(data) {
+    const grid = document.getElementById('devicesGrid');
+    const { devices, unidentified_count } = data;
+
+    document.getElementById('statConnected').textContent = devices.length;
+    document.getElementById('statUnidentified').textContent = unidentified_count;
+
+    if (devices.length === 0) {
+      grid.innerHTML = `
+        <div class="empty-state">
+          <div class="icon">📡</div>
+          <p>No devices connected yet.<br>Waiting for ESP32 to connect...</p>
+        </div>
+      `;
+      return;
+    }
+
+    grid.innerHTML = devices.map(d => `
+      <div class="device-card online">
+        <div class="device-top">
+          <div>
+            <div class="device-name">🔌 Smart Extension</div>
+            <div class="device-id">${d.device_id}</div>
+          </div>
+          <span class="device-badge online">● Online</span>
+        </div>
+        <div class="device-meta">
+          <div class="meta-item">
+            <label>IP Address</label>
+            <span>${d.ip || '—'}</span>
+          </div>
+          <div class="meta-item">
+            <label>Uptime</label>
+            <span>${formatUptime(d.last_uptime_ms)}</span>
+          </div>
+          <div class="meta-item">
+            <label>LED Status</label>
+            <span>${d.led_status === 'on' ? '🟢 ON' : d.led_status === 'off' ? '🔴 OFF' : '⚪ Unknown'}</span>
+          </div>
+          <div class="meta-item">
+            <label>Last Seen</label>
+            <span style="font-size:0.75rem">${formatTimestamp(d.last_heartbeat)}</span>
+          </div>
+        </div>
+        <div class="device-actions">
+          <button class="btn btn-success" onclick="sendCommand('${d.device_id}', 'led_on')">💡 LED On</button>
+          <button class="btn btn-danger" onclick="sendCommand('${d.device_id}', 'led_off')">LED Off</button>
+          <button class="btn" onclick="sendCommand('${d.device_id}', 'toggle')">⚡ Toggle</button>
+          <button class="btn btn-danger" onclick="if(confirm('Reboot device?')) sendCommand('${d.device_id}', 'reboot')">🔄 Reboot</button>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  function renderHeartbeats(data) {
+    const tbody = document.getElementById('heartbeatTableBody');
+    const { heartbeats } = data;
+
+    document.getElementById('statHeartbeats').textContent = heartbeats.length;
+
+    // Show last 20 heartbeats, newest first
+    const recent = heartbeats.slice(-20).reverse();
+
+    if (recent.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--text-muted);">No heartbeats recorded yet.</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = recent.map(h => `
+      <tr>
+        <td><code>${h.device_id}</code></td>
+        <td>${formatUptime(h.uptime_ms)}</td>
+        <td>${h.ip_address || '—'}</td>
+        <td>${formatTimestamp(h.timestamp)}</td>
+      </tr>
+    `).join('');
+  }
+
+  async function refreshAll() {
+    const btn = document.getElementById('refreshBtn');
+    btn.classList.add('spinning');
+    setTimeout(() => btn.classList.remove('spinning'), 600);
+
+    try {
+      const [devices, db] = await Promise.all([fetchDevices(), fetchHeartbeats()]);
+      renderDevices(devices);
+      renderHeartbeats(db);
+      document.getElementById('statUpdated').textContent = new Date().toLocaleTimeString();
+      document.getElementById('serverStatus').className = 'status-dot';
+      document.getElementById('serverStatusText').textContent = 'Server Online';
+    } catch (e) {
+      document.getElementById('serverStatus').className = 'status-dot offline';
+      document.getElementById('serverStatusText').textContent = 'Server Offline';
+    }
+  }
+
+  // Initial load & auto-refresh every 5s
+  refreshAll();
+  autoRefreshInterval = setInterval(refreshAll, 5000);
+</script>
+</body>
+</html>
