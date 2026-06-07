@@ -31,7 +31,7 @@ class MayaSmartHomeApp extends StatelessWidget {
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         ),
-        cardTheme: CardThemeData(
+        cardTheme: CardTheme(
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
@@ -62,7 +62,7 @@ class MayaSmartHomeApp extends StatelessWidget {
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         ),
-        cardTheme: CardThemeData(
+        cardTheme: CardTheme(
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(20),
