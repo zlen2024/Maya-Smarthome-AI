@@ -18,6 +18,9 @@ from auth import (
     get_current_user_or_child, SECRET_KEY, ALGORITHM
 )
 
+import mimetypes
+mimetypes.add_type('application/vnd.android.package-archive', '.apk')
+
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
