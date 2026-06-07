@@ -49,74 +49,7 @@ class _DeviceManagementTabState extends State<DeviceManagementTab>
     _fetchDevices(); // Refresh after returning
   }
 
-  // ── Register Device Dialog ─────────────────────────────────────
-  Future<void> _showRegisterDialog() async {
-    final idCtrl = TextEditingController();
-    final nameCtrl = TextEditingController();
 
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Register Device'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'After BLE provisioning, register the device with your household.',
-              style: Theme.of(ctx).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(ctx).colorScheme.onSurfaceVariant,
-                  ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: idCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Device ID',
-                prefixIcon: Icon(Icons.qr_code_rounded),
-                helperText: 'e.g. esp32-9f83b1c1',
-              ),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: nameCtrl,
-              decoration: const InputDecoration(
-                labelText: 'Device Name',
-                prefixIcon: Icon(Icons.label_outline_rounded),
-                helperText: 'e.g. Living Room Socket',
-              ),
-              textCapitalization: TextCapitalization.words,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Register'),
-          ),
-        ],
-      ),
-    );
-
-    if (result == true) {
-      final id = idCtrl.text.trim();
-      final name = nameCtrl.text.trim();
-      if (id.isEmpty || name.isEmpty) {
-        _snack('Please fill in both fields');
-        return;
-      }
-      try {
-        await ApiService.registerDevice(id, name);
-        _snack('Device "$name" registered successfully!');
-        _fetchDevices();
-      } catch (e) {
-        _snack(e.toString().replaceFirst('Exception: ', ''));
-      }
-    }
-  }
 
   void _snack(String msg) {
     if (!mounted) return;
@@ -156,24 +89,10 @@ class _DeviceManagementTabState extends State<DeviceManagementTab>
         padding: const EdgeInsets.all(16),
         children: [
           // Action buttons
-          Row(
-            children: [
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: _openProvision,
-                  icon: const Icon(Icons.bluetooth_searching_rounded),
-                  label: const Text('Provision BLE'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: FilledButton.tonalIcon(
-                  onPressed: _showRegisterDialog,
-                  icon: const Icon(Icons.add_circle_outline_rounded),
-                  label: const Text('Register'),
-                ),
-              ),
-            ],
+          FilledButton.icon(
+            onPressed: _openProvision,
+            icon: const Icon(Icons.bluetooth_connected_rounded),
+            label: const Text('Register New Device'),
           ),
           const SizedBox(height: 20),
 
@@ -198,7 +117,7 @@ class _DeviceManagementTabState extends State<DeviceManagementTab>
                             ?.copyWith(color: cs.onSurfaceVariant)),
                     const SizedBox(height: 4),
                     Text(
-                      'Provision a new device via BLE, then register it.',
+                      'Register a new Maya Smart Home device via BLE.',
                       style: tt.bodySmall
                           ?.copyWith(color: cs.onSurfaceVariant),
                       textAlign: TextAlign.center,

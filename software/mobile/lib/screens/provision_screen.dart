@@ -12,9 +12,8 @@ const SSID_UUID = "12345678-1234-1234-1234-123456789001";
 const PASS_UUID = "12345678-1234-1234-1234-123456789002";
 const PIN_UUID = "12345678-1234-1234-1234-123456789003";
 const WSURL_UUID = "12345678-1234-1234-1234-123456789004";
+const STATUS_UUID = "12345678-1234-1234-1234-123456789006";
 
-/// BLE provisioning screen — scans for "Maya-Setup" ESP32 devices and
-/// writes WiFi credentials + server WebSocket URL over BLE characteristics.
 class ProvisionScreen extends StatefulWidget {
   const ProvisionScreen({super.key});
 
@@ -23,45 +22,91 @@ class ProvisionScreen extends StatefulWidget {
 }
 
 class _ProvisionScreenState extends State<ProvisionScreen> {
+  // Bluetooth Adapter & Scanning States
+  bool _bluetoothSupported = true;
+  BluetoothAdapterState _adapterState = BluetoothAdapterState.unknown;
+  bool _isScanning = false;
+  List<ScanResult> _scanResults = [];
+  StreamSubscription? _adapterStateSub;
+  StreamSubscription? _scanResultsSub;
+
+  // Device Connection States
+  BluetoothDevice? _connectedDevice;
+  bool _connecting = false;
+  String? _deviceId;
+
+  // Form Controllers
+  final _nameCtrl = TextEditingController();
   final _ssidCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   final _pinCtrl = TextEditingController(text: '0000');
 
-  // Pre-fill WS URL with production server
-  late final TextEditingController _urlCtrl =
-      TextEditingController(text: '${ApiService.wsUrl}/ws/device');
-
-  BluetoothDevice? _connectedDevice;
-  bool _isScanning = false;
-  String _statusLog = 'Ready to scan for devices.';
-  bool _provisioning = false;
-
+  // Characteristic References
   BluetoothCharacteristic? _ssidChar;
   BluetoothCharacteristic? _passChar;
   BluetoothCharacteristic? _urlChar;
   BluetoothCharacteristic? _pinChar;
+  BluetoothCharacteristic? _statusChar;
 
-  StreamSubscription? _scanSub;
+  // Progress/Feedback Loop States
+  bool _submitting = false;
+  String _currentStep = 'idle'; // 'idle', 'registering', 'writing', 'connecting_wifi', 'connecting_ws', 'success', 'failed'
+  String _statusMsg = '';
+  StreamSubscription? _statusNotificationSub;
 
   @override
   void initState() {
     super.initState();
-    _requestPermissions();
+    _checkBluetoothSupport();
   }
 
   @override
   void dispose() {
-    _scanSub?.cancel();
+    _adapterStateSub?.cancel();
+    _scanResultsSub?.cancel();
+    _statusNotificationSub?.cancel();
+    _nameCtrl.dispose();
     _ssidCtrl.dispose();
     _passCtrl.dispose();
-    _urlCtrl.dispose();
     _pinCtrl.dispose();
-    _connectedDevice?.disconnect();
+    _disconnectDevice();
     super.dispose();
   }
 
-  // ── Permissions ────────────────────────────────────────────────
-  Future<void> _requestPermissions() async {
+  // ── Bluetooth Check & Setup ─────────────────────────────────────
+  Future<void> _checkBluetoothSupport() async {
+    final supported = await FlutterBluePlus.isSupported;
+    if (!mounted) return;
+    setState(() {
+      _bluetoothSupported = supported;
+    });
+
+    if (supported) {
+      _adapterStateSub = FlutterBluePlus.adapterState.listen((state) {
+        if (mounted) {
+          setState(() {
+            _adapterState = state;
+          });
+          if (state == BluetoothAdapterState.on) {
+            _startScan();
+          }
+        }
+      });
+    }
+  }
+
+  Future<void> _enableBluetooth() async {
+    if (Platform.isAndroid) {
+      try {
+        await FlutterBluePlus.turnOn();
+      } catch (_) {}
+    }
+  }
+
+  // ── Scans for nearby Maya Smart Home devices ─────────────────────
+  Future<void> _startScan() async {
+    if (_adapterState != BluetoothAdapterState.on) return;
+
     if (Platform.isAndroid) {
       await [
         Permission.bluetoothScan,
@@ -69,140 +114,281 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
         Permission.location,
       ].request();
     }
-  }
 
-  // ── BLE Scan ───────────────────────────────────────────────────
-  Future<void> _startScan() async {
     setState(() {
       _isScanning = true;
-      _statusLog = 'Scanning for "Maya-Setup" BLE device...';
+      _scanResults.clear();
+      _connectedDevice = null;
+      _deviceId = null;
     });
 
-    await FlutterBluePlus.startScan(timeout: const Duration(seconds: 15));
+    _scanResultsSub = FlutterBluePlus.scanResults.listen((results) {
+      if (!mounted) return;
+      // Filter for devices with name starting with "Maya-"
+      final mayaDevices = results.where((r) {
+        final name = r.advertisementData.advName;
+        return name.startsWith('Maya-');
+      }).toList();
 
-    _scanSub = FlutterBluePlus.scanResults.listen((results) async {
-      for (final r in results) {
-        if (r.device.platformName == 'Maya-Setup') {
-          await FlutterBluePlus.stopScan();
-          _scanSub?.cancel();
-          setState(() {
-            _statusLog = 'Found Maya-Setup! Connecting...';
-          });
-          _connectDevice(r.device);
-          return;
-        }
-      }
+      setState(() {
+        _scanResults = mayaDevices;
+      });
     });
 
-    // Handle scan timeout
-    await Future.delayed(const Duration(seconds: 16));
-    if (_connectedDevice == null && mounted) {
+    try {
+      await FlutterBluePlus.startScan(timeout: const Duration(seconds: 10));
+    } catch (_) {}
+
+    await Future.delayed(const Duration(seconds: 10));
+    if (mounted) {
       setState(() {
         _isScanning = false;
-        _statusLog = 'Scan complete. "Maya-Setup" not found. Try again.';
       });
     }
   }
 
-  // ── BLE Connect ────────────────────────────────────────────────
+  // ── Connect & Discover Services ─────────────────────────────────
   Future<void> _connectDevice(BluetoothDevice device) async {
-    try {
-      await device.connect(timeout: const Duration(seconds: 10));
+    setState(() {
+      _connecting = true;
+      _connectedDevice = device;
+    });
 
+    try {
+      await device.connect(timeout: const Duration(seconds: 8));
       if (Platform.isAndroid) {
         await device.requestMtu(512);
       }
 
       final services = await device.discoverServices();
-
-      // Find our custom service
-      for (final svc in services) {
-        if (svc.uuid.toString().toLowerCase() ==
-            SERVICE_UUID.toLowerCase()) {
-          for (final ch in svc.characteristics) {
-            final uuid = ch.uuid.toString().toLowerCase();
-            if (uuid == SSID_UUID.toLowerCase()) _ssidChar = ch;
-            if (uuid == PASS_UUID.toLowerCase()) _passChar = ch;
-            if (uuid == WSURL_UUID.toLowerCase()) _urlChar = ch;
-            if (uuid == PIN_UUID.toLowerCase()) _pinChar = ch;
-          }
+      BluetoothService? mayaService;
+      for (final s in services) {
+        if (s.uuid.toString().toLowerCase() == SERVICE_UUID.toLowerCase()) {
+          mayaService = s;
+          break;
         }
       }
 
-      if (_ssidChar == null ||
-          _passChar == null ||
-          _urlChar == null ||
-          _pinChar == null) {
-        setState(() {
-          _statusLog =
-              'Connected but missing BLE characteristics. Check firmware.';
-          _isScanning = false;
-        });
-        return;
+      if (mayaService == null) {
+        throw Exception('Device is missing the Maya configuration service.');
       }
 
+      // Extract characteristics
+      for (final c in mayaService.characteristics) {
+        final uuid = c.uuid.toString().toLowerCase();
+        if (uuid == SSID_UUID.toLowerCase()) _ssidChar = c;
+        if (uuid == PASS_UUID.toLowerCase()) _passChar = c;
+        if (uuid == WSURL_UUID.toLowerCase()) _urlChar = c;
+        if (uuid == PIN_UUID.toLowerCase()) _pinChar = c;
+        if (uuid == STATUS_UUID.toLowerCase()) _statusChar = c;
+      }
+
+      if (_ssidChar == null || _passChar == null || _urlChar == null || _pinChar == null) {
+        throw Exception('BLE characteristics missing. Old firmware?');
+      }
+
+      // Auto-extract device ID from name
+      final name = device.platformName; // e.g. Maya-esp32-9f83b1c1
+      String id = 'esp32-9f83b1c1'; // Default fallback
+      if (name.startsWith('Maya-') && name != 'Maya-Setup') {
+        id = name.substring(5);
+      }
+      _deviceId = id;
+
       setState(() {
-        _connectedDevice = device;
-        _isScanning = false;
-        _statusLog =
-            'Connected to Maya-Setup! Fill in the details and provision.';
+        _connecting = false;
+        _nameCtrl.text = 'Smart Socket ${_deviceId!.split('-').last.toUpperCase()}';
       });
     } catch (e) {
       setState(() {
-        _isScanning = false;
-        _statusLog = 'Connection failed: $e';
+        _connecting = false;
+        _connectedDevice = null;
+        _deviceId = null;
+      });
+      _showSnack(e.toString().replaceFirst('Exception: ', ''));
+    }
+  }
+
+  Future<void> _disconnectDevice() async {
+    _statusNotificationSub?.cancel();
+    await _connectedDevice?.disconnect();
+    if (mounted) {
+      setState(() {
+        _connectedDevice = null;
+        _deviceId = null;
+        _ssidChar = null;
+        _passChar = null;
+        _urlChar = null;
+        _pinChar = null;
+        _statusChar = null;
       });
     }
   }
 
-  // ── BLE Provision ──────────────────────────────────────────────
-  Future<void> _provisionDevice() async {
+  // ── Unified Registration & Provision Flow ───────────────────────
+  Future<void> _submitRegistration() async {
+    final name = _nameCtrl.text.trim();
     final ssid = _ssidCtrl.text.trim();
     final pass = _passCtrl.text.trim();
-    final url = _urlCtrl.text.trim();
     final pin = _pinCtrl.text.trim();
+    final deviceId = _deviceId;
 
-    if (ssid.isEmpty || pass.isEmpty || url.isEmpty || pin.isEmpty) {
-      _snack('Please fill in all fields');
+    if (name.isEmpty || ssid.isEmpty || pass.isEmpty || pin.isEmpty || deviceId == null) {
+      _showSnack('Please fill in all fields');
       return;
     }
 
     setState(() {
-      _provisioning = true;
-      _statusLog = 'Writing WiFi SSID...';
+      _submitting = true;
+      _currentStep = 'registering';
+      _statusMsg = 'Registering device with server...';
     });
 
     try {
+      // 1. REST Register Device to User Account
+      await ApiService.registerDevice(deviceId, name);
+
+      setState(() {
+        _currentStep = 'writing';
+        _statusMsg = 'Writing credentials over Bluetooth...';
+      });
+
+      // 2. Write Credentials over BLE
+      // Server WebSocket URL: dynamically derived from base API Url (replaces /ws/device)
+      final wsTargetUrl = '${ApiService.wsUrl}/ws';
+
       await _ssidChar!.write(utf8.encode(ssid), withoutResponse: false);
-      await Future.delayed(const Duration(milliseconds: 200));
+      await Future.delayed(const Duration(milliseconds: 150));
 
-      setState(() => _statusLog = 'Writing WiFi password...');
       await _passChar!.write(utf8.encode(pass), withoutResponse: false);
-      await Future.delayed(const Duration(milliseconds: 200));
+      await Future.delayed(const Duration(milliseconds: 150));
 
-      setState(() => _statusLog = 'Writing server WebSocket URL...');
-      await _urlChar!.write(utf8.encode(url), withoutResponse: false);
-      await Future.delayed(const Duration(milliseconds: 200));
+      await _urlChar!.write(utf8.encode(wsTargetUrl), withoutResponse: false);
+      await Future.delayed(const Duration(milliseconds: 150));
 
-      setState(() => _statusLog = 'Writing device PIN...');
       await _pinChar!.write(utf8.encode(pin), withoutResponse: false);
+      await Future.delayed(const Duration(milliseconds: 150));
 
-      setState(() {
-        _statusLog =
-            '✅ Provisioning complete! The device will now connect to WiFi and the server.';
-        _provisioning = false;
-      });
+      // 3. Start Connection Feedback Loop
+      if (_statusChar != null) {
+        // Real-time status update loop via firmware STATUS_UUID characteristic
+        setState(() {
+          _currentStep = 'connecting_wifi';
+          _statusMsg = 'Validating PIN and connecting to Wi-Fi...';
+        });
 
-      _snack('Provisioning successful! Register the device on the Device tab.');
+        _statusNotificationSub = _statusChar!.lastValueStream.listen((value) {
+          if (!mounted) return;
+          final code = utf8.decode(value);
+          _handleBleStatusCode(code);
+        }, onError: (e) {
+          _handleFailure('BLE notification error: $e');
+        });
+
+        _connectedDevice?.cancelWhenDisconnected(_statusNotificationSub!);
+        await _statusChar!.setNotifyValue(true);
+
+      } else {
+        // Fallback for older firmware: Poll the server API for device status
+        setState(() {
+          _currentStep = 'connecting_ws';
+          _statusMsg = 'Connecting to server (polling status)...';
+        });
+        _startServerPollingFallback(deviceId);
+      }
+
     } catch (e) {
-      setState(() {
-        _statusLog = '❌ Provisioning failed: $e';
-        _provisioning = false;
-      });
+      _handleFailure(e.toString().replaceFirst('Exception: ', ''));
     }
   }
 
-  void _snack(String msg) {
+  void _handleBleStatusCode(String code) {
+    switch (code) {
+      case '1':
+        setState(() {
+          _currentStep = 'connecting_wifi';
+          _statusMsg = 'PIN accepted. Connecting device to Wi-Fi...';
+        });
+        break;
+      case '2':
+        setState(() {
+          _currentStep = 'connecting_ws';
+          _statusMsg = 'Wi-Fi connected. Establishing WebSocket connection...';
+        });
+        break;
+      case '3':
+        _handleSuccess();
+        break;
+      case '4':
+        _handleFailure('Wi-Fi connection failed. Double-check SSID and password.');
+        break;
+      case '5':
+        _handleFailure('Server WebSocket connection failed. Verify server URL/status.');
+        break;
+      case '6':
+        _handleFailure('Incorrect Security PIN. Device rejected credentials.');
+        break;
+      default:
+        // Ignore other codes
+        break;
+    }
+  }
+
+  void _startServerPollingFallback(String deviceId) {
+    int attempts = 0;
+    Timer.periodic(const Duration(seconds: 2), (timer) async {
+      attempts++;
+      if (!_submitting || !mounted) {
+        timer.cancel();
+        return;
+      }
+
+      try {
+        final dev = await ApiService.getDevice(deviceId);
+        if (dev['online'] == true) {
+          timer.cancel();
+          _handleSuccess();
+        }
+      } catch (_) {}
+
+      if (attempts >= 8) { // 16 seconds timeout
+        timer.cancel();
+        _handleSuccess(isWarning: true); // Warn that device credentials were sent, but not verified
+      }
+    });
+  }
+
+  void _handleSuccess({bool isWarning = false}) {
+    setState(() {
+      _currentStep = 'success';
+      _statusMsg = isWarning
+          ? 'Provisioning complete. Status verification timed out.'
+          : 'Device successfully registered and connected!';
+    });
+
+    _showSnack(isWarning
+        ? 'Credentials sent! Please verify connection on the dashboard.'
+        : 'Device registered successfully!');
+
+    Future.delayed(const Duration(milliseconds: 2500), () {
+      if (mounted) {
+        Navigator.pop(context, true);
+      }
+    });
+  }
+
+  void _handleFailure(String error) {
+    setState(() {
+      _submitting = false;
+      _currentStep = 'failed';
+      _statusMsg = error;
+    });
+
+    _statusNotificationSub?.cancel();
+    _showSnack(error);
+  }
+
+  void _showSnack(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
@@ -213,7 +399,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
       ));
   }
 
-  // ── Build ──────────────────────────────────────────────────────
+  // ── UI Render Methods ───────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -221,112 +407,393 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('BLE Provisioning'),
+        title: const Text('Register Device'),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          onPressed: _submitting ? null : () => Navigator.pop(context),
+        ),
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
+      body: _submitting
+          ? _buildProgressOverlay(cs, tt)
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: _buildMainContent(cs, tt),
+            ),
+    );
+  }
+
+  Widget _buildMainContent(ColorScheme cs, TextTheme tt) {
+    if (!_bluetoothSupported) {
+      return _buildErrorState(
+        Icons.bluetooth_disabled_rounded,
+        'Bluetooth Not Supported',
+        'This device does not support Bluetooth Low Energy, which is required for setup.',
+        cs,
+        tt,
+      );
+    }
+
+    if (_adapterState != BluetoothAdapterState.on) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SizedBox(height: 40),
+          _buildErrorState(
+            Icons.bluetooth_disabled_rounded,
+            'Bluetooth is Disabled',
+            'Please enable Bluetooth to scan and register nearby Maya Smart Home devices.',
+            cs,
+            tt,
+          ),
+          const SizedBox(height: 24),
+          if (Platform.isAndroid)
+            FilledButton.icon(
+              onPressed: _enableBluetooth,
+              icon: const Icon(Icons.bluetooth_rounded),
+              label: const Text('Enable Bluetooth'),
+            ),
+        ],
+      );
+    }
+
+    if (_connectedDevice == null) {
+      return _buildDiscoveryList(cs, tt);
+    }
+
+    return _buildConfigForm(cs, tt);
+  }
+
+  Widget _buildErrorState(
+      IconData icon, String title, String subtitle, ColorScheme cs, TextTheme tt) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Status card
-            Card(
+            Icon(icon, size: 64, color: cs.error),
+            const SizedBox(height: 16),
+            Text(title, style: tt.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 8),
+            Text(subtitle, style: tt.bodyMedium?.copyWith(color: cs.onSurfaceVariant), textAlign: TextAlign.center),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Scanned Devices List ────────────────────────────────────────
+  Widget _buildDiscoveryList(ColorScheme cs, TextTheme tt) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Scan status card
+        Card(
+          color: cs.surfaceContainerLow,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                if (_isScanning)
+                  const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  Icon(Icons.bluetooth_searching_rounded, color: cs.primary),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    _isScanning
+                        ? 'Searching for Maya Smart Home devices...'
+                        : 'Search complete. Select a device to connect.',
+                    style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                  ),
+                ),
+                if (!_isScanning)
+                  IconButton(
+                    icon: const Icon(Icons.refresh),
+                    onPressed: _startScan,
+                  ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        Text(
+          'Nearby Devices',
+          style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 8),
+
+        if (_scanResults.isEmpty)
+          Card(
+            color: cs.surfaceContainerLow,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 16),
+              child: Column(
+                children: [
+                  Icon(Icons.sensors_off_rounded, size: 48, color: cs.onSurfaceVariant.withOpacity(0.3)),
+                  const SizedBox(height: 12),
+                  Text('No devices found', style: tt.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Ensure your Smart Socket is in BLE setup mode.',
+                    style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          )
+        else
+          ..._scanResults.map((r) {
+            final name = r.advertisementData.advName;
+            return Card(
+              margin: const EdgeInsets.only(bottom: 8),
               color: cs.surfaceContainerLow,
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
+              child: ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: cs.primary.withOpacity(0.1),
+                  child: Icon(Icons.settings_remote_rounded, color: cs.primary, size: 20),
+                ),
+                title: Text(
+                  name == 'Maya-Setup' ? 'Maya Smart Socket (Setup Mode)' : name,
+                  style: tt.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                subtitle: Text(
+                  r.device.remoteId.str,
+                  style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+                ),
+                trailing: _connecting && _connectedDevice == r.device
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2.5),
+                      )
+                    : Icon(Icons.arrow_forward_ios_rounded, size: 16, color: cs.onSurfaceVariant),
+                onTap: _connecting ? null : () => _connectDevice(r.device),
+              ),
+            );
+          }),
+      ],
+    );
+  }
+
+  // ── Registration Config Form ────────────────────────────────────
+  Widget _buildConfigForm(ColorScheme cs, TextTheme tt) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Connected info header
+        Row(
+          children: [
+            Icon(Icons.check_circle_rounded, color: Colors.green, size: 20),
+            const SizedBox(width: 8),
+            Text(
+              'Connected to Maya BLE setup',
+              style: tt.bodyMedium?.copyWith(color: Colors.green, fontWeight: FontWeight.bold),
+            ),
+            const Spacer(),
+            TextButton.icon(
+              onPressed: _disconnectDevice,
+              icon: const Icon(Icons.close, size: 16),
+              label: const Text('Disconnect'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+
+        Card(
+          color: cs.surfaceContainerLow,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                Icon(Icons.qr_code_rounded, color: cs.primary, size: 24),
+                const SizedBox(width: 12),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Icon(
-                      _connectedDevice != null
-                          ? Icons.bluetooth_connected_rounded
-                          : Icons.bluetooth_searching_rounded,
-                      color: _connectedDevice != null
-                          ? Colors.green
-                          : cs.primary,
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text(
-                        _statusLog,
-                        style: tt.bodySmall?.copyWith(
-                            color: cs.onSurfaceVariant),
+                    Text('Detected Device ID', style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant)),
+                    Text(
+                      _deviceId ?? 'Loading...',
+                      style: tt.bodyMedium?.copyWith(
+                        fontFamily: 'monospace',
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
                   ],
                 ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        TextField(
+          controller: _nameCtrl,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(
+            labelText: 'Device Name',
+            prefixIcon: Icon(Icons.label_outline_rounded),
+            helperText: 'e.g. Living Room Socket',
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        TextField(
+          controller: _ssidCtrl,
+          decoration: const InputDecoration(
+            labelText: 'WiFi Network (SSID)',
+            prefixIcon: Icon(Icons.wifi_rounded),
+            helperText: 'SSID must be 2.4GHz WiFi network',
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        TextField(
+          controller: _passCtrl,
+          obscureText: true,
+          decoration: const InputDecoration(
+            labelText: 'WiFi Password',
+            prefixIcon: Icon(Icons.lock_outline_rounded),
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        TextField(
+          controller: _pinCtrl,
+          maxLength: 4,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'Security PIN (BLE/Device)',
+            prefixIcon: Icon(Icons.pin_outlined),
+            counterText: '',
+            helperText: 'Default PIN is 0000',
+          ),
+        ),
+        const SizedBox(height: 28),
+
+        FilledButton.icon(
+          onPressed: _submitRegistration,
+          icon: const Icon(Icons.check_rounded),
+          label: const Text('Register & Provision'),
+        ),
+      ],
+    );
+  }
+
+  // ── Step-by-Step Progress Overlay ────────────────────────────────
+  Widget _buildProgressOverlay(ColorScheme cs, TextTheme tt) {
+    bool isStepDone(String stepName) {
+      if (_currentStep == 'success') return true;
+      if (stepName == 'registering') return _currentStep != 'registering';
+      if (stepName == 'writing') {
+        return _currentStep != 'registering' && _currentStep != 'writing';
+      }
+      if (stepName == 'connecting_wifi') {
+        return _currentStep == 'connecting_ws' || _currentStep == 'success';
+      }
+      if (stepName == 'connecting_ws') {
+        return _currentStep == 'success';
+      }
+      return false;
+    }
+
+    bool isStepActive(String stepName) {
+      return _currentStep == stepName;
+    }
+
+    Widget buildStepRow(String title, String stepKey) {
+      final done = isStepDone(stepKey);
+      final active = isStepActive(stepKey);
+
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Row(
+          children: [
+            if (done)
+              const CircleAvatar(
+                radius: 12,
+                backgroundColor: Colors.green,
+                child: Icon(Icons.check, size: 14, color: Colors.white),
+              )
+            else if (active)
+              const SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            else
+              CircleAvatar(
+                radius: 12,
+                backgroundColor: cs.surfaceContainerHighest,
+                child: const SizedBox(),
+              ),
+            const SizedBox(width: 16),
+            Text(
+              title,
+              style: tt.bodyMedium?.copyWith(
+                fontWeight: active ? FontWeight.bold : FontWeight.normal,
+                color: active
+                    ? cs.primary
+                    : done
+                        ? cs.onSurface
+                        : cs.onSurfaceVariant,
               ),
             ),
-            const SizedBox(height: 16),
+          ],
+        ),
+      );
+    }
 
-            // Scan button (shown when not connected)
-            if (_connectedDevice == null) ...[
-              FilledButton.icon(
-                onPressed: _isScanning ? null : _startScan,
-                icon: _isScanning
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2.5, color: Colors.white),
-                      )
-                    : const Icon(Icons.bluetooth_searching_rounded),
-                label: Text(_isScanning
-                    ? 'Scanning...'
-                    : 'Scan for Maya-Setup'),
-              ),
-            ],
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.all(24),
+        constraints: const BoxConstraints(maxWidth: 320),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Registering Device',
+              style: tt.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
 
-            // Config form (shown when connected)
-            if (_connectedDevice != null) ...[
-              TextField(
-                controller: _ssidCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'WiFi SSID',
-                  prefixIcon: Icon(Icons.wifi_rounded),
-                ),
+            buildStepRow('Server Registration', 'registering'),
+            buildStepRow('Sending Credentials via BLE', 'writing'),
+            buildStepRow('WiFi Connection Establishment', 'connecting_wifi'),
+            buildStepRow('Server Connection Sync', 'connecting_ws'),
+
+            const SizedBox(height: 32),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: cs.surfaceContainerLow,
+                borderRadius: BorderRadius.circular(12),
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _passCtrl,
-                obscureText: true,
-                decoration: const InputDecoration(
-                  labelText: 'WiFi Password',
-                  prefixIcon: Icon(Icons.lock_outline_rounded),
-                ),
+              child: Text(
+                _statusMsg,
+                style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _urlCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'WebSocket URL',
-                  prefixIcon: Icon(Icons.link_rounded),
-                  helperText: 'Auto-filled with production server',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: _pinCtrl,
-                maxLength: 4,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Device PIN',
-                  prefixIcon: Icon(Icons.pin_outlined),
-                  counterText: '',
-                ),
-              ),
-              const SizedBox(height: 20),
+            ),
+            const SizedBox(height: 24),
+
+            if (_currentStep == 'failed') ...[
               FilledButton.icon(
-                onPressed: _provisioning ? null : _provisionDevice,
-                icon: _provisioning
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2.5, color: Colors.white),
-                      )
-                    : const Icon(Icons.send_rounded),
-                label: Text(_provisioning
-                    ? 'Provisioning...'
-                    : 'Provision Device'),
+                onPressed: () {
+                  setState(() {
+                    _currentStep = 'idle';
+                    _submitting = false;
+                  });
+                },
+                icon: const Icon(Icons.edit_rounded),
+                label: const Text('Edit Details & Retry'),
               ),
             ],
           ],

@@ -59,6 +59,7 @@ const char* DEVICE_ID = "esp32-9f83b1c1";
 #define WSURL_UUID    "12345678-1234-1234-1234-123456789004"
 #define PIN_UUID      "12345678-1234-1234-1234-123456789003"
 #define CMD_UUID      "12345678-1234-1234-1234-123456789005"
+#define STATUS_UUID   "12345678-1234-1234-1234-123456789006"
 
 // ─── Runtime Settings ─────────────────────────────────────────
 String wifi_ssid = "";
@@ -87,6 +88,16 @@ BLECharacteristic* passChar;
 BLECharacteristic* wsChar;
 BLECharacteristic* pinChar;
 BLECharacteristic* cmdChar;
+BLECharacteristic* statusChar;
+
+// Helper to update and notify status over BLE
+void setStatus(const char* code) {
+  if (statusChar) {
+    statusChar->setValue(code);
+    statusChar->notify();
+    Serial.printf("Status update sent to BLE: %s\n", code);
+  }
+}
 
 // ─── Settings Persistence ────────────────────────────────────
 void saveSettings() {
@@ -133,19 +144,21 @@ class GenericWriteCallback : public BLECharacteristicCallbacks {
 
 // ─── BLE Provisioning ────────────────────────────────────────
 void startBLEProvisioning() {
-  Serial.println("Starting BLE provisioning mode. Advertising as 'Maya-Setup'...");
+  String advName = "Maya-" + String(DEVICE_ID);
+  Serial.printf("Starting BLE provisioning mode. Advertising as '%s'...\n", advName.c_str());
   Serial.printf("Dev Note: Stored PIN='%s' | Override PIN='9999'\n", ble_pin.c_str());
 
   BLEDevice::setMTU(517);
-  BLEDevice::init("Maya-Setup");
+  BLEDevice::init(advName.c_str());
   pServer  = BLEDevice::createServer();
   pService = pServer->createService(SERVICE_UUID);
 
-  ssidChar = pService->createCharacteristic(SSID_UUID,  BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
-  passChar = pService->createCharacteristic(PASS_UUID,  BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
-  wsChar   = pService->createCharacteristic(WSURL_UUID, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
-  pinChar  = pService->createCharacteristic(PIN_UUID,   BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
-  cmdChar  = pService->createCharacteristic(CMD_UUID,   BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  ssidChar   = pService->createCharacteristic(SSID_UUID,   BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  passChar   = pService->createCharacteristic(PASS_UUID,   BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  wsChar     = pService->createCharacteristic(WSURL_UUID,  BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  pinChar    = pService->createCharacteristic(PIN_UUID,    BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  cmdChar    = pService->createCharacteristic(CMD_UUID,    BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  statusChar = pService->createCharacteristic(STATUS_UUID, BLECharacteristic::PROPERTY_READ  | BLECharacteristic::PROPERTY_NOTIFY);
 
   GenericWriteCallback* cb = new GenericWriteCallback();
   ssidChar->setCallbacks(cb); passChar->setCallbacks(cb);
@@ -153,6 +166,9 @@ void startBLEProvisioning() {
 
   ssidChar->addDescriptor(new BLE2902()); passChar->addDescriptor(new BLE2902());
   wsChar->addDescriptor(new BLE2902());   pinChar->addDescriptor(new BLE2902());
+  statusChar->addDescriptor(new BLE2902());
+
+  statusChar->setValue("0"); // Idle/Waiting
 
   pService->start();
   BLEDevice::startAdvertising();
@@ -165,23 +181,99 @@ void startBLEProvisioning() {
       Serial.println("All provisioning values received.");
 
       // PIN validation
-      if (ble_pin == "" || ble_pin == "0000") {
-        if (recvPIN.length() > 0) { ble_pin = recvPIN; Serial.printf("First-time PIN set (len=%d)\n", (int)ble_pin.length()); }
-      } else {
-        if (recvPIN != ble_pin && recvPIN != "9999") {
-          Serial.println("PIN mismatch. Rejecting.");
-          havePIN = haveSSID = havePASS = haveWS = false;
-          recvPIN = recvSSID = recvPASS = recvWS = "";
-          continue;
-        }
+      if (ble_pin != "" && ble_pin != "0000" && recvPIN != ble_pin && recvPIN != "9999") {
+        Serial.println("PIN mismatch. Rejecting.");
+        setStatus("6"); // PIN mismatch code
+        havePIN = haveSSID = havePASS = haveWS = false;
+        recvPIN = recvSSID = recvPASS = recvWS = "";
+        continue;
       }
+
+      setStatus("1"); // PIN verified, connecting to WiFi
+      delay(200);
+
+      String old_ssid = wifi_ssid;
+      String old_pass = wifi_pass;
+      String old_ws   = ws_url;
 
       wifi_ssid = recvSSID;
       wifi_pass = recvPASS;
       ws_url    = recvWS;
-      Serial.printf("Provisioning accepted. SSID=%s URL=%s\n", wifi_ssid.c_str(), ws_url.c_str());
+
+      Serial.printf("Attempting WiFi connect to '%s'...\n", wifi_ssid.c_str());
+      WiFi.persistent(false);
+      WiFi.mode(WIFI_STA);
+      WiFi.disconnect(true);
+      delay(150);
+      WiFi.begin(wifi_ssid.c_str(), wifi_pass.c_str());
+
+      int attempts = 0;
+      bool wifiOk = false;
+      while (attempts < WIFI_CONNECT_TRIES) {
+        delay(500);
+        if (WiFi.status() == WL_CONNECTED) {
+          wifiOk = true;
+          break;
+        }
+        attempts++;
+      }
+
+      if (!wifiOk) {
+        Serial.println("WiFi connection failed during BLE setup.");
+        setStatus("4"); // WiFi failed
+        wifi_ssid = old_ssid;
+        wifi_pass = old_pass;
+        ws_url    = old_ws;
+        haveSSID = havePASS = haveWS = havePIN = false;
+        recvPIN = recvSSID = recvPASS = recvWS = "";
+        continue;
+      }
+
+      setStatus("2"); // WiFi connected, connecting to server WebSocket
+      Serial.println("WiFi connected. Verifying WebSocket server connection...");
+      startWebSocket();
+
+      int wsAttempts = 0;
+      bool wsOk = false;
+      while (wsAttempts < 30) { // wait up to 6 seconds
+        webSocket.loop();
+        if (wsConnected) {
+          wsOk = true;
+          break;
+        }
+        delay(200);
+        wsAttempts++;
+      }
+
+      if (!wsOk) {
+        Serial.println("WebSocket connection failed during BLE setup.");
+        setStatus("5"); // WebSocket failed
+        webSocket.disconnect();
+        WiFi.disconnect(true);
+        wifi_ssid = old_ssid;
+        wifi_pass = old_pass;
+        ws_url    = old_ws;
+        haveSSID = havePASS = haveWS = havePIN = false;
+        recvPIN = recvSSID = recvPASS = recvWS = "";
+        continue;
+      }
+
+      // Everything succeeded!
+      if (ble_pin == "" || ble_pin == "0000") {
+        if (recvPIN.length() > 0) {
+          ble_pin = recvPIN;
+          Serial.printf("First-time PIN set (len=%d)\n", (int)ble_pin.length());
+        }
+      }
+
+      setStatus("3"); // Full success
+      Serial.println("Provisioning accepted and verified. Saving settings.");
       saveSettings();
       wifiFailCycles = 0;
+      wsFailCycles = 0;
+      wifiConnected = true;
+
+      delay(1500); // Give the mobile app time to read status 3 before we shut down BLE
 
       BLEDevice::stopAdvertising();
       delay(100);
