@@ -654,63 +654,6 @@
       padding: 1.25rem 1.5rem;
     }
     
-    /* Messages & Chat Box */
-    .chat-box {
-      height: 250px;
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-      margin-bottom: 1rem;
-      padding-right: 0.25rem;
-    }
-    
-    .chat-box::-webkit-scrollbar {
-      width: 4px;
-    }
-    .chat-box::-webkit-scrollbar-thumb {
-      background: rgba(255,255,255,0.1);
-      border-radius: 10px;
-    }
-    
-    .msg-bubble {
-      background: rgba(255,255,255,0.02);
-      border: 1px solid rgba(255,255,255,0.04);
-      border-radius: 12px;
-      padding: 0.65rem 0.85rem;
-      font-size: 0.8rem;
-    }
-    
-    .msg-meta {
-      display: flex;
-      justify-content: space-between;
-      font-size: 0.65rem;
-      color: var(--text-muted);
-      margin-bottom: 0.25rem;
-    }
-    
-    .msg-sender {
-      font-weight: 700;
-      color: #a5b4fc;
-    }
-    
-    .chat-input-wrap {
-      display: flex;
-      gap: 0.5rem;
-    }
-    
-    .chat-input-wrap input {
-      flex: 1;
-      padding: 0.65rem 1rem;
-      font-size: 0.85rem;
-      border-radius: 10px;
-    }
-    
-    .chat-input-wrap .btn {
-      width: auto;
-      padding: 0 1rem;
-      border-radius: 10px;
-    }
     
     /* Child list and permissions */
     .child-list-item {
@@ -895,8 +838,8 @@
               <p>Configure channel-level permissions with a dedicated child dashboard.</p>
             </div>
             <div class="feature-item">
-              <h3><span>💬</span> Household Chat</h3>
-              <p>An integrated message hub to log actions and coordinate with family.</p>
+              <h3><span>📱</span> Mobile App Control</h3>
+              <p>Provision devices via BLE and control channels from the companion mobile app.</p>
             </div>
           </div>
         </div>
@@ -983,8 +926,7 @@
           </div>
         </div>
         <div>
-          <!-- Show only to parents -->
-          <button id="btnOpenRegDevice" onclick="openModal('modal-reg-device')" class="btn btn-secondary" style="width:auto; padding: 0.65rem 1.25rem; font-size: 0.85rem; border-radius: 12px;">➕ Register Socket</button>
+          <!-- Device registration is handled via BLE on the mobile app -->
         </div>
       </div>
       
@@ -1007,26 +949,6 @@
         <!-- Right: Control Panel / Sidebar Widgets -->
         <div class="sidebar">
           
-          <!-- Household Chat -->
-          <div class="card">
-            <div class="widget-header">
-              <h3>💬 Household Broadcasts</h3>
-            </div>
-            <div class="widget-body">
-              <div class="chat-box" id="chatContainer">
-                <div class="empty-state">
-                  <div class="empty-state-icon">💬</div>
-                  <p>No messages in chat.</p>
-                </div>
-              </div>
-              <form onsubmit="handleSendMsg(event)">
-                <div class="chat-input-wrap">
-                  <input type="text" id="chatMsgInput" placeholder="Send a message..." required>
-                  <button type="submit" class="btn btn-primary">Send</button>
-                </div>
-              </form>
-            </div>
-          </div>
           
           <!-- Children Profiles (Visible to Parents only) -->
           <div class="card" id="widgetChildrenPanel">
@@ -1051,35 +973,7 @@
     
   </main>
 
-  <!-- ==========================================
-       MODAL: Register Device
-       ========================================== -->
-  <div class="modal-overlay" id="modal-reg-device">
-    <div class="card modal-card">
-      <div class="modal-header">
-        <h3>🔌 Register New Smart Socket</h3>
-        <button class="modal-close" onclick="closeModal('modal-reg-device')">×</button>
-      </div>
-      <div class="modal-body">
-        <form onsubmit="handleRegDevice(event)">
-          <div class="form-group">
-            <label for="regDeviceId">Device ID</label>
-            <input type="text" id="regDeviceId" required placeholder="e.g. esp32-9f83b1c1">
-            <span style="font-size: 0.65rem; color: var(--text-dark); margin-top: 0.25rem; display: block;">Input the unique identifier broadcasted by the ESP32.</span>
-          </div>
-          <div class="form-group">
-            <label for="regDeviceName">Custom Device Name</label>
-            <input type="text" id="regDeviceName" required placeholder="e.g. Living Room Socket">
-          </div>
-          <div class="form-group">
-            <label for="regDevicePrice">Purchase Price ($)</label>
-            <input type="number" id="regDevicePrice" placeholder="e.g. 15.90" step="0.01" min="0">
-          </div>
-          <button type="submit" class="btn btn-primary">Register Socket</button>
-        </form>
-      </div>
-    </div>
-  </div>
+  <!-- Device registration is handled via BLE provisioning on the mobile app -->
 
   <!-- ==========================================
        MODAL: Create Child Account
@@ -1415,10 +1309,8 @@
       
       // Layout checks based on roles
       if (isChildSession) {
-        document.getElementById('btnOpenRegDevice').style.display = 'none';
         document.getElementById('widgetChildrenPanel').style.display = 'none';
       } else {
-        document.getElementById('btnOpenRegDevice').style.display = 'inline-flex';
         document.getElementById('widgetChildrenPanel').style.display = 'block';
       }
     }
@@ -1435,12 +1327,7 @@
           devices = devData.devices || [];
         }
         
-        // Fetch household chat
-        const msgRes = await fetch(`${API_BASE}/api/messages`, { headers });
-        if (msgRes.ok) {
-          const msgData = await msgRes.json();
-          renderChat(msgData.messages || []);
-        }
+        // Chat/messaging feature removed — not integrated yet
         
         // Parent-only fetches
         if (!isChildSession) {
@@ -1504,7 +1391,7 @@
           <div class="card" style="grid-column: 1/-1; padding: 3rem; text-align: center;">
             <div class="empty-state-icon" style="font-size: 2.5rem; margin-bottom: 1rem; opacity: 0.35;">📡</div>
             <p style="color: var(--text-muted);">No smart sockets connected to your house ID yet.</p>
-            ${isChildSession ? '' : '<p style="font-size: 0.85rem; color: var(--text-dark); margin-top: 0.5rem;">Use the "Register Socket" button above to link a socket.</p>'}
+            ${isChildSession ? '' : '<p style="font-size: 0.85rem; color: var(--text-dark); margin-top: 0.5rem;">Use the companion mobile app to provision and register new devices via Bluetooth.</p>'}
           </div>
         `;
         return;
@@ -1715,97 +1602,8 @@
       }
     }
     
-    // Send Device Registration
-    async function handleRegDevice(e) {
-      e.preventDefault();
-      const deviceId = document.getElementById('regDeviceId').value.trim();
-      const name = document.getElementById('regDeviceName').value.trim();
-      const price = parseFloat(document.getElementById('regDevicePrice').value) || 0.0;
-      
-      try {
-        const res = await fetch(`${API_BASE}/api/devices/register`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({ device_id: deviceId, name, price })
-        });
-        
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Failed to register socket');
-        
-        showToast(`Smart socket "${name}" registered!`, 'success');
-        closeModal('modal-reg-device');
-        document.getElementById('regDeviceId').value = '';
-        document.getElementById('regDeviceName').value = '';
-        document.getElementById('regDevicePrice').value = '';
-        refreshDashboardData();
-        
-      } catch (err) {
-        showToast(err.message, 'error');
-      }
-    }
-    
-    // Send Message / Chat room
-    async function handleSendMsg(e) {
-      e.preventDefault();
-      const input = document.getElementById('chatMsgInput');
-      const message = input.value.trim();
-      if (!message) return;
-      
-      try {
-        const res = await fetch(`${API_BASE}/api/messages`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify({ message })
-        });
-        
-        if (!res.ok) {
-          const data = await res.json();
-          throw new Error(data.detail || 'Failed to send message');
-        }
-        
-        input.value = '';
-        refreshDashboardData();
-        
-      } catch (err) {
-        showToast(err.message, 'error');
-      }
-    }
-    
-    function renderChat(messages) {
-      const container = document.getElementById('chatContainer');
-      if (messages.length === 0) {
-        container.innerHTML = `
-          <div class="empty-state">
-            <div class="empty-state-icon">💬</div>
-            <p>No announcements in this house yet.</p>
-          </div>
-        `;
-        return;
-      }
-      
-      const scrollAtBottom = container.scrollHeight - container.scrollTop === container.clientHeight;
-      
-      container.innerHTML = messages.map(m => `
-        <div class="msg-bubble">
-          <div class="msg-meta">
-            <span class="msg-sender">${escapeHtml(m.sender_type === 'child' ? 'Child ID: ' + m.sender_id : 'Parent')}</span>
-            <span>${new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-          </div>
-          <p>${escapeHtml(m.message)}</p>
-        </div>
-      `).join('');
-      
-      // Auto scroll if user was at bottom
-      if (scrollAtBottom) {
-        container.scrollTop = container.scrollHeight;
-      }
-    }
+    // Device registration is handled via BLE provisioning on the mobile app
+    // Chat/messaging feature is not integrated yet
     
     // Child Management & Permissions Matrix
     function renderChildren(childrenList) {
