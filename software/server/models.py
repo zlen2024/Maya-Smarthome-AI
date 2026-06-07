@@ -15,16 +15,17 @@ class Account(Base):
     __tablename__ = "accounts"
 
     acc_id = Column(Integer, primary_key=True, index=True)
-    house_id = Column(Integer, ForeignKey("houses.house_id"), nullable=True)
+    house_id = Column(Integer, ForeignKey("houses.house_id"), nullable=True)  # active house
     email = Column(String, unique=True, index=True, nullable=False)
     password = Column(String, nullable=False)
     name = Column(String, nullable=False)
     role = Column(SAEnum(AccountRole), default=AccountRole.parent, nullable=False)
-    is_master = Column(Boolean, default=False)
+    is_master = Column(Boolean, default=False)  # kept for backward compat; canonical source is AccountHouse.is_master
     is_home = Column(Boolean, default=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     house = relationship("House", back_populates="accounts")
+    house_associations = relationship("AccountHouse", back_populates="account", cascade="all, delete-orphan")
 
 
 class House(Base):
@@ -32,12 +33,31 @@ class House(Base):
 
     house_id = Column(Integer, primary_key=True, index=True)
     location = Column(String, default="")
+    join_pin = Column(String(6), nullable=True)  # 6-digit random PIN for joining
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     accounts = relationship("Account", back_populates="house")
+    account_associations = relationship("AccountHouse", back_populates="house", cascade="all, delete-orphan")
     children = relationship("Child", back_populates="house")
     devices = relationship("Device", back_populates="house")
     messages = relationship("MsgHistory", back_populates="house")
+
+
+class AccountHouse(Base):
+    """Many-to-many association between accounts and houses."""
+    __tablename__ = "account_houses"
+    __table_args__ = (
+        UniqueConstraint('acc_id', 'house_id', name='_acc_house_uc'),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    acc_id = Column(Integer, ForeignKey("accounts.acc_id"), nullable=False)
+    house_id = Column(Integer, ForeignKey("houses.house_id"), nullable=False)
+    is_master = Column(Boolean, default=False)
+    joined_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    account = relationship("Account", back_populates="house_associations")
+    house = relationship("House", back_populates="account_associations")
 
 
 class Child(Base):
@@ -118,7 +138,8 @@ class MsgHistory(Base):
     msg_id = Column(Integer, primary_key=True, index=True)
     house_id = Column(Integer, ForeignKey("houses.house_id"), nullable=False)
     sender_id = Column(Integer, nullable=False)
-    sender_type = Column(String, nullable=False)
+    sender_type = Column(String, nullable=False)  # "parent" or "child"
+    sender_name = Column(String, default="")  # denormalized for quick display
     message = Column(String, nullable=False)
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 

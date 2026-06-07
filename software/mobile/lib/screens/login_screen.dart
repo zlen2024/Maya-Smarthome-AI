@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/api_service.dart';
-import 'parent_shell.dart';
-import 'child_shell.dart';
 
 /// Login screen with a Parent/Child toggle.
 /// Parent: email + password.  Child: ID + PIN.
@@ -67,10 +65,8 @@ class _LoginScreenState extends State<LoginScreen>
       );
 
       if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const ParentShell()),
-      );
+      // Navigate to AuthGate which handles house check & routing
+      Navigator.pushNamedAndRemoveUntil(context, '/', (_) => false);
     } catch (e) {
       _snack(e.toString().replaceFirst('Exception: ', ''));
     } finally {
@@ -111,10 +107,8 @@ class _LoginScreenState extends State<LoginScreen>
       );
 
       if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const ChildShell()),
-      );
+      // Navigate to AuthGate which handles routing
+      Navigator.pushNamedAndRemoveUntil(context, '/', (_) => false);
     } catch (e) {
       _snack(e.toString().replaceFirst('Exception: ', ''));
     } finally {

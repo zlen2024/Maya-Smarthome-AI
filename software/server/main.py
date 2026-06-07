@@ -1,5 +1,7 @@
 import os
 import json
+import random
+import string
 import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
@@ -11,7 +13,7 @@ from sqlalchemy.orm import Session
 from database import engine, Base, get_db, SessionLocal
 from models import (
     Account, AccountRole, House, Child, Device, SmartExtension,
-    Relay, Permission, MsgHistory, Heartbeat
+    Relay, Permission, MsgHistory, Heartbeat, AccountHouse
 )
 from auth import (
     hash_password, verify_password, create_access_token, get_current_user,
@@ -22,6 +24,57 @@ import mimetypes
 mimetypes.add_type('application/vnd.android.package-archive', '.apk')
 
 Base.metadata.create_all(bind=engine)
+
+
+def run_migrations():
+    """Run SQLite schema migrations for backward compatibility."""
+    db = SessionLocal()
+    try:
+        from sqlalchemy import inspect, text
+        inspector = inspect(engine)
+
+        # Add join_pin to houses if missing
+        house_cols = [c['name'] for c in inspector.get_columns('houses')]
+        if 'join_pin' not in house_cols:
+            db.execute(text('ALTER TABLE houses ADD COLUMN join_pin TEXT'))
+            db.commit()
+
+        # Add sender_name to msg_history if missing
+        msg_cols = [c['name'] for c in inspector.get_columns('msg_history')]
+        if 'sender_name' not in msg_cols:
+            db.execute(text("ALTER TABLE msg_history ADD COLUMN sender_name TEXT DEFAULT ''"))
+            db.commit()
+
+        # Create account_houses table if not exists
+        if 'account_houses' not in inspector.get_table_names():
+            AccountHouse.__table__.create(bind=engine)
+
+        # Populate account_houses from existing accounts
+        existing = db.query(AccountHouse).first()
+        if not existing:
+            accounts = db.query(Account).filter(Account.house_id.isnot(None)).all()
+            for acc in accounts:
+                assoc = AccountHouse(
+                    acc_id=acc.acc_id,
+                    house_id=acc.house_id,
+                    is_master=acc.is_master,
+                )
+                db.add(assoc)
+            db.commit()
+
+        # Generate PINs for houses missing one
+        houses = db.query(House).filter(House.join_pin.is_(None)).all()
+        for h in houses:
+            h.join_pin = ''.join(random.choices(string.digits, k=6))
+        db.commit()
+    except Exception as e:
+        print(f'Migration warning: {e}')
+        db.rollback()
+    finally:
+        db.close()
+
+
+run_migrations()
 
 app = FastAPI()
 
@@ -166,22 +219,17 @@ async def register(payload: dict, db: Session = Depends(get_db)):
     email = payload.get("email", "").strip()
     password = payload.get("password", "")
     name = payload.get("name", "").strip()
-    location = payload.get("location", "")
     if not email or not password or not name:
         raise HTTPException(status_code=400, detail="email, password, name required")
     existing = db.query(Account).filter(Account.email == email).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
-    house = House(location=location)
-    db.add(house)
-    db.flush()
     account = Account(
-        house_id=house.house_id,
         email=email,
         password=hash_password(password),
         name=name,
         role=AccountRole.parent,
-        is_master=True,
+        is_master=False,
     )
     db.add(account)
     db.commit()
@@ -190,7 +238,7 @@ async def register(payload: dict, db: Session = Depends(get_db)):
         "acc_id": account.acc_id,
         "email": account.email,
         "name": account.name,
-        "house_id": house.house_id,
+        "house_id": None,
         "token": token,
     }
 
@@ -251,6 +299,203 @@ async def update_house(house_id: int, payload: dict, db: Session = Depends(get_d
         house.location = payload["location"]
     db.commit()
     return {"house_id": house.house_id, "location": house.location}
+
+
+def _generate_pin():
+    return ''.join(random.choices(string.digits, k=6))
+
+
+# ─── Multi-House Management ───────────────────────────────────
+
+@app.get("/api/houses")
+async def list_my_houses(db: Session = Depends(get_db),
+                        current_user: Account = Depends(get_current_user)):
+    """List all houses the current user has joined."""
+    assocs = db.query(AccountHouse).filter(AccountHouse.acc_id == current_user.acc_id).all()
+    result = []
+    for a in assocs:
+        house = db.query(House).filter(House.house_id == a.house_id).first()
+        if house:
+            result.append({
+                "house_id": house.house_id,
+                "location": house.location,
+                "is_master": a.is_master,
+                "join_pin": house.join_pin if a.is_master else None,
+                "is_active": current_user.house_id == house.house_id,
+            })
+    return {"houses": result}
+
+
+@app.post("/api/houses")
+async def create_house(payload: dict, db: Session = Depends(get_db),
+                      current_user: Account = Depends(get_current_user)):
+    """Create a new house and link the user as master."""
+    location = payload.get("location", "").strip()
+    if not location:
+        raise HTTPException(status_code=400, detail="location required")
+    house = House(location=location, join_pin=_generate_pin())
+    db.add(house)
+    db.flush()
+    assoc = AccountHouse(acc_id=current_user.acc_id, house_id=house.house_id, is_master=True)
+    db.add(assoc)
+    # Set as active house if user has none
+    if not current_user.house_id:
+        current_user.house_id = house.house_id
+    db.commit()
+    return {
+        "house_id": house.house_id,
+        "location": house.location,
+        "join_pin": house.join_pin,
+        "is_master": True,
+    }
+
+
+@app.post("/api/houses/join")
+async def join_house(payload: dict, db: Session = Depends(get_db),
+                    current_user: Account = Depends(get_current_user)):
+    """Join an existing house using house_id + 6-digit PIN."""
+    house_id = payload.get("house_id")
+    pin = payload.get("pin", "").strip()
+    if not house_id or not pin:
+        raise HTTPException(status_code=400, detail="house_id and pin required")
+    house = db.query(House).filter(House.house_id == house_id).first()
+    if not house or house.join_pin != pin:
+        raise HTTPException(status_code=403, detail="Invalid house ID or PIN")
+    # Check if already joined
+    existing = db.query(AccountHouse).filter(
+        AccountHouse.acc_id == current_user.acc_id,
+        AccountHouse.house_id == house_id
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Already a member of this house")
+    assoc = AccountHouse(acc_id=current_user.acc_id, house_id=house.house_id, is_master=False)
+    db.add(assoc)
+    if not current_user.house_id:
+        current_user.house_id = house.house_id
+    db.commit()
+    return {"house_id": house.house_id, "location": house.location, "is_master": False}
+
+
+@app.post("/api/houses/switch")
+async def switch_house(payload: dict, db: Session = Depends(get_db),
+                      current_user: Account = Depends(get_current_user)):
+    """Switch the user's active house."""
+    house_id = payload.get("house_id")
+    if not house_id:
+        raise HTTPException(status_code=400, detail="house_id required")
+    assoc = db.query(AccountHouse).filter(
+        AccountHouse.acc_id == current_user.acc_id,
+        AccountHouse.house_id == house_id
+    ).first()
+    if not assoc:
+        raise HTTPException(status_code=403, detail="Not a member of this house")
+    current_user.house_id = house_id
+    db.commit()
+    return {"house_id": house_id, "active": True}
+
+
+@app.get("/api/houses/{house_id}/members")
+async def list_house_members(house_id: int, db: Session = Depends(get_db),
+                            current_user: Account = Depends(get_current_user)):
+    """List all members of a house."""
+    # Check caller is a member
+    caller_assoc = db.query(AccountHouse).filter(
+        AccountHouse.acc_id == current_user.acc_id,
+        AccountHouse.house_id == house_id
+    ).first()
+    if not caller_assoc:
+        raise HTTPException(status_code=403, detail="Not a member of this house")
+    assocs = db.query(AccountHouse).filter(AccountHouse.house_id == house_id).all()
+    members = []
+    for a in assocs:
+        acc = db.query(Account).filter(Account.acc_id == a.acc_id).first()
+        if acc:
+            members.append({
+                "acc_id": acc.acc_id,
+                "name": acc.name,
+                "email": acc.email,
+                "is_master": a.is_master,
+            })
+    return {"members": members}
+
+
+@app.delete("/api/houses/{house_id}/members/{acc_id}")
+async def kick_member(house_id: int, acc_id: int, db: Session = Depends(get_db),
+                     current_user: Account = Depends(get_current_user)):
+    """Remove a member from a house (master-only)."""
+    caller_assoc = db.query(AccountHouse).filter(
+        AccountHouse.acc_id == current_user.acc_id,
+        AccountHouse.house_id == house_id
+    ).first()
+    if not caller_assoc or not caller_assoc.is_master:
+        raise HTTPException(status_code=403, detail="Only the house master can remove members")
+    if acc_id == current_user.acc_id:
+        raise HTTPException(status_code=400, detail="Cannot remove yourself")
+    target = db.query(AccountHouse).filter(
+        AccountHouse.acc_id == acc_id,
+        AccountHouse.house_id == house_id
+    ).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Member not found in this house")
+    db.delete(target)
+    # If the kicked user's active house was this one, clear it
+    kicked_user = db.query(Account).filter(Account.acc_id == acc_id).first()
+    if kicked_user and kicked_user.house_id == house_id:
+        kicked_user.house_id = None
+    db.commit()
+    return {"removed": acc_id}
+
+
+@app.post("/api/houses/{house_id}/reset-pin")
+async def reset_house_pin(house_id: int, db: Session = Depends(get_db),
+                         current_user: Account = Depends(get_current_user)):
+    """Regenerate the join PIN for a house (master-only)."""
+    caller_assoc = db.query(AccountHouse).filter(
+        AccountHouse.acc_id == current_user.acc_id,
+        AccountHouse.house_id == house_id
+    ).first()
+    if not caller_assoc or not caller_assoc.is_master:
+        raise HTTPException(status_code=403, detail="Only the house master can reset the PIN")
+    house = db.query(House).filter(House.house_id == house_id).first()
+    if not house:
+        raise HTTPException(status_code=404, detail="House not found")
+    house.join_pin = _generate_pin()
+    db.commit()
+    return {"house_id": house.house_id, "join_pin": house.join_pin}
+
+
+@app.get("/api/houses/{house_id}/chat")
+async def get_chat_history(house_id: int, before: int = None, db: Session = Depends(get_db),
+                          user_info: dict = Depends(get_current_user_or_child)):
+    """Get the last 50 chat messages for a house, with cursor pagination."""
+    caller_house = user_info.get("house_id")
+    if caller_house != house_id:
+        # Also check AccountHouse for parent multi-house
+        if user_info["type"] == "user":
+            assoc = db.query(AccountHouse).filter(
+                AccountHouse.acc_id == user_info["user"].acc_id,
+                AccountHouse.house_id == house_id
+            ).first()
+            if not assoc:
+                raise HTTPException(status_code=403, detail="Not a member of this house")
+        else:
+            raise HTTPException(status_code=403, detail="Access denied")
+    query = db.query(MsgHistory).filter(MsgHistory.house_id == house_id)
+    if before:
+        query = query.filter(MsgHistory.msg_id < before)
+    messages = query.order_by(MsgHistory.msg_id.desc()).limit(50).all()
+    messages.reverse()  # oldest first
+    return {
+        "messages": [{
+            "msg_id": m.msg_id,
+            "sender_id": m.sender_id,
+            "sender_type": m.sender_type,
+            "sender_name": m.sender_name,
+            "message": m.message,
+            "timestamp": m.timestamp.isoformat() if m.timestamp else None,
+        } for m in messages],
+        "has_more": len(messages) == 50,
+    }
 
 
 # ─── Child Management ─────────────────────────────────────────
@@ -972,11 +1217,14 @@ async def _handle_websocket(websocket: WebSocket):
 @app.websocket("/ws/mobile")
 async def mobile_websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
+    sender_name = "Unknown"
+    sender_type = "parent"
     try:
         # Wait for first message with the auth token
         auth_msg = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
         auth_data = json.loads(auth_msg)
         token = auth_data.get("token", "")
+        requested_house_id = auth_data.get("house_id")  # optional override
 
         from jose import jwt as jose_jwt, JWTError
         try:
@@ -1004,6 +1252,8 @@ async def mobile_websocket_endpoint(websocket: WebSocket):
                     return
                 acc_id = child_id
                 house_id = child.house_id
+                sender_name = child.name
+                sender_type = "child"
             else:
                 try:
                     acc_id = int(sub)
@@ -1014,7 +1264,21 @@ async def mobile_websocket_endpoint(websocket: WebSocket):
                 if not account:
                     await websocket.close(code=4001, reason="User not found")
                     return
-                house_id = account.house_id
+                sender_name = account.name
+                sender_type = "parent"
+                # Use requested house_id if provided, otherwise fall back
+                if requested_house_id is not None:
+                    # Verify the user is a member of that house
+                    assoc = db.query(AccountHouse).filter(
+                        AccountHouse.acc_id == acc_id,
+                        AccountHouse.house_id == requested_house_id
+                    ).first()
+                    if assoc:
+                        house_id = requested_house_id
+                    else:
+                        house_id = account.house_id
+                else:
+                    house_id = account.house_id
         finally:
             db.close()
 
@@ -1026,7 +1290,41 @@ async def mobile_websocket_endpoint(websocket: WebSocket):
         await websocket.send_text(json.dumps({"type": "auth_ok", "house_id": house_id}))
 
         while True:
-            await websocket.receive_text()
+            raw = await websocket.receive_text()
+            try:
+                msg_data = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+
+            if msg_data.get("type") == "chat":
+                message_text = msg_data.get("message", "").strip()
+                if not message_text:
+                    continue
+                db = SessionLocal()
+                try:
+                    msg = MsgHistory(
+                        house_id=house_id,
+                        sender_id=acc_id,
+                        sender_type=sender_type,
+                        sender_name=sender_name,
+                        message=message_text,
+                    )
+                    db.add(msg)
+                    db.commit()
+                    await manager.broadcast_to_house(house_id, {
+                        "type": "chat_message",
+                        "msg_id": msg.msg_id,
+                        "sender_id": acc_id,
+                        "sender_type": sender_type,
+                        "sender_name": sender_name,
+                        "message": message_text,
+                        "timestamp": msg.timestamp.isoformat() if msg.timestamp else None,
+                    })
+                except Exception as e:
+                    db.rollback()
+                    print(f"Error saving chat message: {e}")
+                finally:
+                    db.close()
 
     except asyncio.TimeoutError:
         try:

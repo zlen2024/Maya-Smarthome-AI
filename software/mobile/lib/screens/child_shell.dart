@@ -4,9 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../services/api_service.dart';
 import 'devices_tab.dart';
+import 'chat_tab.dart';
 import 'settings_tab.dart';
 
-/// Child shell with 2-tab bottom navigation (Devices + Settings).
+/// Child shell with 3-tab bottom navigation (Devices + Chat + Settings).
 /// Children see only their permitted channels — no Children or Device tabs.
 class ChildShell extends StatefulWidget {
   const ChildShell({super.key});
@@ -23,6 +24,7 @@ class _ChildShellState extends State<ChildShell> {
 
   final List<Widget> _tabs = const [
     DevicesTab(), // Child filter is applied inside DevicesTab
+    ChatTab(),
     SettingsTab(),
   ];
 
@@ -36,6 +38,7 @@ class _ChildShellState extends State<ChildShell> {
   void dispose() {
     _reconnectTimer?.cancel();
     _channel?.sink.close();
+    ApiService.activeChannel = null;
     super.dispose();
   }
 
@@ -45,7 +48,13 @@ class _ChildShellState extends State<ChildShell> {
     try {
       final uri = Uri.parse('${ApiService.wsUrl}/ws/mobile');
       _channel = WebSocketChannel.connect(uri);
-      _channel!.sink.add(jsonEncode({'token': ApiService.token}));
+      ApiService.activeChannel = _channel;
+
+      // Authenticate with token AND house_id
+      _channel!.sink.add(jsonEncode({
+        'token': ApiService.token,
+        'house_id': ApiService.houseId,
+      }));
 
       _channel!.stream.listen(
         (message) {
@@ -57,6 +66,8 @@ class _ChildShellState extends State<ChildShell> {
             if (mounted) setState(() => _wsConnected = true);
           } else if (type == 'device_update' || type == 'device_offline') {
             ApiService.emitBroadcast(data);
+          } else if (type == 'chat_message') {
+            ApiService.emitChat(data);
           }
         },
         onDone: () {
@@ -146,6 +157,11 @@ class _ChildShellState extends State<ChildShell> {
             icon: Icon(Icons.power_settings_new_outlined),
             selectedIcon: Icon(Icons.power_settings_new_rounded),
             label: 'Devices',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.chat_outlined),
+            selectedIcon: Icon(Icons.chat_rounded),
+            label: 'Chat',
           ),
           NavigationDestination(
             icon: Icon(Icons.settings_outlined),

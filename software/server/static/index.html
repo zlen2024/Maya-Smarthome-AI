@@ -852,7 +852,7 @@
         <div class="card auth-card">
           <div class="auth-tabs">
             <button class="auth-tab-btn active" onclick="switchAuthTab('login')">Sign In</button>
-            <button class="auth-tab-btn" onclick="switchAuthTab('register')">Register House</button>
+            <button class="auth-tab-btn" onclick="switchAuthTab('register')">Register</button>
             <button class="auth-tab-btn" onclick="switchAuthTab('child-login')">Child Access</button>
           </div>
           <div class="auth-body">
@@ -887,11 +887,7 @@
                   <label for="registerPassword">Password</label>
                   <input type="password" id="registerPassword" required placeholder="••••••••" minlength="6">
                 </div>
-                <div class="form-group">
-                  <label for="registerLocation">Home Location (optional)</label>
-                  <input type="text" id="registerLocation" placeholder="Living Room, Kuala Lumpur">
-                </div>
-                <button type="submit" class="btn btn-primary">Create Household Account</button>
+                <button type="submit" class="btn btn-primary">Create Account</button>
               </form>
             </div>
             
@@ -916,6 +912,32 @@
         
       </div>
     </div>
+
+    <!-- ==========================================
+         VIEW: Onboarding Gate (No Houses)
+         ========================================== -->
+    <div id="view-onboarding" class="view">
+      <div style="max-width: 700px; margin: 4rem auto; text-align: center;">
+        <div style="font-size: 4rem; margin-bottom: 1.5rem;">🏠</div>
+        <h2 style="font-family: 'Outfit', sans-serif; font-size: 2.5rem; font-weight: 800; background: linear-gradient(135deg, #fff 30%, #a5b4fc 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 1rem;">Welcome to Maya Smart Home</h2>
+        <p style="color: var(--text-muted); font-size: 1.1rem; margin-bottom: 3rem;">You're not part of any household yet. Create a new house or join an existing one to get started.</p>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; max-width: 550px; margin: 0 auto;">
+          <div class="card" style="padding: 2.5rem 1.5rem; text-align: center; cursor: pointer; transition: all 0.3s;" onclick="openModal('modal-create-house')" onmouseover="this.style.borderColor='var(--border-glow-active)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.04)'">
+            <div style="font-size: 3rem; margin-bottom: 1rem;">🏗️</div>
+            <h3 style="font-size: 1.2rem; font-weight: 700; margin-bottom: 0.5rem;">Create a House</h3>
+            <p style="font-size: 0.85rem; color: var(--text-muted);">Start a new household and become the house master.</p>
+          </div>
+          <div class="card" style="padding: 2.5rem 1.5rem; text-align: center; cursor: pointer; transition: all 0.3s;" onclick="openModal('modal-join-house')" onmouseover="this.style.borderColor='var(--border-glow-active)'" onmouseout="this.style.borderColor='rgba(255,255,255,0.04)'">
+            <div style="font-size: 3rem; margin-bottom: 1rem;">🔗</div>
+            <h3 style="font-size: 1.2rem; font-weight: 700; margin-bottom: 0.5rem;">Join a House</h3>
+            <p style="font-size: 0.85rem; color: var(--text-muted);">Enter a House ID and 6-digit PIN to join an existing household.</p>
+          </div>
+        </div>
+        <div style="margin-top: 2rem;">
+          <button onclick="logout()" class="btn btn-secondary" style="width: auto; padding: 0.5rem 1.5rem; font-size: 0.85rem;">← Sign Out</button>
+        </div>
+      </div>
+    </div>
     
     <!-- ==========================================
          VIEW: Main App Dashboard (Logged In)
@@ -927,12 +949,16 @@
           <div class="user-avatar" id="avatarText">P</div>
           <div class="user-details">
             <h2 id="userNameDisplay">Welcome Home <span class="role-badge parent" id="roleBadge">Parent</span></h2>
-            <span>Household Space ID: <strong id="houseIdDisplay">—</strong></span>
+            <div style="display: flex; align-items: center; gap: 0.75rem; margin-top: 0.25rem;">
+              <span style="font-size: 0.8rem; color: var(--text-muted);">House:</span>
+              <select id="houseSwitcher" onchange="handleHouseSwitch(this.value)" style="width: auto; min-width: 160px; padding: 0.4rem 0.75rem; font-size: 0.8rem; border-radius: 8px;"></select>
+            </div>
           </div>
         </div>
-        <div>
+        <div style="display: flex; align-items: center; gap: 0.75rem;">
+          <button onclick="openModal('modal-house-settings')" class="btn btn-secondary" style="width: auto; padding: 0.5rem 1rem; font-size: 0.8rem; border-radius: 8px;">⚙️ House Settings</button>
           <a href="/static/app-release.apk" download="maya-smart-home.apk" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.5rem; width: auto; padding: 0.5rem 1.2rem; border-radius: 8px; text-decoration: none; font-size: 0.85rem; font-weight: 600;">
-            <span>📥</span> Download Android App (APK)
+            <span>📥</span> Download APK
           </a>
         </div>
       </div>
@@ -1028,6 +1054,61 @@
     </div>
   </div>
 
+  <!-- MODAL: Create House -->
+  <div class="modal-overlay" id="modal-create-house">
+    <div class="card modal-card">
+      <div class="modal-header">
+        <h3>🏗️ Create a New House</h3>
+        <button class="modal-close" onclick="closeModal('modal-create-house')">×</button>
+      </div>
+      <div class="modal-body">
+        <form onsubmit="handleCreateHouse(event)">
+          <div class="form-group">
+            <label for="newHouseLocation">House Location / Name</label>
+            <input type="text" id="newHouseLocation" required placeholder="e.g. Living Room, Kuala Lumpur">
+          </div>
+          <button type="submit" class="btn btn-primary">Create House</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Join House -->
+  <div class="modal-overlay" id="modal-join-house">
+    <div class="card modal-card">
+      <div class="modal-header">
+        <h3>🔗 Join an Existing House</h3>
+        <button class="modal-close" onclick="closeModal('modal-join-house')">×</button>
+      </div>
+      <div class="modal-body">
+        <form onsubmit="handleJoinHouse(event)">
+          <div class="form-group">
+            <label for="joinHouseId">House ID</label>
+            <input type="number" id="joinHouseId" required placeholder="e.g. 1" min="1">
+          </div>
+          <div class="form-group">
+            <label for="joinHousePin">6-Digit PIN</label>
+            <input type="text" id="joinHousePin" required placeholder="e.g. 482910" maxlength="6" pattern="[0-9]{6}" inputmode="numeric">
+          </div>
+          <button type="submit" class="btn btn-primary">Join House</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: House Settings -->
+  <div class="modal-overlay" id="modal-house-settings">
+    <div class="card modal-card" style="max-width: 600px;">
+      <div class="modal-header">
+        <h3>⚙️ House Settings</h3>
+        <button class="modal-close" onclick="closeModal('modal-house-settings')">×</button>
+      </div>
+      <div class="modal-body">
+        <div id="houseSettingsContent">Loading...</div>
+      </div>
+    </div>
+  </div>
+
   <div class="toast-container" id="toastContainer"></div>
 
   <!-- ==========================================
@@ -1041,11 +1122,13 @@
     let socket = null;
     let pollInterval = null;
     
-    // Store current state of devices, relays, and permissions
+    // Store current state
     let devices = [];
     let relays = [];
     let permissions = [];
     let children = [];
+    let houses = [];
+    let activeHouse = null;
     
     // UI Helpers
     function showToast(msg, type = 'info') {
@@ -1085,6 +1168,8 @@
       // Additional modal loads
       if (id === 'modal-permissions') {
         renderPermissionsModal();
+      } else if (id === 'modal-house-settings') {
+        loadHouseSettings();
       }
     }
     
@@ -1113,6 +1198,23 @@
         currentUser = data;
         isChildSession = data.role === 'child';
         localStorage.setItem('is_child_session', String(isChildSession));
+        
+        // Fetch houses for parent users
+        if (!isChildSession) {
+          const houseRes = await fetch(`${API_BASE}/api/houses`, { headers });
+          if (houseRes.ok) {
+            const houseData = await houseRes.json();
+            houses = houseData.houses || [];
+            activeHouse = houses.find(h => h.is_active) || houses[0] || null;
+          }
+          
+          // If no houses, show onboarding gate
+          if (houses.length === 0) {
+            document.getElementById('logoutBtn').style.display = 'block';
+            showView('onboarding');
+            return;
+          }
+        }
         
         setupDashboardUI();
         showView('dashboard');
@@ -1190,13 +1292,12 @@
       const name = document.getElementById('registerName').value.trim();
       const email = document.getElementById('registerEmail').value.trim();
       const password = document.getElementById('registerPassword').value;
-      const location = document.getElementById('registerLocation').value.trim();
       
       try {
         const res = await fetch(`${API_BASE}/api/auth/register`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, email, password, location })
+          body: JSON.stringify({ name, email, password })
         });
         
         const data = await res.json();
@@ -1207,7 +1308,7 @@
         isChildSession = false;
         localStorage.setItem('is_child_session', 'false');
         
-        showToast(`Account registered for house ID ${data.house_id}!`, 'success');
+        showToast(`Account created! Now create or join a house.`, 'success');
         loadUserProfile();
         
       } catch (err) {
@@ -1256,8 +1357,10 @@
       
       socket.onopen = () => {
         updateWSStatusDot('connecting');
-        // Authenticate the socket
-        socket.send(JSON.stringify({ token }));
+        // Authenticate the socket with active house
+        const authPayload = { token };
+        if (activeHouse) authPayload.house_id = activeHouse.house_id;
+        socket.send(JSON.stringify(authPayload));
       };
       
       socket.onmessage = (event) => {
@@ -1312,7 +1415,19 @@
       // User Profile details
       document.getElementById('avatarText').textContent = currentUser.name.charAt(0).toUpperCase();
       document.getElementById('userNameDisplay').innerHTML = `Welcome Home, ${currentUser.name} <span class="role-badge ${isChildSession ? 'child' : 'parent'}">${isChildSession ? 'Child' : 'Parent'}</span>`;
-      document.getElementById('houseIdDisplay').textContent = currentUser.house_id;
+      
+      // House switcher dropdown
+      const switcher = document.getElementById('houseSwitcher');
+      if (!isChildSession && houses.length > 0) {
+        switcher.innerHTML = houses.map(h => 
+          `<option value="${h.house_id}" ${h.is_active ? 'selected' : ''}>${escapeHtml(h.location || 'House #' + h.house_id)}${h.is_master ? ' ★' : ''}</option>`
+        ).join('') + 
+        '<option value="__join">➕ Join House...</option>' +
+        '<option value="__create">🏠 Create House...</option>';
+        switcher.parentElement.style.display = 'flex';
+      } else {
+        switcher.parentElement.style.display = 'none';
+      }
       
       // Layout checks based on roles
       if (isChildSession) {
@@ -1610,7 +1725,158 @@
     }
     
     // Device registration is handled via BLE provisioning on the mobile app
-    // Chat/messaging feature is not integrated yet
+    
+    // ── House Management ────────────────────────────────────────
+    async function handleHouseSwitch(val) {
+      if (val === '__join') {
+        document.getElementById('houseSwitcher').value = activeHouse ? activeHouse.house_id : '';
+        openModal('modal-join-house');
+        return;
+      }
+      if (val === '__create') {
+        document.getElementById('houseSwitcher').value = activeHouse ? activeHouse.house_id : '';
+        openModal('modal-create-house');
+        return;
+      }
+      const houseId = parseInt(val);
+      if (!houseId || (activeHouse && activeHouse.house_id === houseId)) return;
+      
+      try {
+        const res = await fetch(`${API_BASE}/api/houses/switch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ house_id: houseId })
+        });
+        if (!res.ok) { const d = await res.json(); throw new Error(d.detail); }
+        
+        // Refresh everything
+        showToast('Switched house!', 'success');
+        loadUserProfile();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+    
+    async function handleCreateHouse(e) {
+      e.preventDefault();
+      const location = document.getElementById('newHouseLocation').value.trim();
+      try {
+        const res = await fetch(`${API_BASE}/api/houses`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ location })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to create house');
+        
+        showToast(`House created! PIN: ${data.join_pin}`, 'success');
+        closeModal('modal-create-house');
+        document.getElementById('newHouseLocation').value = '';
+        loadUserProfile();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+    
+    async function handleJoinHouse(e) {
+      e.preventDefault();
+      const houseId = parseInt(document.getElementById('joinHouseId').value);
+      const pin = document.getElementById('joinHousePin').value.trim();
+      try {
+        const res = await fetch(`${API_BASE}/api/houses/join`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ house_id: houseId, pin })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to join house');
+        
+        showToast(`Joined house: ${data.location}!`, 'success');
+        closeModal('modal-join-house');
+        document.getElementById('joinHouseId').value = '';
+        document.getElementById('joinHousePin').value = '';
+        loadUserProfile();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+    
+    async function loadHouseSettings() {
+      const container = document.getElementById('houseSettingsContent');
+      if (!activeHouse) { container.innerHTML = '<p style="color:var(--text-muted)">No active house</p>'; return; }
+      
+      const isMaster = activeHouse.is_master;
+      let html = `<div style="margin-bottom:1.5rem;"><h4 style="font-size:1rem;margin-bottom:0.5rem;">House #${activeHouse.house_id} — ${escapeHtml(activeHouse.location)}</h4>`;
+      
+      if (isMaster) {
+        html += `<div style="background:rgba(0,0,0,0.2);padding:1rem;border-radius:12px;margin-bottom:1rem;">
+          <span style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;font-weight:700;">Join PIN</span>
+          <div style="font-size:1.5rem;font-weight:800;letter-spacing:0.2em;color:#a5b4fc;margin:0.5rem 0;" id="pinDisplay">${activeHouse.join_pin || '——'}</div>
+          <button onclick="regeneratePin()" class="btn btn-secondary" style="width:auto;padding:0.35rem 0.75rem;font-size:0.75rem;border-radius:6px;">🔄 Regenerate PIN</button>
+        </div>`;
+      }
+      html += '</div>';
+      
+      // Members list
+      html += '<h4 style="font-size:1rem;margin-bottom:0.75rem;">👥 House Members</h4>';
+      try {
+        const res = await fetch(`${API_BASE}/api/houses/${activeHouse.house_id}/members`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          const members = data.members || [];
+          html += '<div style="display:flex;flex-direction:column;gap:0.5rem;">';
+          for (const m of members) {
+            html += `<div class="channel-row" style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.04);">
+              <div style="display:flex;align-items:center;gap:0.75rem;">
+                <div style="width:32px;height:32px;background:var(--primary-gradient);border-radius:8px;display:grid;place-items:center;font-size:14px;font-weight:700;">${m.name.charAt(0).toUpperCase()}</div>
+                <div>
+                  <div style="font-size:0.9rem;font-weight:600;">${escapeHtml(m.name)} ${m.is_master ? '<span style="font-size:0.6rem;color:#a5b4fc;border:1px solid rgba(99,102,241,0.3);padding:0.1rem 0.35rem;border-radius:8px;margin-left:0.25rem;">MASTER</span>' : ''}</div>
+                  <div style="font-size:0.7rem;color:var(--text-dark);">${escapeHtml(m.email)}</div>
+                </div>
+              </div>
+              ${isMaster && !m.is_master ? `<button onclick="kickMember(${m.acc_id}, '${escapeJs(m.name)}')" class="btn btn-secondary" style="width:auto;padding:0.25rem 0.5rem;font-size:0.7rem;border-radius:6px;color:var(--danger);">Remove</button>` : ''}
+            </div>`;
+          }
+          html += '</div>';
+        }
+      } catch (e) { console.error(e); }
+      
+      container.innerHTML = html;
+    }
+    
+    async function regeneratePin() {
+      if (!activeHouse) return;
+      try {
+        const res = await fetch(`${API_BASE}/api/houses/${activeHouse.house_id}/reset-pin`, {
+          method: 'POST',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail);
+        activeHouse.join_pin = data.join_pin;
+        document.getElementById('pinDisplay').textContent = data.join_pin;
+        showToast('PIN regenerated!', 'success');
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+    
+    async function kickMember(accId, name) {
+      if (!confirm(`Remove ${name} from this house?`)) return;
+      try {
+        const res = await fetch(`${API_BASE}/api/houses/${activeHouse.house_id}/members/${accId}`, {
+          method: 'DELETE',
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (!res.ok) { const d = await res.json(); throw new Error(d.detail); }
+        showToast(`${name} removed from house`, 'success');
+        loadHouseSettings();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
     
     // Child Management & Permissions Matrix
     function renderChildren(childrenList) {

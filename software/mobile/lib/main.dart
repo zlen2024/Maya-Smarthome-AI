@@ -3,6 +3,7 @@ import 'services/api_service.dart';
 import 'screens/login_screen.dart';
 import 'screens/parent_shell.dart';
 import 'screens/child_shell.dart';
+import 'screens/onboarding_screen.dart';
 
 void main() {
   runApp(const MayaSmartHomeApp());
@@ -80,7 +81,10 @@ class MayaSmartHomeApp extends StatelessWidget {
         ),
       ),
       themeMode: ThemeMode.system,
-      home: const _AuthGate(),
+      // Named route for OnboardingScreen to navigate back to
+      routes: {
+        '/': (_) => const _AuthGate(),
+      },
     );
   }
 }
@@ -116,7 +120,7 @@ class _AuthGateState extends State<_AuthGate> {
 
         await ApiService.saveCredentials(
           jwtToken: ApiService.token,
-          house: profile['house_id'] ?? ApiService.houseId!,
+          house: profile['house_id'],
           name: profile['name'] ?? ApiService.userName,
           role: role,
           accountId: profile['acc_id'],
@@ -124,13 +128,37 @@ class _AuthGateState extends State<_AuthGate> {
         );
 
         if (!mounted) return;
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(
-            builder: (_) =>
-                isChild ? const ChildShell() : const ParentShell(),
-          ),
-        );
+
+        // For children, go straight to shell (they're locked to one house)
+        if (isChild) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const ChildShell()),
+          );
+          return;
+        }
+
+        // For parents, fetch houses and decide
+        try {
+          await ApiService.getHouses();
+        } catch (_) {
+          // If houses fetch fails, still proceed with whatever we have
+        }
+
+        if (!mounted) return;
+
+        if (ApiService.houses.isEmpty) {
+          // No houses → show onboarding
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const OnboardingScreen()),
+          );
+        } else {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const ParentShell()),
+          );
+        }
       } catch (_) {
         // Token expired or invalid, go to login
         await ApiService.logout();

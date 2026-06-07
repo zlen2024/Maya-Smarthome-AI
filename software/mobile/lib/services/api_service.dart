@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 /// Centralized API service with hardcoded production server URL.
 /// All REST and WebSocket communication flows through this class.
@@ -18,6 +19,13 @@ class ApiService {
   static String userRole = 'parent';
   static int? accId;
 
+  // ── Multi-House State ──────────────────────────────────────────
+  static List<Map<String, dynamic>> houses = [];
+  static Map<String, dynamic>? activeHouse;
+
+  // ── WebSocket Channel Reference ────────────────────────────────
+  static WebSocketChannel? activeChannel;
+
   // ── WebSocket Broadcast Relay ──────────────────────────────────
   static final StreamController<Map<String, dynamic>> _broadcastController =
       StreamController<Map<String, dynamic>>.broadcast();
@@ -29,6 +37,16 @@ class ApiService {
     _broadcastController.add(data);
   }
 
+  // ── Chat Broadcast Relay ───────────────────────────────────────
+  static final StreamController<Map<String, dynamic>> _chatController =
+      StreamController<Map<String, dynamic>>.broadcast();
+
+  static Stream<Map<String, dynamic>> get chatBroadcasts =>
+      _chatController.stream;
+
+  static void emitChat(Map<String, dynamic> data) =>
+      _chatController.add(data);
+
   // ── Initialization ─────────────────────────────────────────────
   static Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
@@ -38,14 +56,25 @@ class ApiService {
     userName = prefs.getString('user_name') ?? '';
     userRole = prefs.getString('user_role') ?? 'parent';
     accId = prefs.getInt('acc_id');
+
+    // Restore activeHouse
+    final activeHouseJson = prefs.getString('active_house');
+    if (activeHouseJson != null) {
+      try {
+        activeHouse = jsonDecode(activeHouseJson) as Map<String, dynamic>;
+      } catch (_) {
+        activeHouse = null;
+      }
+    }
   }
 
-  static bool get isLoggedIn => token.isNotEmpty && houseId != null;
+  static bool get isLoggedIn => token.isNotEmpty;
+  static bool get hasHouse => houseId != null;
 
   // ── Credential Persistence ─────────────────────────────────────
   static Future<void> saveCredentials({
     required String jwtToken,
-    required int house,
+    required int? house,
     required String name,
     required String role,
     int? accountId,
@@ -60,11 +89,20 @@ class ApiService {
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('auth_token', jwtToken);
-    await prefs.setInt('house_id', house);
+    if (house != null) {
+      await prefs.setInt('house_id', house);
+    } else {
+      await prefs.remove('house_id');
+    }
     await prefs.setString('user_name', name);
     await prefs.setString('user_role', role);
     await prefs.setBool('is_child', child);
     if (accountId != null) await prefs.setInt('acc_id', accountId);
+
+    // Persist activeHouse
+    if (activeHouse != null) {
+      await prefs.setString('active_house', jsonEncode(activeHouse));
+    }
   }
 
   static Future<void> logout() async {
@@ -74,6 +112,9 @@ class ApiService {
     userName = '';
     userRole = 'parent';
     accId = null;
+    houses = [];
+    activeHouse = null;
+    activeChannel = null;
 
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_token');
@@ -82,6 +123,7 @@ class ApiService {
     await prefs.remove('user_role');
     await prefs.remove('is_child');
     await prefs.remove('acc_id');
+    await prefs.remove('active_house');
   }
 
   // ── HTTP Helpers ───────────────────────────────────────────────
@@ -108,6 +150,10 @@ class ApiService {
       headers: _authHeaders,
       body: jsonEncode(body),
     );
+  }
+
+  static Future<http.Response> delete(String path) {
+    return http.delete(Uri.parse('$baseUrl$path'), headers: _authHeaders);
   }
 
   // ── Auth ────────────────────────────────────────────────────────
@@ -143,6 +189,108 @@ class ApiService {
     final res = await get('/api/auth/me');
     if (res.statusCode != 200) throw Exception('Session expired');
     return jsonDecode(res.body);
+  }
+
+  // ── Houses ─────────────────────────────────────────────────────
+  static Future<List<Map<String, dynamic>>> getHouses() async {
+    final res = await get('/api/houses');
+    if (res.statusCode != 200) throw Exception('Failed to fetch houses');
+    final data = jsonDecode(res.body);
+    final list = (data['houses'] as List)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    houses = list;
+
+    // Set activeHouse to the one with is_active == true
+    activeHouse = null;
+    for (final h in houses) {
+      if (h['is_active'] == true) {
+        activeHouse = h;
+        houseId = h['house_id'] as int?;
+        break;
+      }
+    }
+    // Fallback: use first house if none is marked active
+    if (activeHouse == null && houses.isNotEmpty) {
+      activeHouse = houses.first;
+      houseId = houses.first['house_id'] as int?;
+    }
+
+    return houses;
+  }
+
+  static Future<Map<String, dynamic>> createHouse(String location) async {
+    final res = await post('/api/houses', {'location': location});
+    if (res.statusCode != 200 && res.statusCode != 201) {
+      final data = jsonDecode(res.body);
+      throw Exception(data['detail'] ?? 'Failed to create house');
+    }
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    // Refresh houses list
+    await getHouses();
+    return data;
+  }
+
+  static Future<Map<String, dynamic>> joinHouse(
+      int houseId, String pin) async {
+    final res = await post('/api/houses/join', {
+      'house_id': houseId,
+      'pin': pin,
+    });
+    if (res.statusCode != 200) {
+      final data = jsonDecode(res.body);
+      throw Exception(data['detail'] ?? 'Failed to join house');
+    }
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    // Refresh houses list
+    await getHouses();
+    return data;
+  }
+
+  static Future<void> switchHouse(int houseId) async {
+    final res = await post('/api/houses/switch', {'house_id': houseId});
+    if (res.statusCode != 200) {
+      final data = jsonDecode(res.body);
+      throw Exception(data['detail'] ?? 'Failed to switch house');
+    }
+    // Update local state
+    await getHouses();
+  }
+
+  static Future<List<Map<String, dynamic>>> getMembers(int houseId) async {
+    final res = await get('/api/houses/$houseId/members');
+    if (res.statusCode != 200) throw Exception('Failed to fetch members');
+    final data = jsonDecode(res.body);
+    return (data['members'] as List)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  static Future<void> kickMember(int houseId, int accId) async {
+    final res = await delete('/api/houses/$houseId/members/$accId');
+    if (res.statusCode != 200) {
+      final data = jsonDecode(res.body);
+      throw Exception(data['detail'] ?? 'Failed to remove member');
+    }
+  }
+
+  static Future<String> resetPin(int houseId) async {
+    final res = await post('/api/houses/$houseId/reset-pin', {});
+    if (res.statusCode != 200) {
+      final data = jsonDecode(res.body);
+      throw Exception(data['detail'] ?? 'Failed to reset PIN');
+    }
+    final data = jsonDecode(res.body);
+    return data['join_pin'] as String;
+  }
+
+  static Future<Map<String, dynamic>> getChatHistory(int houseId,
+      {int? before}) async {
+    String path = '/api/houses/$houseId/chat';
+    if (before != null) path += '?before=$before';
+    final res = await get(path);
+    if (res.statusCode != 200) throw Exception('Failed to fetch chat');
+    return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   // ── Devices ─────────────────────────────────────────────────────
