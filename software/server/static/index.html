@@ -1,0 +1,1985 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Maya Smart Home</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg-space: #070913;
+      --bg-card: rgba(13, 17, 39, 0.45);
+      --bg-card-hover: rgba(18, 24, 54, 0.65);
+      --bg-glass-input: rgba(255, 255, 255, 0.03);
+      --border-glow: rgba(99, 102, 241, 0.25);
+      --border-glow-active: rgba(99, 102, 241, 0.6);
+      --text-glow: 0 0 10px rgba(165, 180, 252, 0.5);
+      
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --text-dark: #64748b;
+      
+      --primary: #6366f1;
+      --primary-gradient: linear-gradient(135deg, #818cf8, #6366f1);
+      --success: #10b981;
+      --success-gradient: linear-gradient(135deg, #34d399, #10b981);
+      --danger: #ef4444;
+      --danger-gradient: linear-gradient(135deg, #f87171, #ef4444);
+      --warning: #f59e0b;
+      
+      --ch1-color: #ff6b6b;
+      --ch2-color: #2ecc71;
+      --ch3-color: #3498db;
+    }
+    
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background: var(--bg-space);
+      color: var(--text-main);
+      min-height: 100vh;
+      overflow-x: hidden;
+      position: relative;
+    }
+    
+    /* Dynamic Cosmic Background Glows */
+    body::before {
+      content: '';
+      position: fixed;
+      top: -20%;
+      left: -20%;
+      width: 140%;
+      height: 140%;
+      background: 
+        radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.08) 0%, transparent 40%),
+        radial-gradient(circle at 80% 80%, rgba(139, 92, 246, 0.06) 0%, transparent 45%),
+        radial-gradient(circle at 50% 50%, rgba(59, 130, 246, 0.05) 0%, transparent 50%);
+      z-index: -1;
+      animation: drift 25s ease-in-out infinite alternate;
+    }
+    
+    @keyframes drift {
+      0% { transform: translate(0, 0) scale(1); }
+      100% { transform: translate(3%, -3%) scale(1.05); }
+    }
+    
+    /* Header Navigation */
+    header {
+      padding: 1.25rem 2rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      background: rgba(7, 9, 19, 0.8);
+      backdrop-filter: blur(20px);
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      text-decoration: none;
+      color: inherit;
+    }
+    
+    .logo-icon {
+      width: 40px;
+      height: 40px;
+      background: var(--primary-gradient);
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      font-size: 20px;
+      box-shadow: 0 0 20px rgba(99, 102, 241, 0.4);
+    }
+    
+    .logo h1 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.5rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #ffffff, #a5b4fc);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -0.02em;
+    }
+    
+    .logo-badge {
+      font-size: 0.65rem;
+      padding: 0.15rem 0.5rem;
+      background: rgba(99, 102, 241, 0.15);
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      border-radius: 20px;
+      color: #a5b4fc;
+      text-transform: uppercase;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+    }
+    
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    
+    .conn-status {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      background: rgba(255,255,255,0.03);
+      padding: 0.35rem 0.75rem;
+      border-radius: 20px;
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+    
+    .conn-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--text-dark);
+    }
+    .conn-dot.online {
+      background: var(--success);
+      box-shadow: 0 0 8px var(--success);
+      animation: pulse 2s infinite;
+    }
+    .conn-dot.offline {
+      background: var(--danger);
+      box-shadow: 0 0 8px var(--danger);
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.6; transform: scale(0.85); }
+    }
+    
+    /* Layout Framework */
+    main {
+      padding: 2rem;
+      max-width: 1400px;
+      margin: 0 auto;
+      min-height: calc(100vh - 80px);
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .view {
+      display: none;
+      animation: fadeIn 0.4s ease-out forwards;
+    }
+    
+    .view.active {
+      display: block;
+    }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(15px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    /* Glassmorphic Cards */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      border-radius: 24px;
+      backdrop-filter: blur(25px);
+      -webkit-backdrop-filter: blur(25px);
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3);
+      transition: all 0.3s ease;
+      overflow: hidden;
+    }
+    
+    .card:hover {
+      border-color: var(--border-glow);
+      box-shadow: 0 25px 60px rgba(99, 102, 241, 0.05);
+    }
+    
+    /* Welcome & Landing Hero View */
+    .hero-container {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 3rem;
+      align-items: center;
+      padding: 3rem 0;
+    }
+    
+    .hero-text h2 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 3.5rem;
+      font-weight: 800;
+      line-height: 1.15;
+      margin-bottom: 1.5rem;
+      background: linear-gradient(135deg, #ffffff 30%, #a5b4fc 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -0.03em;
+    }
+    
+    .hero-text p {
+      font-size: 1.15rem;
+      line-height: 1.6;
+      color: var(--text-muted);
+      margin-bottom: 2.5rem;
+    }
+    
+    .hero-features {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+    }
+    
+    .feature-item {
+      background: rgba(255,255,255,0.02);
+      border: 1px solid rgba(255,255,255,0.05);
+      border-radius: 16px;
+      padding: 1.25rem;
+    }
+    
+    .feature-item h3 {
+      font-size: 1rem;
+      margin-bottom: 0.5rem;
+      color: #a5b4fc;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    
+    .feature-item p {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-bottom: 0;
+    }
+    
+    /* Auth Form Tabs */
+    .auth-card {
+      width: 100%;
+      max-width: 480px;
+      margin-left: auto;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    
+    .auth-tabs {
+      display: flex;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      background: rgba(0, 0, 0, 0.2);
+    }
+    
+    .auth-tab-btn {
+      flex: 1;
+      padding: 1.25rem;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-family: inherit;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s;
+      position: relative;
+    }
+    
+    .auth-tab-btn.active {
+      color: var(--text-main);
+      background: rgba(99, 102, 241, 0.05);
+    }
+    
+    .auth-tab-btn.active::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: var(--primary-gradient);
+      box-shadow: 0 0 10px var(--primary);
+    }
+    
+    .auth-body {
+      padding: 2.25rem;
+    }
+    
+    .auth-panel {
+      display: none;
+    }
+    
+    .auth-panel.active {
+      display: block;
+      animation: fadeIn 0.3s ease-out;
+    }
+    
+    /* Inputs & Forms */
+    .form-group {
+      margin-bottom: 1.5rem;
+    }
+    
+    .form-group label {
+      display: block;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.5rem;
+    }
+    
+    .input-wrapper {
+      position: relative;
+    }
+    
+    input, select {
+      width: 100%;
+      padding: 0.85rem 1.25rem;
+      background: var(--bg-glass-input);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      color: var(--text-main);
+      font-family: inherit;
+      font-size: 0.95rem;
+      outline: none;
+      transition: all 0.2s ease;
+    }
+    
+    input:focus, select:focus {
+      border-color: var(--border-glow-active);
+      background: rgba(99, 102, 241, 0.04);
+      box-shadow: 0 0 15px rgba(99, 102, 241, 0.15);
+    }
+    
+    select option {
+      background: #0d1127;
+      color: var(--text-main);
+    }
+    
+    /* Buttons */
+    .btn {
+      width: 100%;
+      padding: 0.9rem 1.5rem;
+      border: none;
+      border-radius: 12px;
+      font-family: inherit;
+      font-size: 0.95rem;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    
+    .btn-primary {
+      background: var(--primary-gradient);
+      color: white;
+      box-shadow: 0 4px 20px rgba(99, 102, 241, 0.3);
+    }
+    
+    .btn-primary:hover {
+      box-shadow: 0 6px 25px rgba(99, 102, 241, 0.55);
+      transform: translateY(-2px);
+    }
+    
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: var(--text-main);
+    }
+    
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+    
+    /* Dashboard Frame */
+    .dash-grid {
+      display: grid;
+      grid-template-columns: 1fr 360px;
+      gap: 2rem;
+      margin-top: 1rem;
+    }
+    
+    .dash-header {
+      background: var(--bg-card);
+      border: 1px solid rgba(255,255,255,0.03);
+      padding: 1.5rem 2rem;
+      border-radius: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 2rem;
+      backdrop-filter: blur(25px);
+    }
+    
+    .user-profile {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+    
+    .user-avatar {
+      width: 48px;
+      height: 48px;
+      background: var(--primary-gradient);
+      border-radius: 14px;
+      display: grid;
+      place-items: center;
+      font-size: 22px;
+      font-weight: 700;
+    }
+    
+    .user-details h2 {
+      font-size: 1.25rem;
+      font-weight: 700;
+    }
+    
+    .user-details span {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+    
+    .role-badge {
+      display: inline-block;
+      font-size: 0.65rem;
+      font-weight: 800;
+      padding: 0.15rem 0.5rem;
+      border-radius: 12px;
+      text-transform: uppercase;
+      margin-left: 0.5rem;
+    }
+    
+    .role-badge.parent { background: rgba(99,102,241,0.15); color: #818cf8; border: 1px solid rgba(99,102,241,0.2); }
+    .role-badge.child { background: rgba(16,185,129,0.15); color: #34d399; border: 1px solid rgba(16,185,129,0.2); }
+    
+    /* Device Cards Grid */
+    .section-title {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 1.25rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    
+    .devices-container {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+      gap: 1.5rem;
+    }
+    
+    .device-card {
+      background: var(--bg-card);
+      border: 1px solid rgba(255,255,255,0.03);
+      border-radius: 20px;
+      padding: 1.5rem;
+      position: relative;
+      overflow: hidden;
+      transition: all 0.3s ease;
+      backdrop-filter: blur(25px);
+    }
+    
+    .device-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 4px;
+      background: var(--primary-gradient);
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    
+    .device-card.online::before {
+      opacity: 1;
+    }
+    
+    .device-card:hover {
+      border-color: var(--border-glow);
+      transform: translateY(-4px);
+    }
+    
+    .dev-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 1.25rem;
+    }
+    
+    .dev-info h3 {
+      font-size: 1.1rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    
+    .dev-info span {
+      font-size: 0.75rem;
+      color: var(--text-dark);
+      font-family: monospace;
+    }
+    
+    .dev-badge {
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 0.25rem 0.6rem;
+      border-radius: 20px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .dev-badge.online { background: rgba(16,185,129,0.1); color: var(--success); border: 1px solid rgba(16,185,129,0.2); }
+    .dev-badge.offline { background: rgba(239,68,68,0.1); color: var(--danger); border: 1px solid rgba(239,68,68,0.2); }
+    
+    /* Channel Switch */
+    .channel-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.75rem 1rem;
+      background: rgba(0,0,0,0.15);
+      border-radius: 14px;
+      margin-bottom: 0.5rem;
+      border: 1px solid rgba(255,255,255,0.02);
+    }
+    
+    .channel-label {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    
+    .channel-indicator {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--text-dark);
+      transition: all 0.3s;
+    }
+    
+    .channel-row.on .channel-indicator {
+      box-shadow: 0 0 10px currentColor;
+    }
+    
+    /* Custom Toggle Switch */
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 50px;
+      height: 26px;
+    }
+    
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: rgba(255,255,255,0.1);
+      border: 1px solid rgba(255,255,255,0.05);
+      transition: .4s;
+      border-radius: 34px;
+    }
+    
+    .slider::before {
+      position: absolute;
+      content: "";
+      height: 18px;
+      width: 18px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: .4s;
+      border-radius: 50%;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    }
+    
+    input:checked + .slider {
+      background-color: var(--primary);
+    }
+    
+    input:checked + .slider::before {
+      transform: translateX(24px);
+    }
+    
+    /* Device Metadata */
+    .dev-meta {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.5rem;
+      margin-top: 1rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid rgba(255,255,255,0.04);
+      font-size: 0.7rem;
+      color: var(--text-muted);
+    }
+    
+    /* Sidebar Widgets */
+    .sidebar {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+    
+    .widget-header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .widget-header h3 {
+      font-size: 0.95rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #a5b4fc;
+    }
+    
+    .widget-body {
+      padding: 1.25rem 1.5rem;
+    }
+    
+    /* Messages & Chat Box */
+    .chat-box {
+      height: 250px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+      padding-right: 0.25rem;
+    }
+    
+    .chat-box::-webkit-scrollbar {
+      width: 4px;
+    }
+    .chat-box::-webkit-scrollbar-thumb {
+      background: rgba(255,255,255,0.1);
+      border-radius: 10px;
+    }
+    
+    .msg-bubble {
+      background: rgba(255,255,255,0.02);
+      border: 1px solid rgba(255,255,255,0.04);
+      border-radius: 12px;
+      padding: 0.65rem 0.85rem;
+      font-size: 0.8rem;
+    }
+    
+    .msg-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.65rem;
+      color: var(--text-muted);
+      margin-bottom: 0.25rem;
+    }
+    
+    .msg-sender {
+      font-weight: 700;
+      color: #a5b4fc;
+    }
+    
+    .chat-input-wrap {
+      display: flex;
+      gap: 0.5rem;
+    }
+    
+    .chat-input-wrap input {
+      flex: 1;
+      padding: 0.65rem 1rem;
+      font-size: 0.85rem;
+      border-radius: 10px;
+    }
+    
+    .chat-input-wrap .btn {
+      width: auto;
+      padding: 0 1rem;
+      border-radius: 10px;
+    }
+    
+    /* Child list and permissions */
+    .child-list-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.65rem 0.85rem;
+      background: rgba(255,255,255,0.02);
+      border: 1px solid rgba(255,255,255,0.04);
+      border-radius: 10px;
+      margin-bottom: 0.5rem;
+    }
+    
+    .child-list-item span {
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    
+    .btn-perm {
+      padding: 0.35rem 0.65rem;
+      font-size: 0.7rem;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    
+    /* Modal styles */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(7, 9, 19, 0.85);
+      backdrop-filter: blur(15px);
+      z-index: 10000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      animation: fadeIn 0.2s ease-out;
+    }
+    
+    .modal-card {
+      width: 100%;
+      max-width: 500px;
+      margin: 1.5rem;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    
+    .modal-header {
+      padding: 1.25rem 1.5rem;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .modal-close {
+      background: none;
+      border: none;
+      font-size: 1.5rem;
+      color: var(--text-muted);
+      cursor: pointer;
+    }
+    
+    .modal-body {
+      padding: 1.5rem;
+    }
+    
+    /* Toasts */
+    .toast-container {
+      position: fixed;
+      bottom: 2rem;
+      right: 2rem;
+      z-index: 100000;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    
+    .toast {
+      padding: 1rem 1.5rem;
+      border-radius: 12px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+      backdrop-filter: blur(10px);
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      animation: slideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1) forwards,
+                 slideOut 0.3s cubic-bezier(0.4, 0, 0.2, 1) 2.7s forwards;
+      border: 1px solid;
+    }
+    
+    .toast.success { background: rgba(16, 185, 129, 0.1); color: var(--success); border-color: rgba(16, 185, 129, 0.2); }
+    .toast.error { background: rgba(239, 68, 68, 0.1); color: var(--danger); border-color: rgba(239, 68, 68, 0.2); }
+    .toast.info { background: rgba(99, 102, 241, 0.1); color: #a5b4fc; border-color: rgba(99, 102, 241, 0.2); }
+    
+    @keyframes slideIn { from { opacity: 0; transform: translateX(50px); } to { opacity: 1; transform: translateX(0); } }
+    @keyframes slideOut { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateY(-10px); } }
+    
+    .empty-state {
+      text-align: center;
+      padding: 2.5rem 1.5rem;
+      color: var(--text-dark);
+      border: 2px dashed rgba(255,255,255,0.03);
+      border-radius: 16px;
+    }
+    
+    .empty-state-icon {
+      font-size: 2rem;
+      margin-bottom: 0.5rem;
+      opacity: 0.3;
+    }
+    
+    .loading-spinner {
+      border: 3px solid rgba(255, 255, 255, 0.05);
+      border-top: 3px solid var(--primary);
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto;
+    }
+    
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    
+    /* Responsive styles */
+    @media (max-width: 1024px) {
+      .dash-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 768px) {
+      .hero-container { grid-template-columns: 1fr; gap: 2rem; padding: 1rem 0; }
+      .hero-text h2 { font-size: 2.5rem; }
+      .hero-features { grid-template-columns: 1fr; }
+      .auth-card { margin: 0 auto; }
+      header { padding: 1rem; }
+      main { padding: 1rem; }
+      .dash-header { flex-direction: column; gap: 1rem; text-align: center; padding: 1rem; }
+    }
+  </style>
+</head>
+<body>
+  
+  <header>
+    <a href="#" class="logo">
+      <div class="logo-icon">⚡</div>
+      <div>
+        <h1>Maya Smart Home</h1>
+      </div>
+      <span class="logo-badge">Web Portal</span>
+    </a>
+    <div class="header-right">
+      <div class="conn-status" id="wsConnStatus">
+        <div class="conn-dot" id="wsConnDot"></div>
+        <span id="wsConnText">Disconnected</span>
+      </div>
+      <button id="logoutBtn" onclick="logout()" class="btn btn-secondary" style="display:none; padding: 0.4rem 0.8rem; font-size: 0.8rem; width: auto; border-radius: 8px;">Logout</button>
+    </div>
+  </header>
+
+  <main>
+    
+    <!-- ==========================================
+         VIEW: Welcome / Auth (Logged Out)
+         ========================================== -->
+    <div id="view-welcome" class="view active">
+      <div class="hero-container">
+        
+        <div class="hero-text">
+          <h2>Take control of your smart home.</h2>
+          <p>Maya Smart Home is an advanced IoT management ecosystem. Manage accounts, register smart sockets, control power channels, and coordinate household permissions in real time.</p>
+          
+          <div class="hero-features">
+            <div class="feature-item">
+              <h3><span>🔌</span> 3-Channel Control</h3>
+              <p>Toggle individual relay outputs or command all channels simultaneously.</p>
+            </div>
+            <div class="feature-item">
+              <h3><span>📡</span> Real-time Broadcast</h3>
+              <p>Powered by WebSockets to synchronize states between users instantly.</p>
+            </div>
+            <div class="feature-item">
+              <h3><span>👥</span> Child Safeguards</h3>
+              <p>Configure channel-level permissions with a dedicated child dashboard.</p>
+            </div>
+            <div class="feature-item">
+              <h3><span>💬</span> Household Chat</h3>
+              <p>An integrated message hub to log actions and coordinate with family.</p>
+            </div>
+          </div>
+        </div>
+        
+        <div class="card auth-card">
+          <div class="auth-tabs">
+            <button class="auth-tab-btn active" onclick="switchAuthTab('login')">Sign In</button>
+            <button class="auth-tab-btn" onclick="switchAuthTab('register')">Register House</button>
+            <button class="auth-tab-btn" onclick="switchAuthTab('child-login')">Child Access</button>
+          </div>
+          <div class="auth-body">
+            
+            <!-- Parent/Admin Login -->
+            <div id="auth-panel-login" class="auth-panel active">
+              <form onsubmit="handleLogin(event)">
+                <div class="form-group">
+                  <label for="loginEmail">Email Address</label>
+                  <input type="email" id="loginEmail" required placeholder="name@domain.com">
+                </div>
+                <div class="form-group">
+                  <label for="loginPassword">Password</label>
+                  <input type="password" id="loginPassword" required placeholder="••••••••">
+                </div>
+                <button type="submit" class="btn btn-primary">Sign In to Dashboard</button>
+              </form>
+            </div>
+            
+            <!-- Parent Register -->
+            <div id="auth-panel-register" class="auth-panel">
+              <form onsubmit="handleRegister(event)">
+                <div class="form-group">
+                  <label for="registerName">Full Name</label>
+                  <input type="text" id="registerName" required placeholder="Alex Mercer">
+                </div>
+                <div class="form-group">
+                  <label for="registerEmail">Email Address</label>
+                  <input type="email" id="registerEmail" required placeholder="alex@domain.com">
+                </div>
+                <div class="form-group">
+                  <label for="registerPassword">Password</label>
+                  <input type="password" id="registerPassword" required placeholder="••••••••" minlength="6">
+                </div>
+                <div class="form-group">
+                  <label for="registerLocation">Home Location (optional)</label>
+                  <input type="text" id="registerLocation" placeholder="Living Room, Kuala Lumpur">
+                </div>
+                <button type="submit" class="btn btn-primary">Create Household Account</button>
+              </form>
+            </div>
+            
+            <!-- Child Login -->
+            <div id="auth-panel-child-login" class="auth-panel">
+              <form onsubmit="handleChildLogin(event)">
+                <div class="form-group">
+                  <label for="childIdInput">Child Account ID</label>
+                  <input type="number" id="childIdInput" required placeholder="e.g. 1" min="1">
+                  <span style="font-size: 0.65rem; color: var(--text-dark); margin-top: 0.25rem; display: block;">Ask your parents for your Child ID number.</span>
+                </div>
+                <div class="form-group">
+                  <label for="childPinInput">4-Digit Security PIN</label>
+                  <input type="password" id="childPinInput" required placeholder="••••" maxlength="4" pattern="[0-9]*" inputmode="numeric">
+                </div>
+                <button type="submit" class="btn btn-primary">Access Child Dashboard</button>
+              </form>
+            </div>
+            
+          </div>
+        </div>
+        
+      </div>
+    </div>
+    
+    <!-- ==========================================
+         VIEW: Main App Dashboard (Logged In)
+         ========================================== -->
+    <div id="view-dashboard" class="view">
+      
+      <div class="dash-header">
+        <div class="user-profile">
+          <div class="user-avatar" id="avatarText">P</div>
+          <div class="user-details">
+            <h2 id="userNameDisplay">Welcome Home <span class="role-badge parent" id="roleBadge">Parent</span></h2>
+            <span>Household Space ID: <strong id="houseIdDisplay">—</strong></span>
+          </div>
+        </div>
+        <div>
+          <!-- Show only to parents -->
+          <button id="btnOpenRegDevice" onclick="openModal('modal-reg-device')" class="btn btn-secondary" style="width:auto; padding: 0.65rem 1.25rem; font-size: 0.85rem; border-radius: 12px;">➕ Register Socket</button>
+        </div>
+      </div>
+      
+      <div class="dash-grid">
+        
+        <!-- Left: Device Toggles -->
+        <div class="dash-left">
+          <div class="section-title">
+            <span>📡</span> Household Smart Devices
+          </div>
+          <div class="devices-container" id="dashboardDevices">
+            <!-- Dynamically populated -->
+            <div class="card" style="grid-column: 1/-1; padding: 3rem; text-align: center;">
+              <div class="loading-spinner"></div>
+              <p style="margin-top: 1rem; color: var(--text-muted);">Fetching connected devices...</p>
+            </div>
+          </div>
+        </div>
+        
+        <!-- Right: Control Panel / Sidebar Widgets -->
+        <div class="sidebar">
+          
+          <!-- Household Chat -->
+          <div class="card">
+            <div class="widget-header">
+              <h3>💬 Household Broadcasts</h3>
+            </div>
+            <div class="widget-body">
+              <div class="chat-box" id="chatContainer">
+                <div class="empty-state">
+                  <div class="empty-state-icon">💬</div>
+                  <p>No messages in chat.</p>
+                </div>
+              </div>
+              <form onsubmit="handleSendMsg(event)">
+                <div class="chat-input-wrap">
+                  <input type="text" id="chatMsgInput" placeholder="Send a message..." required>
+                  <button type="submit" class="btn btn-primary">Send</button>
+                </div>
+              </form>
+            </div>
+          </div>
+          
+          <!-- Children Profiles (Visible to Parents only) -->
+          <div class="card" id="widgetChildrenPanel">
+            <div class="widget-header">
+              <h3>👥 Children Profiles</h3>
+              <button onclick="openModal('modal-create-child')" class="btn btn-secondary" style="width:auto; padding:0.25rem 0.5rem; font-size:0.75rem; border-radius:6px;">Add</button>
+            </div>
+            <div class="widget-body">
+              <div id="childrenContainer">
+                <div class="empty-state">
+                  <div class="empty-state-icon">👥</div>
+                  <p>No child accounts added.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          
+        </div>
+        
+      </div>
+    </div>
+    
+  </main>
+
+  <!-- ==========================================
+       MODAL: Register Device
+       ========================================== -->
+  <div class="modal-overlay" id="modal-reg-device">
+    <div class="card modal-card">
+      <div class="modal-header">
+        <h3>🔌 Register New Smart Socket</h3>
+        <button class="modal-close" onclick="closeModal('modal-reg-device')">×</button>
+      </div>
+      <div class="modal-body">
+        <form onsubmit="handleRegDevice(event)">
+          <div class="form-group">
+            <label for="regDeviceId">Device ID</label>
+            <input type="text" id="regDeviceId" required placeholder="e.g. esp32-9f83b1c1">
+            <span style="font-size: 0.65rem; color: var(--text-dark); margin-top: 0.25rem; display: block;">Input the unique identifier broadcasted by the ESP32.</span>
+          </div>
+          <div class="form-group">
+            <label for="regDeviceName">Custom Device Name</label>
+            <input type="text" id="regDeviceName" required placeholder="e.g. Living Room Socket">
+          </div>
+          <div class="form-group">
+            <label for="regDevicePrice">Purchase Price ($)</label>
+            <input type="number" id="regDevicePrice" placeholder="e.g. 15.90" step="0.01" min="0">
+          </div>
+          <button type="submit" class="btn btn-primary">Register Socket</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================
+       MODAL: Create Child Account
+       ========================================== -->
+  <div class="modal-overlay" id="modal-create-child">
+    <div class="card modal-card">
+      <div class="modal-header">
+        <h3>👥 Add Child Account</h3>
+        <button class="modal-close" onclick="closeModal('modal-create-child')">×</button>
+      </div>
+      <div class="modal-body">
+        <form onsubmit="handleCreateChild(event)">
+          <div class="form-group">
+            <label for="createChildName">Child Name</label>
+            <input type="text" id="createChildName" required placeholder="e.g. Tommy">
+          </div>
+          <div class="form-group">
+            <label for="createChildPin">Security Login PIN (4 digits)</label>
+            <input type="password" id="createChildPin" required placeholder="1234" maxlength="4" pattern="[0-9]*" inputmode="numeric">
+          </div>
+          <button type="submit" class="btn btn-primary">Create Profile</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================
+       MODAL: Child Permissions Matrix
+       ========================================== -->
+  <div class="modal-overlay" id="modal-permissions">
+    <div class="card modal-card">
+      <div class="modal-header">
+        <h3>🔒 Channel Permissions: <span id="permModalChildName" style="color:var(--primary)">Child</span></h3>
+        <button class="modal-close" onclick="closeModal('modal-permissions')">×</button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="permModalChildId">
+        <div style="margin-bottom: 1rem; font-size: 0.8rem; color: var(--text-muted);">
+          Allow or deny this child access to control individual relay channels in the house.
+        </div>
+        <div style="display:flex; flex-direction:column; gap:0.75rem;" id="permissionsGrid">
+          <!-- Dynamically populated list of house relays -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- ==========================================
+       CLIENT APPLICATION LOGIC
+       ========================================== -->
+  <script>
+    const API_BASE = window.location.origin;
+    let currentUser = null;
+    let token = localStorage.getItem('user_token');
+    let isChildSession = localStorage.getItem('is_child_session') === 'true';
+    let socket = null;
+    let pollInterval = null;
+    
+    // Store current state of devices, relays, and permissions
+    let devices = [];
+    let relays = [];
+    let permissions = [];
+    let children = [];
+    
+    // UI Helpers
+    function showToast(msg, type = 'info') {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      toast.className = `toast ${type}`;
+      
+      let icon = 'ℹ️';
+      if (type === 'success') icon = '✅';
+      if (type === 'error') icon = '❌';
+      
+      toast.innerHTML = `<span>${icon}</span> <span>${msg}</span>`;
+      container.appendChild(toast);
+      
+      // Auto-remove toast
+      setTimeout(() => {
+        toast.remove();
+      }, 3000);
+    }
+    
+    function switchAuthTab(panel) {
+      document.querySelectorAll('.auth-tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.auth-panel').forEach(p => p.classList.remove('active'));
+      
+      // Find the tab button clicked
+      const clickedBtn = Array.from(document.querySelectorAll('.auth-tab-btn')).find(btn => 
+        btn.textContent.toLowerCase().includes(panel.replace('-', ' '))
+      );
+      if (clickedBtn) clickedBtn.classList.add('active');
+      
+      document.getElementById(`auth-panel-${panel}`).classList.add('active');
+    }
+    
+    function openModal(id) {
+      document.getElementById(id).style.display = 'flex';
+      
+      // Additional modal loads
+      if (id === 'modal-permissions') {
+        renderPermissionsModal();
+      }
+    }
+    
+    function closeModal(id) {
+      document.getElementById(id).style.display = 'none';
+    }
+    
+    // Auth & Session Management
+    function checkSession() {
+      if (token) {
+        loadUserProfile();
+      } else {
+        showView('welcome');
+      }
+    }
+    
+    async function loadUserProfile() {
+      try {
+        const headers = { 'Authorization': `Bearer ${token}` };
+        const res = await fetch(`${API_BASE}/api/auth/me`, { headers });
+        if (!res.ok) {
+          throw new Error('Session invalid');
+        }
+        
+        const data = await res.json();
+        currentUser = data;
+        isChildSession = data.role === 'child';
+        localStorage.setItem('is_child_session', String(isChildSession));
+        
+        setupDashboardUI();
+        showView('dashboard');
+        
+        // Connect Live Socket
+        connectWebSocket();
+        
+        // Start Periodic Polling as Backup
+        refreshDashboardData();
+        if (pollInterval) clearInterval(pollInterval);
+        pollInterval = setInterval(refreshDashboardData, 8000);
+        
+      } catch (err) {
+        console.error(err);
+        logout();
+      }
+    }
+    
+    function logout() {
+      token = null;
+      currentUser = null;
+      isChildSession = false;
+      localStorage.removeItem('user_token');
+      localStorage.removeItem('is_child_session');
+      
+      if (socket) {
+        socket.close();
+      }
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
+      
+      document.getElementById('logoutBtn').style.display = 'none';
+      updateWSStatusDot('disconnected');
+      showView('welcome');
+      showToast('Logged out successfully', 'info');
+    }
+    
+    function showView(viewId) {
+      document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+      document.getElementById(`view-${viewId}`).classList.add('active');
+    }
+    
+    // Login / Registration Actions
+    async function handleLogin(e) {
+      e.preventDefault();
+      const email = document.getElementById('loginEmail').value.trim();
+      const password = document.getElementById('loginPassword').value;
+      
+      try {
+        const res = await fetch(`${API_BASE}/api/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, password })
+        });
+        
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Invalid login credentials');
+        
+        token = data.token;
+        localStorage.setItem('user_token', token);
+        isChildSession = false;
+        localStorage.setItem('is_child_session', 'false');
+        
+        showToast(`Welcome back, ${data.name}!`, 'success');
+        loadUserProfile();
+        
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+    
+    async function handleRegister(e) {
+      e.preventDefault();
+      const name = document.getElementById('registerName').value.trim();
+      const email = document.getElementById('registerEmail').value.trim();
+      const password = document.getElementById('registerPassword').value;
+      const location = document.getElementById('registerLocation').value.trim();
+      
+      try {
+        const res = await fetch(`${API_BASE}/api/auth/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, email, password, location })
+        });
+        
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Registration failed');
+        
+        token = data.token;
+        localStorage.setItem('user_token', token);
+        isChildSession = false;
+        localStorage.setItem('is_child_session', 'false');
+        
+        showToast(`Account registered for house ID ${data.house_id}!`, 'success');
+        loadUserProfile();
+        
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+    
+    async function handleChildLogin(e) {
+      e.preventDefault();
+      const childId = document.getElementById('childIdInput').value;
+      const pin = document.getElementById('childPinInput').value;
+      
+      try {
+        const res = await fetch(`${API_BASE}/api/children/${childId}/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin })
+        });
+        
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Invalid PIN or Child ID');
+        
+        token = data.token;
+        localStorage.setItem('user_token', token);
+        isChildSession = true;
+        localStorage.setItem('is_child_session', 'true');
+        
+        showToast(`Welcome back, ${data.name}!`, 'success');
+        loadUserProfile();
+        
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+    
+    // Live WebSocket connection
+    function connectWebSocket() {
+      if (socket) {
+        socket.close();
+      }
+      
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${wsProtocol}//${window.location.host}/ws/mobile`;
+      
+      socket = new WebSocket(wsUrl);
+      
+      socket.onopen = () => {
+        updateWSStatusDot('connecting');
+        // Authenticate the socket
+        socket.send(JSON.stringify({ token }));
+      };
+      
+      socket.onmessage = (event) => {
+        const data = jsonParse(event.data);
+        if (!data) return;
+        
+        if (data.type === 'auth_ok') {
+          updateWSStatusDot('online');
+        } else if (data.type === 'device_update') {
+          updateDeviceState(data.device_id, data);
+        } else if (data.type === 'device_offline') {
+          updateDeviceOfflineState(data.device_id);
+        }
+      };
+      
+      socket.onclose = () => {
+        updateWSStatusDot('offline');
+        // Reconnect after 5 seconds if still logged in
+        if (token) {
+          setTimeout(connectWebSocket, 5000);
+        }
+      };
+      
+      socket.onerror = (err) => {
+        console.error('Socket error:', err);
+        updateWSStatusDot('offline');
+      };
+    }
+    
+    function updateWSStatusDot(status) {
+      const dot = document.getElementById('wsConnDot');
+      const text = document.getElementById('wsConnText');
+      
+      dot.className = 'conn-dot';
+      
+      if (status === 'online') {
+        dot.classList.add('online');
+        text.textContent = 'Live Synced';
+      } else if (status === 'connecting') {
+        dot.style.background = 'var(--warning)';
+        text.textContent = 'Authenticating...';
+      } else {
+        dot.classList.add('offline');
+        text.textContent = 'Live Disconnected';
+      }
+    }
+    
+    // Dashboard Logic & Content Building
+    function setupDashboardUI() {
+      document.getElementById('logoutBtn').style.display = 'block';
+      
+      // User Profile details
+      document.getElementById('avatarText').textContent = currentUser.name.charAt(0).toUpperCase();
+      document.getElementById('userNameDisplay').innerHTML = `Welcome Home, ${currentUser.name} <span class="role-badge ${isChildSession ? 'child' : 'parent'}">${isChildSession ? 'Child' : 'Parent'}</span>`;
+      document.getElementById('houseIdDisplay').textContent = currentUser.house_id;
+      
+      // Layout checks based on roles
+      if (isChildSession) {
+        document.getElementById('btnOpenRegDevice').style.display = 'none';
+        document.getElementById('widgetChildrenPanel').style.display = 'none';
+      } else {
+        document.getElementById('btnOpenRegDevice').style.display = 'inline-flex';
+        document.getElementById('widgetChildrenPanel').style.display = 'block';
+      }
+    }
+    
+    async function refreshDashboardData() {
+      if (!token) return;
+      try {
+        const headers = { 'Authorization': `Bearer ${token}` };
+        
+        // Fetch devices
+        const devRes = await fetch(`${API_BASE}/api/devices`, { headers });
+        if (devRes.ok) {
+          const devData = await devRes.json();
+          devices = devData.devices || [];
+        }
+        
+        // Fetch household chat
+        const msgRes = await fetch(`${API_BASE}/api/messages`, { headers });
+        if (msgRes.ok) {
+          const msgData = await msgRes.json();
+          renderChat(msgData.messages || []);
+        }
+        
+        // Parent-only fetches
+        if (!isChildSession) {
+          // Fetch children list
+          const childRes = await fetch(`${API_BASE}/api/children`, { headers });
+          if (childRes.ok) {
+            const childData = await childRes.json();
+            children = childData.children || [];
+            renderChildren(children);
+          }
+          
+          // Fetch house relays
+          const relayRes = await fetch(`${API_BASE}/api/relays`, { headers });
+          if (relayRes.ok) {
+            const relayData = await relayRes.json();
+            relays = relayData.relays || [];
+          }
+          
+          // Fetch permissions
+          const permRes = await fetch(`${API_BASE}/api/permissions`, { headers });
+          if (permRes.ok) {
+            const permData = await permRes.json();
+            permissions = permData.permissions || [];
+          }
+        } else {
+          // Child session: fetch child permissions to filter available channels
+          const myChildId = currentUser.acc_id; // in child tokens, the subject acc_id is child_id
+          const permRes = await fetch(`${API_BASE}/api/permissions?child_id=${myChildId}`, { headers });
+          if (permRes.ok) {
+            const permData = await permRes.json();
+            permissions = permData.permissions || [];
+          }
+        }
+        
+        // Render toggles
+        renderDevices();
+        
+      } catch (err) {
+        console.error('Error fetching dashboard data:', err);
+      }
+    }
+    
+    function renderDevices() {
+      const container = document.getElementById('dashboardDevices');
+      
+      // Filter list if child session
+      let displayDevices = [...devices];
+      
+      if (isChildSession) {
+        // Find which relays are allowed for this child
+        const allowedRelayIds = permissions
+          .filter(p => p.is_allowed)
+          .map(p => p.relay_id);
+        
+        // For children, if there is no explicit permissions loaded yet, allow nothing
+        // Or if we check allowed channels, we can render the switches in a disabled state
+      }
+      
+      if (displayDevices.length === 0) {
+        container.innerHTML = `
+          <div class="card" style="grid-column: 1/-1; padding: 3rem; text-align: center;">
+            <div class="empty-state-icon" style="font-size: 2.5rem; margin-bottom: 1rem; opacity: 0.35;">📡</div>
+            <p style="color: var(--text-muted);">No smart sockets connected to your house ID yet.</p>
+            ${isChildSession ? '' : '<p style="font-size: 0.85rem; color: var(--text-dark); margin-top: 0.5rem;">Use the "Register Socket" button above to link a socket.</p>'}
+          </div>
+        `;
+        return;
+      }
+      
+      container.innerHTML = displayDevices.map(d => {
+        // Child filter: check allowed relays for this device
+        // We know channel_number matches relays. In our app design:
+        // Relays are named "Channel 1", "Channel 2", "Channel 3".
+        // Let's check which channels are allowed.
+        const isCh1Allowed = isChannelAllowedForChild(d.device_id, 1);
+        const isCh2Allowed = isChannelAllowedForChild(d.device_id, 2);
+        const isCh3Allowed = isChannelAllowedForChild(d.device_id, 3);
+        
+        // If child session, and all channels are disallowed, we still show the device card but disable everything
+        
+        return `
+          <div class="device-card ${d.online ? 'online' : ''}" id="card-${d.device_id}">
+            <div class="dev-header">
+              <div class="dev-info">
+                <h3>🔌 ${escapeHtml(d.name)}</h3>
+                <span>ID: ${escapeHtml(d.device_id)}</span>
+              </div>
+              <span class="dev-badge ${d.online ? 'online' : 'offline'}">${d.online ? '● Online' : '● Offline'}</span>
+            </div>
+            
+            <!-- Channel 1 -->
+            <div class="channel-row ${d.ch1 === 'on' ? 'on' : ''}" id="row-${d.device_id}-1" style="color: ${d.ch1 === 'on' ? 'var(--ch1-color)' : 'inherit'}">
+              <span class="channel-label">
+                <span class="channel-indicator" style="background-color: var(--ch1-color)"></span>
+                Channel 1
+              </span>
+              <label class="switch">
+                <input type="checkbox" 
+                       id="switch-${d.device_id}-1" 
+                       ${d.ch1 === 'on' ? 'checked' : ''} 
+                       ${(isChildSession && !isCh1Allowed) || !d.online ? 'disabled' : ''} 
+                       onchange="toggleChannel('${d.device_id}', 1, this.checked)">
+                <span class="slider"></span>
+              </label>
+            </div>
+            
+            <!-- Channel 2 -->
+            <div class="channel-row ${d.ch2 === 'on' ? 'on' : ''}" id="row-${d.device_id}-2" style="color: ${d.ch2 === 'on' ? 'var(--ch2-color)' : 'inherit'}">
+              <span class="channel-label">
+                <span class="channel-indicator" style="background-color: var(--ch2-color)"></span>
+                Channel 2
+              </span>
+              <label class="switch">
+                <input type="checkbox" 
+                       id="switch-${d.device_id}-2" 
+                       ${d.ch2 === 'on' ? 'checked' : ''} 
+                       ${(isChildSession && !isCh2Allowed) || !d.online ? 'disabled' : ''} 
+                       onchange="toggleChannel('${d.device_id}', 2, this.checked)">
+                <span class="slider"></span>
+              </label>
+            </div>
+            
+            <!-- Channel 3 -->
+            <div class="channel-row ${d.ch3 === 'on' ? 'on' : ''}" id="row-${d.device_id}-3" style="color: ${d.ch3 === 'on' ? 'var(--ch3-color)' : 'inherit'}">
+              <span class="channel-label">
+                <span class="channel-indicator" style="background-color: var(--ch3-color)"></span>
+                Channel 3
+              </span>
+              <label class="switch">
+                <input type="checkbox" 
+                       id="switch-${d.device_id}-3" 
+                       ${d.ch3 === 'on' ? 'checked' : ''} 
+                       ${(isChildSession && !isCh3Allowed) || !d.online ? 'disabled' : ''} 
+                       onchange="toggleChannel('${d.device_id}', 3, this.checked)">
+                <span class="slider"></span>
+              </label>
+            </div>
+            
+            <div class="dev-meta">
+              <div>IP: ${escapeHtml(d.ip) || '—'}</div>
+              <div>Uptime: ${formatUptime(d.last_uptime_ms)}</div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+    
+    function isChannelAllowedForChild(deviceId, channelNum) {
+      if (!isChildSession) return true; // Parents can control everything
+      
+      // Find the corresponding relay in cached relays
+      // Wait, since children don't fetch the relays endpoint, how do they check allowed relay?
+      // In child session, permissions has the allowed list of p.relay_id.
+      // But they don't have the relay mapping locally.
+      // To work around this without the `/api/relays` endpoint for children (who can't access it):
+      // We can have the backend handle the permission check (which it does, returning 403 if disallowed).
+      // But visually, how do we show it?
+      // Actually, if we want the child's UI to lock the switch, we need to know the relay_id.
+      // Let's modify our new `/api/relays` endpoint in main.py to allow both Parents AND Children!
+      // This is a great design decision. I will make sure the GET `/api/relays` endpoint allows `get_current_user_or_child` instead of `get_current_user`.
+      // Let's assume they have it. We find the relay:
+      const relay = relays.find(r => r.device_id === deviceId && r.channel_number === channelNum);
+      if (!relay) return false; // Default to blocked if not loaded yet
+      
+      const perm = permissions.find(p => p.relay_id === relay.relay_id);
+      return perm ? perm.is_allowed : false;
+    }
+    
+    function updateDeviceState(deviceId, wsData) {
+      const devIndex = devices.findIndex(d => d.device_id === deviceId);
+      if (devIndex !== -1) {
+        devices[devIndex].ch1 = wsData.ch1;
+        devices[devIndex].ch2 = wsData.ch2;
+        devices[devIndex].ch3 = wsData.ch3;
+        devices[devIndex].online = true;
+      }
+      
+      // Update DOM directly for smooth micro-animations
+      const card = document.getElementById(`card-${deviceId}`);
+      if (card) {
+        card.classList.add('online');
+        const badge = card.querySelector('.dev-badge');
+        badge.className = 'dev-badge online';
+        badge.textContent = '● Online';
+      }
+      
+      const chStates = [wsData.ch1, wsData.ch2, wsData.ch3];
+      for (let ch = 1; ch <= 3; ch++) {
+        const state = chStates[ch - 1];
+        const row = document.getElementById(`row-${deviceId}-${ch}`);
+        const chInput = document.getElementById(`switch-${deviceId}-${ch}`);
+        if (row && chInput) {
+          chInput.checked = (state === 'on');
+          if (state === 'on') {
+            row.classList.add('on');
+            row.style.color = `var(--ch${ch}-color)`;
+          } else {
+            row.classList.remove('on');
+            row.style.color = 'inherit';
+          }
+        }
+      }
+    }
+    
+    function updateDeviceOfflineState(deviceId) {
+      const devIndex = devices.findIndex(d => d.device_id === deviceId);
+      if (devIndex !== -1) {
+        devices[devIndex].online = false;
+      }
+      const card = document.getElementById(`card-${deviceId}`);
+      if (card) {
+        card.classList.remove('online');
+        const badge = card.querySelector('.dev-badge');
+        badge.className = 'dev-badge offline';
+        badge.textContent = '● Offline';
+        
+        // Disable switches
+        for (let ch = 1; ch <= 3; ch++) {
+          const chInput = document.getElementById(`switch-${deviceId}-${ch}`);
+          if (chInput) chInput.disabled = true;
+        }
+      }
+    }
+    
+    // Toggle Relay Switch
+    async function toggleChannel(deviceId, channelNum, isChecked) {
+      const cmd = isChecked ? 'output_on' : 'output_off';
+      const row = document.getElementById(`row-${deviceId}-${channelNum}`);
+      const chInput = document.getElementById(`switch-${deviceId}-${channelNum}`);
+      
+      // Apply optimistic update for responsiveness
+      if (isChecked) {
+        row.classList.add('on');
+        row.style.color = `var(--ch${channelNum}-color)`;
+      } else {
+        row.classList.remove('on');
+        row.style.color = 'inherit';
+      }
+      
+      try {
+        const res = await fetch(`${API_BASE}/api/devices/${deviceId}/command`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ cmd, channel: channelNum })
+        });
+        
+        const data = await res.json();
+        if (!res.ok) {
+          throw new Error(data.detail || 'Control command failed');
+        }
+        
+        if (data.status !== 'ok') {
+          throw new Error(`Device status: ${data.status}`);
+        }
+        
+        showToast(`Channel ${channelNum} toggled successfully!`, 'success');
+        
+      } catch (err) {
+        showToast(err.message, 'error');
+        // Revert UI state on failure
+        chInput.checked = !isChecked;
+        if (!isChecked) {
+          row.classList.add('on');
+          row.style.color = `var(--ch${channelNum}-color)`;
+        } else {
+          row.classList.remove('on');
+          row.style.color = 'inherit';
+        }
+      }
+    }
+    
+    // Send Device Registration
+    async function handleRegDevice(e) {
+      e.preventDefault();
+      const deviceId = document.getElementById('regDeviceId').value.trim();
+      const name = document.getElementById('regDeviceName').value.trim();
+      const price = parseFloat(document.getElementById('regDevicePrice').value) || 0.0;
+      
+      try {
+        const res = await fetch(`${API_BASE}/api/devices/register`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ device_id: deviceId, name, price })
+        });
+        
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to register socket');
+        
+        showToast(`Smart socket "${name}" registered!`, 'success');
+        closeModal('modal-reg-device');
+        document.getElementById('regDeviceId').value = '';
+        document.getElementById('regDeviceName').value = '';
+        document.getElementById('regDevicePrice').value = '';
+        refreshDashboardData();
+        
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+    
+    // Send Message / Chat room
+    async function handleSendMsg(e) {
+      e.preventDefault();
+      const input = document.getElementById('chatMsgInput');
+      const message = input.value.trim();
+      if (!message) return;
+      
+      try {
+        const res = await fetch(`${API_BASE}/api/messages`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ message })
+        });
+        
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.detail || 'Failed to send message');
+        }
+        
+        input.value = '';
+        refreshDashboardData();
+        
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+    
+    function renderChat(messages) {
+      const container = document.getElementById('chatContainer');
+      if (messages.length === 0) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">💬</div>
+            <p>No announcements in this house yet.</p>
+          </div>
+        `;
+        return;
+      }
+      
+      const scrollAtBottom = container.scrollHeight - container.scrollTop === container.clientHeight;
+      
+      container.innerHTML = messages.map(m => `
+        <div class="msg-bubble">
+          <div class="msg-meta">
+            <span class="msg-sender">${escapeHtml(m.sender_type === 'child' ? 'Child ID: ' + m.sender_id : 'Parent')}</span>
+            <span>${new Date(m.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+          </div>
+          <p>${escapeHtml(m.message)}</p>
+        </div>
+      `).join('');
+      
+      // Auto scroll if user was at bottom
+      if (scrollAtBottom) {
+        container.scrollTop = container.scrollHeight;
+      }
+    }
+    
+    // Child Management & Permissions Matrix
+    function renderChildren(childrenList) {
+      const container = document.getElementById('childrenContainer');
+      if (childrenList.length === 0) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon">👥</div>
+            <p>No child accounts added.</p>
+          </div>
+        `;
+        return;
+      }
+      
+      container.innerHTML = childrenList.map(c => `
+        <div class="child-list-item">
+          <div>
+            <span>👦 ${escapeHtml(c.name)}</span>
+            <div style="font-size: 0.65rem; color: var(--text-dark);">ID: ${c.child_id}</div>
+          </div>
+          <button onclick="openPermissionsModal(${c.child_id}, '${escapeJs(c.name)}')" class="btn btn-secondary btn-perm">Permissions</button>
+        </div>
+      `).join('');
+    }
+    
+    async function handleCreateChild(e) {
+      e.preventDefault();
+      const name = document.getElementById('createChildName').value.trim();
+      const pin = document.getElementById('createChildPin').value;
+      
+      try {
+        const res = await fetch(`${API_BASE}/api/children`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ name, pin })
+        });
+        
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Failed to create child profile');
+        
+        showToast(`Created profile for ${name}! Child ID: ${data.child_id}`, 'success');
+        closeModal('modal-create-child');
+        document.getElementById('createChildName').value = '';
+        document.getElementById('createChildPin').value = '';
+        refreshDashboardData();
+        
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+    
+    // Permissions Management Matrix
+    function openPermissionsModal(childId, childName) {
+      document.getElementById('permModalChildId').value = childId;
+      document.getElementById('permModalChildName').textContent = childName;
+      openModal('modal-permissions');
+    }
+    
+    function renderPermissionsModal() {
+      const childId = parseInt(document.getElementById('permModalChildId').value);
+      const container = document.getElementById('permissionsGrid');
+      
+      if (relays.length === 0) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <p>No smart extensions or channels configured yet. Register a device first.</p>
+          </div>
+        `;
+        return;
+      }
+      
+      // Group relays by device for a clean UI
+      container.innerHTML = relays.map(r => {
+        // Find if this child has permission for this relay
+        const perm = permissions.find(p => p.child_id === childId && p.relay_id === r.relay_id);
+        const isAllowed = perm ? perm.is_allowed : false;
+        
+        const device = devices.find(d => d.device_id === r.device_id);
+        const devName = device ? device.name : 'Unknown Socket';
+        
+        return `
+          <div class="channel-row" style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.04);">
+            <div class="channel-label">
+              <span style="font-size: 0.75rem; color: var(--text-muted); display: block;">${escapeHtml(devName)}</span>
+              <span>⚡ ${escapeHtml(r.name)} (CH ${r.channel_number})</span>
+            </div>
+            <label class="switch">
+              <input type="checkbox" 
+                     ${isAllowed ? 'checked' : ''} 
+                     onchange="toggleChildPermission(${childId}, ${r.relay_id}, ${perm ? perm.permission_id : 'null'}, this.checked)">
+              <span class="slider"></span>
+            </label>
+          </div>
+        `;
+      }).join('');
+    }
+    
+    async function toggleChildPermission(childId, relayId, existingPermId, isChecked) {
+      try {
+        let res;
+        const headers = {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        };
+        
+        if (existingPermId) {
+          // Update existing permission
+          res = await fetch(`${API_BASE}/api/permissions/${existingPermId}`, {
+            method: 'PUT',
+            headers,
+            body: JSON.stringify({ is_allowed: isChecked })
+          });
+        } else {
+          // Create new permission
+          res = await fetch(`${API_BASE}/api/permissions`, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ child_id: childId, relay_id: relayId, is_allowed: isChecked })
+          });
+        }
+        
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.detail || 'Permission update failed');
+        }
+        
+        showToast('Permissions updated!', 'success');
+        
+        // Refresh permissions list and modal UI
+        const permRes = await fetch(`${API_BASE}/api/permissions`, { headers });
+        if (permRes.ok) {
+          const permData = await permRes.json();
+          permissions = permData.permissions || [];
+          renderPermissionsModal();
+        }
+        
+      } catch (err) {
+        showToast(err.message, 'error');
+        renderPermissionsModal(); // Revert toggle visually
+      }
+    }
+    
+    // Utility functions
+    function formatUptime(ms) {
+      if (!ms && ms !== 0) return '—';
+      const secs = Math.floor(ms / 1000);
+      const m = Math.floor(secs / 60);
+      const h = Math.floor(m / 60);
+      if (h > 0) return `${h}h ${m % 60}m`;
+      if (m > 0) return `${m}m ${secs % 60}s`;
+      return `${secs}s`;
+    }
+    
+    function jsonParse(str) {
+      try { return JSON.parse(str); } catch (e) { return null; }
+    }
+    
+    function escapeHtml(text) {
+      if (!text) return '';
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+    
+    function escapeJs(str) {
+      if (!str) return '';
+      return str.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    }
+    
+    // Initialize Session Check
+    checkSession();
+  </script>
+</body>
+</html>

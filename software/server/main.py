@@ -1,3 +1,4 @@
+import os
 import json
 import asyncio
 from datetime import datetime, timezone
@@ -5,6 +6,7 @@ from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status as http_status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy.orm import Session
 from database import engine, Base, get_db, SessionLocal
 from models import (
@@ -120,15 +122,36 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-# ─── Admin Page ───────────────────────────────────────────────
+# ─── Landing Page & Admin Page ────────────────────────────────
 
-@app.get("/", include_in_schema=False)
-async def root_redirect():
-    return RedirectResponse(url="/admin")
+security_basic = HTTPBasic()
+DEFAULT_ADMIN_PASSWORD_HASH = None
+
+def get_default_admin_hash():
+    global DEFAULT_ADMIN_PASSWORD_HASH
+    if DEFAULT_ADMIN_PASSWORD_HASH is None:
+        DEFAULT_ADMIN_PASSWORD_HASH = hash_password("admin")
+    return DEFAULT_ADMIN_PASSWORD_HASH
+
+
+@app.get("/", response_class=HTMLResponse)
+async def root_page():
+    html_path = STATIC_DIR / "index.html"
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
 
 
 @app.get("/admin", response_class=HTMLResponse)
-async def admin_page():
+async def admin_page(credentials: HTTPBasicCredentials = Depends(security_basic)):
+    admin_pw_hash = os.environ.get("ADMIN_PASSWORD_HASH")
+    if not admin_pw_hash:
+        admin_pw_hash = get_default_admin_hash()
+        
+    if credentials.username != "admin" or not verify_password(credentials.password, admin_pw_hash):
+        raise HTTPException(
+            status_code=http_status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Basic"},
+        )
     html_path = STATIC_DIR / "admin.html"
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
 
@@ -590,6 +613,32 @@ async def delete_permission(permission_id: int, db: Session = Depends(get_db),
     db.delete(perm)
     db.commit()
     return {"status": "deleted"}
+
+
+@app.get("/api/relays")
+async def get_relays(db: Session = Depends(get_db), current_auth: dict = Depends(get_current_user_or_child)):
+    house_id = current_auth["house_id"]
+    if not house_id:
+        return {"relays": []}
+    devices = db.query(Device).filter(Device.house_id == house_id).all()
+    device_ids = [d.device_id for d in devices]
+    extensions = db.query(SmartExtension).filter(SmartExtension.device_id.in_(device_ids)).all()
+    ext_map = {e.se_id: e.device_id for e in extensions}
+    se_ids = list(ext_map.keys())
+    relays = db.query(Relay).filter(Relay.se_id.in_(se_ids)).all() if se_ids else []
+    return {
+        "relays": [
+            {
+                "relay_id": r.relay_id,
+                "se_id": r.se_id,
+                "name": r.name,
+                "channel_number": r.channel_number,
+                "is_on": r.is_on,
+                "device_id": ext_map.get(r.se_id)
+            }
+            for r in relays
+        ]
+    }
 
 
 # ─── Messaging ─────────────────────────────────────────────────
