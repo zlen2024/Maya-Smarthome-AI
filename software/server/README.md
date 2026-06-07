@@ -70,4 +70,4 @@ uv run uvicorn main:app --reload
 **Command Breakdown:**
 - `main:app`: Refers to the `app` instance in the `main.py` file. Adjust this if your entry point is named differently (e.g., `server:app`).
 - `--reload`: Enables auto-reloading so the server restarts automatically when you make code changes. (Do not use in production).
-- `--host 0.0.0.0 --port 8000`: (Optional) Use these flags to expose the server on a specific host and port.
+- `--host 0.0.0.0 --port 8080`: (Optional) Use these flags to expose the server on a specific host and port. You can use 8080 or any other port that you find easier to port forward.

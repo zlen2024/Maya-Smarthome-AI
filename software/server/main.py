@@ -1,31 +1,38 @@
 import json
-from datetime import datetime
+import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status as http_status
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
-from database import engine, Base, get_db
-from models import Heartbeat, DeviceState
+from database import engine, Base, get_db, SessionLocal
+from models import (
+    Account, AccountRole, House, Child, Device, SmartExtension,
+    Relay, Permission, MsgHistory, Heartbeat
+)
+from auth import (
+    hash_password, verify_password, create_access_token, get_current_user,
+    get_current_user_or_child, SECRET_KEY, ALGORITHM
+)
 
-# Create tables
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
 
-# Serve static files
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 class ConnectionManager:
     def __init__(self):
-        # Maps device/client ID to WebSocket
         self.active_connections: dict[str, WebSocket] = {}
-        # Keeps track of raw websockets if we don't know their ID yet
         self.unidentified_connections: list[WebSocket] = []
-        # Track device metadata (IP, last heartbeat, uptime)
         self.device_info: dict[str, dict] = {}
+        self.pending_commands: dict[str, asyncio.Future] = {}
+        # Mobile client tracking (house-scoped)
+        self.mobile_clients: dict[WebSocket, dict] = {}           # ws → {"acc_id", "house_id"}
+        self.house_mobile_clients: dict[int, set[WebSocket]] = {} # house_id → set of ws
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -34,8 +41,6 @@ class ConnectionManager:
     def disconnect(self, websocket: WebSocket):
         if websocket in self.unidentified_connections:
             self.unidentified_connections.remove(websocket)
-
-        # Find and remove if it's an identified connection
         for client_id, ws in list(self.active_connections.items()):
             if ws == websocket:
                 del self.active_connections[client_id]
@@ -59,6 +64,58 @@ class ConnectionManager:
             self.device_info[device_id] = {}
         self.device_info[device_id].update(kwargs)
 
+    async def wait_for_ack(self, device_id: str, timeout: float = 5.0) -> dict | None:
+        future = asyncio.Future()
+        self.pending_commands[device_id] = future
+        try:
+            result = await asyncio.wait_for(future, timeout=timeout)
+            return result
+        except asyncio.TimeoutError:
+            return None
+        finally:
+            self.pending_commands.pop(device_id, None)
+
+    def resolve_ack(self, device_id: str, data: dict):
+        future = self.pending_commands.get(device_id)
+        if future and not future.done():
+            future.set_result(data)
+
+    # ── Mobile Client Management ──────────────────────────────
+
+    async def connect_mobile(self, websocket: WebSocket, acc_id: int, house_id: int):
+        """Register an authenticated mobile client, grouped by house."""
+        self.mobile_clients[websocket] = {"acc_id": acc_id, "house_id": house_id}
+        if house_id not in self.house_mobile_clients:
+            self.house_mobile_clients[house_id] = set()
+        self.house_mobile_clients[house_id].add(websocket)
+        print(f"Mobile client acc_id={acc_id} connected (house {house_id})")
+
+    def disconnect_mobile(self, websocket: WebSocket):
+        """Remove a mobile client from tracking."""
+        info = self.mobile_clients.pop(websocket, None)
+        if info:
+            house_id = info["house_id"]
+            self.house_mobile_clients.get(house_id, set()).discard(websocket)
+            if not self.house_mobile_clients.get(house_id):
+                self.house_mobile_clients.pop(house_id, None)
+            print(f"Mobile client acc_id={info['acc_id']} disconnected (house {house_id})")
+
+    async def broadcast_to_house(self, house_id: int, payload: dict):
+        """Send a JSON message to all mobile clients belonging to a house."""
+        clients = self.house_mobile_clients.get(house_id, set()).copy()
+        if not clients:
+            return
+        message = json.dumps(payload)
+        dead = []
+        for ws in clients:
+            try:
+                await ws.send_text(message)
+            except Exception:
+                dead.append(ws)
+        for ws in dead:
+            self.disconnect_mobile(ws)
+
+
 
 manager = ConnectionManager()
 
@@ -67,122 +124,627 @@ manager = ConnectionManager()
 
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page():
-    """Serve the admin dashboard"""
     html_path = STATIC_DIR / "admin.html"
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
 
 
-# ─── API Endpoints ────────────────────────────────────────────
+# ─── Auth Endpoints ───────────────────────────────────────────
+
+@app.post("/api/auth/register")
+async def register(payload: dict, db: Session = Depends(get_db)):
+    email = payload.get("email", "").strip()
+    password = payload.get("password", "")
+    name = payload.get("name", "").strip()
+    location = payload.get("location", "")
+    if not email or not password or not name:
+        raise HTTPException(status_code=400, detail="email, password, name required")
+    existing = db.query(Account).filter(Account.email == email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    house = House(location=location)
+    db.add(house)
+    db.flush()
+    account = Account(
+        house_id=house.house_id,
+        email=email,
+        password=hash_password(password),
+        name=name,
+        role=AccountRole.parent,
+        is_master=True,
+    )
+    db.add(account)
+    db.commit()
+    token = create_access_token({"sub": account.acc_id})
+    return {
+        "acc_id": account.acc_id,
+        "email": account.email,
+        "name": account.name,
+        "house_id": house.house_id,
+        "token": token,
+    }
+
+
+@app.post("/api/auth/login")
+async def login(payload: dict, db: Session = Depends(get_db)):
+    email = payload.get("email", "").strip()
+    password = payload.get("password", "")
+    account = db.query(Account).filter(Account.email == email).first()
+    if not account or not verify_password(password, account.password):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    token = create_access_token({"sub": account.acc_id})
+    return {
+        "acc_id": account.acc_id,
+        "email": account.email,
+        "name": account.name,
+        "role": account.role.value,
+        "house_id": account.house_id,
+        "token": token,
+    }
+
+
+@app.get("/api/auth/me")
+async def get_me(current_user: Account = Depends(get_current_user)):
+    return {
+        "acc_id": current_user.acc_id,
+        "email": current_user.email,
+        "name": current_user.name,
+        "role": current_user.role.value,
+        "house_id": current_user.house_id,
+        "is_master": current_user.is_master,
+        "is_home": current_user.is_home,
+    }
+
+
+# ─── House Endpoints ──────────────────────────────────────────
+
+@app.get("/api/houses/{house_id}")
+async def get_house(house_id: int, db: Session = Depends(get_db),
+                    current_user: Account = Depends(get_current_user)):
+    if current_user.role != AccountRole.admin and current_user.house_id != house_id:
+        raise HTTPException(status_code=403, detail="Access denied to this house")
+    house = db.query(House).filter(House.house_id == house_id).first()
+    if not house:
+        raise HTTPException(status_code=404, detail="House not found")
+    return {"house_id": house.house_id, "location": house.location, "created_at": house.created_at.isoformat() if house.created_at else None}
+
+
+@app.put("/api/houses/{house_id}")
+async def update_house(house_id: int, payload: dict, db: Session = Depends(get_db),
+                       current_user: Account = Depends(get_current_user)):
+    if current_user.role != AccountRole.admin and current_user.house_id != house_id:
+        raise HTTPException(status_code=403, detail="Access denied to this house")
+    house = db.query(House).filter(House.house_id == house_id).first()
+    if not house:
+        raise HTTPException(status_code=404, detail="House not found")
+    if "location" in payload:
+        house.location = payload["location"]
+    db.commit()
+    return {"house_id": house.house_id, "location": house.location}
+
+
+# ─── Child Management ─────────────────────────────────────────
+
+@app.post("/api/children")
+async def create_child(payload: dict, db: Session = Depends(get_db),
+                       current_user: Account = Depends(get_current_user)):
+    if current_user.role not in (AccountRole.parent, AccountRole.admin):
+        raise HTTPException(status_code=403, detail="Only parents/admins can register children")
+    house_id = current_user.house_id
+    if not house_id:
+        raise HTTPException(status_code=400, detail="Account has no house")
+    pin = payload.get("pin", "0000")
+    child = Child(
+        house_id=house_id,
+        name=payload.get("name", "").strip(),
+        pin=hash_password(pin),
+    )
+    db.add(child)
+    db.commit()
+    return {"child_id": child.child_id, "name": child.name, "house_id": child.house_id}
+
+
+@app.get("/api/children")
+async def list_children(db: Session = Depends(get_db),
+                        current_user: Account = Depends(get_current_user)):
+    house_id = current_user.house_id
+    if not house_id:
+        return {"children": []}
+    children = db.query(Child).filter(Child.house_id == house_id).all()
+    return {"children": [{"child_id": c.child_id, "name": c.name, "is_home": c.is_home} for c in children]}
+
+
+@app.get("/api/children/{child_id}")
+async def get_child(child_id: int, db: Session = Depends(get_db),
+                    current_user: Account = Depends(get_current_user)):
+    child = db.query(Child).filter(Child.child_id == child_id).first()
+    if not child:
+        raise HTTPException(status_code=404, detail="Child not found")
+    if current_user.role != AccountRole.admin and child.house_id != current_user.house_id:
+        raise HTTPException(status_code=403, detail="Access denied to this child")
+    return {"child_id": child.child_id, "name": child.name, "is_home": child.is_home, "house_id": child.house_id}
+
+
+@app.post("/api/children/{child_id}/login")
+async def child_login(child_id: int, payload: dict, db: Session = Depends(get_db)):
+    child = db.query(Child).filter(Child.child_id == child_id).first()
+    if not child:
+        raise HTTPException(status_code=404, detail="Child not found")
+    pin = payload.get("pin", "")
+    if not verify_password(pin, child.pin):
+        raise HTTPException(status_code=401, detail="Invalid PIN")
+    token = create_access_token({"sub": f"child_{child.child_id}", "role": "child", "house_id": child.house_id})
+    return {"child_id": child.child_id, "name": child.name, "token": token}
+
+
+# ─── Device Registration ──────────────────────────────────────
+
+@app.post("/api/devices/register")
+async def register_device(payload: dict, db: Session = Depends(get_db),
+                          current_user: Account = Depends(get_current_user)):
+    if current_user.role not in (AccountRole.parent, AccountRole.admin):
+        raise HTTPException(status_code=403, detail="Only parents/admins can register devices")
+    house_id = current_user.house_id
+    if not house_id:
+        raise HTTPException(status_code=400, detail="Account has no house")
+    device_id = payload.get("device_id", "").strip()
+    name = payload.get("name", "Smart Extension")
+    price = payload.get("price", 0.0)
+    if not device_id:
+        raise HTTPException(status_code=400, detail="device_id required")
+    existing = db.query(Device).filter(Device.device_id == device_id).first()
+    if existing:
+        existing.house_id = house_id
+        existing.name = name
+        existing.price = price
+        existing.status = "registered"
+        existing.blocked = False
+        device = existing
+    else:
+        device = Device(device_id=device_id, house_id=house_id, name=name, price=price, status="registered")
+        db.add(device)
+    db.flush()
+    
+    existing_ext = db.query(SmartExtension).filter(SmartExtension.device_id == device_id).first()
+    if existing_ext:
+        ext = existing_ext
+        ext.name = f"{name} Extension"
+        for ch in range(1, 4):
+            relay = db.query(Relay).filter(Relay.se_id == ext.se_id, Relay.channel_number == ch).first()
+            if not relay:
+                relay = Relay(se_id=ext.se_id, name=f"Channel {ch}", channel_number=ch, is_on=False)
+                db.add(relay)
+            else:
+                relay.name = f"Channel {ch}"
+    else:
+        ext = SmartExtension(device_id=device_id, name=f"{name} Extension")
+        db.add(ext)
+        db.flush()
+        for ch in range(1, 4):
+            relay = Relay(se_id=ext.se_id, name=f"Channel {ch}", channel_number=ch, is_on=False)
+            db.add(relay)
+    db.commit()
+    return {"device_id": device.device_id, "name": device.name, "status": device.status, "house_id": device.house_id}
+
 
 @app.get("/api/devices")
-async def get_devices(db: Session = Depends(get_db)):
-    """Get all currently connected devices with their live info"""
+async def get_devices(db: Session = Depends(get_db), current_auth: dict = Depends(get_current_user_or_child)):
+    is_admin = current_auth["role"] == "admin"
+    house_id = current_auth["house_id"]
+    
+    if is_admin:
+        devices_db = db.query(Device).all()
+    else:
+        devices_db = db.query(Device).filter(Device.house_id == house_id).all()
+        
     devices = []
-    for device_id, ws in manager.active_connections.items():
+    for device_db in devices_db:
+        device_id = device_db.device_id
         info = manager.device_info.get(device_id, {})
-
-        # Get LED status from DB
-        device_state = (
-            db.query(DeviceState).filter(DeviceState.device_id == device_id).first()
-        )
-        led_status = device_state.led_status if device_state else "unknown"
-
-        # Get latest heartbeat timestamp from DB
+        
+        ext = db.query(SmartExtension).filter(SmartExtension.device_id == device_id).first()
+        ch1 = "off"
+        ch2 = "off"
+        ch3 = "off"
+        if ext:
+            relays = db.query(Relay).filter(Relay.se_id == ext.se_id).all()
+            for r in relays:
+                if r.channel_number == 1:
+                    ch1 = "on" if r.is_on else "off"
+                elif r.channel_number == 2:
+                    ch2 = "on" if r.is_on else "off"
+                elif r.channel_number == 3:
+                    ch3 = "on" if r.is_on else "off"
+        else:
+            ch1 = info.get("ch1", "off")
+            ch2 = info.get("ch2", "off")
+            ch3 = info.get("ch3", "off")
+            
         latest_hb = (
             db.query(Heartbeat)
             .filter(Heartbeat.device_id == device_id)
             .order_by(Heartbeat.timestamp.desc())
             .first()
         )
-
         devices.append({
             "device_id": device_id,
+            "name": device_db.name,
             "ip": info.get("ip"),
             "last_uptime_ms": info.get("uptime_ms"),
             "last_heartbeat": latest_hb.timestamp.isoformat() if latest_hb and latest_hb.timestamp else None,
-            "led_status": led_status,
+            "ch1": ch1,
+            "ch2": ch2,
+            "ch3": ch3,
+            "blocked": device_db.blocked,
+            "online": device_id in manager.active_connections,
         })
+    unidentified_count = len(manager.unidentified_connections) if is_admin else 0
+    return {"devices": devices, "unidentified_count": unidentified_count}
 
+
+@app.get("/api/devices/{device_id}")
+async def get_device_status(device_id: str, db: Session = Depends(get_db), current_auth: dict = Depends(get_current_user_or_child)):
+    device_db = db.query(Device).filter(Device.device_id == device_id).first()
+    if not device_db:
+        raise HTTPException(status_code=404, detail="Device not found")
+    if current_auth["role"] != "admin" and device_db.house_id != current_auth["house_id"]:
+        raise HTTPException(status_code=403, detail="Access denied to this device")
+        
+    info = manager.device_info.get(device_id, {})
+    online = device_id in manager.active_connections
+    
+    ext = db.query(SmartExtension).filter(SmartExtension.device_id == device_id).first()
+    ch1 = "off"
+    ch2 = "off"
+    ch3 = "off"
+    if ext:
+        relays = db.query(Relay).filter(Relay.se_id == ext.se_id).all()
+        for r in relays:
+            if r.channel_number == 1:
+                ch1 = "on" if r.is_on else "off"
+            elif r.channel_number == 2:
+                ch2 = "on" if r.is_on else "off"
+            elif r.channel_number == 3:
+                ch3 = "on" if r.is_on else "off"
+    else:
+        ch1 = info.get("ch1", "off")
+        ch2 = info.get("ch2", "off")
+        ch3 = info.get("ch3", "off")
+        
+    latest_hb = (
+        db.query(Heartbeat)
+        .filter(Heartbeat.device_id == device_id)
+        .order_by(Heartbeat.timestamp.desc())
+        .first()
+    )
     return {
-        "devices": devices,
-        "unidentified_count": len(manager.unidentified_connections),
+        "device_id": device_id,
+        "name": device_db.name,
+        "online": online,
+        "ip": info.get("ip"),
+        "uptime_ms": info.get("uptime_ms"),
+        "ch1": ch1,
+        "ch2": ch2,
+        "ch3": ch3,
+        "blocked": device_db.blocked,
+        "last_heartbeat": latest_hb.timestamp.isoformat() if latest_hb and latest_hb.timestamp else None,
     }
+
+
+@app.post("/api/devices/{device_id}/block")
+async def block_device(device_id: str, payload: dict, db: Session = Depends(get_db),
+                       current_user: Account = Depends(get_current_user)):
+    if current_user.role != AccountRole.admin:
+        raise HTTPException(status_code=403, detail="Only admins can block devices")
+    device = db.query(Device).filter(Device.device_id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    device.blocked = payload.get("blocked", True)
+    db.commit()
+    return {"device_id": device_id, "blocked": device.blocked}
 
 
 @app.post("/api/devices/{device_id}/command")
-async def send_device_command(device_id: str, payload: dict):
-    """Send a command to a specific device"""
+async def send_device_command(device_id: str, payload: dict,
+                              db: Session = Depends(get_db),
+                              current_auth: dict = Depends(get_current_user_or_child)):
+    device = db.query(Device).filter(Device.device_id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    if device.house_id != current_auth["house_id"]:
+        raise HTTPException(status_code=403, detail="Device does not belong to your house")
+    if device.blocked:
+        return {"status": "blocked", "device_id": device_id}
+        
     cmd = payload.get("cmd", "")
+    channel = payload.get("channel", 1)
+    
+    if current_auth["role"] == "child":
+        child_id = current_auth["child"].child_id
+        ext = db.query(SmartExtension).filter(SmartExtension.device_id == device_id).first()
+        if not ext:
+            raise HTTPException(status_code=400, detail="Smart extension not found for device")
+            
+        if cmd in ("all_on", "all_off"):
+            relays = db.query(Relay).filter(Relay.se_id == ext.se_id).all()
+            for r in relays:
+                perm = db.query(Permission).filter(
+                    Permission.child_id == child_id,
+                    Permission.relay_id == r.relay_id
+                ).first()
+                if not perm or not perm.is_allowed:
+                    raise HTTPException(status_code=403, detail=f"Permission denied for channel {r.channel_number}")
+        else:
+            relay = db.query(Relay).filter(Relay.se_id == ext.se_id, Relay.channel_number == channel).first()
+            if not relay:
+                raise HTTPException(status_code=400, detail="Relay channel not found")
+            perm = db.query(Permission).filter(
+                Permission.child_id == child_id,
+                Permission.relay_id == relay.relay_id
+            ).first()
+            if not perm or not perm.is_allowed:
+                raise HTTPException(status_code=403, detail="You do not have permission to control this channel")
+                
     pin = payload.get("pin", "")
-
-    cmd_payload = json.dumps({
-        "id": device_id,
-        "cmd": cmd,
-        "pin": pin,
-    })
-
+    cmd_payload = json.dumps({"id": device_id, "cmd": cmd, "channel": channel, "pin": pin})
     success = await manager.send_personal_message(cmd_payload, device_id)
-    if success:
-        print(f"Command '{cmd}' sent to {device_id}")
-        return {"status": "sent", "device_id": device_id, "cmd": cmd}
-    else:
-        print(f"Device {device_id} not connected")
+    if not success:
         return {"status": "not_connected", "device_id": device_id}
+    ack = await manager.wait_for_ack(device_id, timeout=5.0)
+    if ack:
+        return {"status": "ok", "device_id": device_id, **{k: ack.get(k) for k in ("ch1", "ch2", "ch3") if k in ack}}
+    return {"status": "timeout", "device_id": device_id}
 
+
+# ─── Permission Endpoints ─────────────────────────────────────
+
+@app.post("/api/permissions")
+async def create_permission(payload: dict, db: Session = Depends(get_db),
+                            current_user: Account = Depends(get_current_user)):
+    if current_user.role not in (AccountRole.parent, AccountRole.admin):
+        raise HTTPException(status_code=403, detail="Only parents/admins can set permissions")
+    child_id = payload.get("child_id")
+    relay_id = payload.get("relay_id")
+    is_allowed = payload.get("is_allowed", True)
+    if not child_id or not relay_id:
+        raise HTTPException(status_code=400, detail="child_id and relay_id required")
+        
+    child = db.query(Child).filter(Child.child_id == child_id).first()
+    if not child:
+        raise HTTPException(status_code=404, detail="Child not found")
+    if current_user.role != AccountRole.admin and child.house_id != current_user.house_id:
+        raise HTTPException(status_code=403, detail="Child does not belong to your house")
+        
+    relay = db.query(Relay).filter(Relay.relay_id == relay_id).first()
+    if not relay:
+        raise HTTPException(status_code=404, detail="Relay not found")
+    ext = db.query(SmartExtension).filter(SmartExtension.se_id == relay.se_id).first()
+    if not ext:
+        raise HTTPException(status_code=404, detail="Smart extension not found")
+    device = db.query(Device).filter(Device.device_id == ext.device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    if current_user.role != AccountRole.admin and device.house_id != current_user.house_id:
+        raise HTTPException(status_code=403, detail="Device does not belong to your house")
+        
+    perm = Permission(child_id=child_id, relay_id=relay_id, is_allowed=is_allowed)
+    db.add(perm)
+    db.commit()
+    return {"permission_id": perm.permission_id, "child_id": child_id, "relay_id": relay_id, "is_allowed": is_allowed}
+
+
+@app.get("/api/permissions")
+async def list_permissions(child_id: int | None = None, db: Session = Depends(get_db),
+                           current_user: Account = Depends(get_current_user)):
+    if current_user.role == AccountRole.admin:
+        q = db.query(Permission)
+        if child_id:
+            q = q.filter(Permission.child_id == child_id)
+        perms = q.all()
+    else:
+        if child_id:
+            child = db.query(Child).filter(Child.child_id == child_id).first()
+            if not child or child.house_id != current_user.house_id:
+                raise HTTPException(status_code=403, detail="Child not found or access denied")
+            perms = db.query(Permission).filter(Permission.child_id == child_id).all()
+        else:
+            children_ids = [c.child_id for c in db.query(Child).filter(Child.house_id == current_user.house_id).all()]
+            perms = db.query(Permission).filter(Permission.child_id.in_(children_ids)).all()
+            
+    return {"permissions": [
+        {"permission_id": p.permission_id, "child_id": p.child_id, "relay_id": p.relay_id, "is_allowed": p.is_allowed}
+        for p in perms
+    ]}
+
+
+@app.put("/api/permissions/{permission_id}")
+async def update_permission(permission_id: int, payload: dict, db: Session = Depends(get_db),
+                            current_user: Account = Depends(get_current_user)):
+    perm = db.query(Permission).filter(Permission.permission_id == permission_id).first()
+    if not perm:
+        raise HTTPException(status_code=404, detail="Permission not found")
+    if current_user.role != AccountRole.admin:
+        child = db.query(Child).filter(Child.child_id == perm.child_id).first()
+        if not child or child.house_id != current_user.house_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+    if "is_allowed" in payload:
+        perm.is_allowed = payload["is_allowed"]
+    db.commit()
+    return {"permission_id": perm.permission_id, "is_allowed": perm.is_allowed}
+
+
+@app.delete("/api/permissions/{permission_id}")
+async def delete_permission(permission_id: int, db: Session = Depends(get_db),
+                            current_user: Account = Depends(get_current_user)):
+    perm = db.query(Permission).filter(Permission.permission_id == permission_id).first()
+    if not perm:
+        raise HTTPException(status_code=404, detail="Permission not found")
+    if current_user.role != AccountRole.admin:
+        child = db.query(Child).filter(Child.child_id == perm.child_id).first()
+        if not child or child.house_id != current_user.house_id:
+            raise HTTPException(status_code=403, detail="Access denied")
+    db.delete(perm)
+    db.commit()
+    return {"status": "deleted"}
+
+
+# ─── Messaging ─────────────────────────────────────────────────
+
+@app.post("/api/messages")
+async def send_message(payload: dict, db: Session = Depends(get_db),
+                       current_auth: dict = Depends(get_current_user_or_child)):
+    house_id = current_auth["house_id"]
+    if not house_id:
+        raise HTTPException(status_code=400, detail="Caller has no house")
+        
+    sender_id = current_auth["user"].acc_id if current_auth["type"] == "user" else current_auth["child"].child_id
+    sender_type = current_auth["role"]
+    
+    msg = MsgHistory(
+        house_id=house_id,
+        sender_id=sender_id,
+        sender_type=sender_type,
+        message=payload.get("message", "").strip(),
+    )
+    db.add(msg)
+    db.commit()
+    return {"msg_id": msg.msg_id, "timestamp": msg.timestamp.isoformat() if msg.timestamp else None}
+
+
+@app.get("/api/messages")
+async def get_messages(limit: int = 50, db: Session = Depends(get_db),
+                       current_auth: dict = Depends(get_current_user_or_child)):
+    house_id = current_auth["house_id"]
+    if not house_id:
+        return {"messages": []}
+    msgs = (
+        db.query(MsgHistory)
+        .filter(MsgHistory.house_id == house_id)
+        .order_by(MsgHistory.timestamp.desc())
+        .limit(limit)
+        .all()
+    )
+    return {"messages": [
+        {"msg_id": m.msg_id, "sender_id": m.sender_id, "sender_type": m.sender_type, "message": m.message,
+         "timestamp": m.timestamp.isoformat() if m.timestamp else None}
+        for m in reversed(msgs)
+    ]}
+
+
+# ─── Admin Endpoints ──────────────────────────────────────────
+
+@app.get("/api/admin/users")
+async def admin_list_users(db: Session = Depends(get_db),
+                           current_user: Account = Depends(get_current_user)):
+    if current_user.role != AccountRole.admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+    accounts = db.query(Account).all()
+    return {"users": [
+        {"acc_id": a.acc_id, "email": a.email, "name": a.name, "role": a.role.value, "house_id": a.house_id}
+        for a in accounts
+    ]}
+
+
+@app.get("/api/admin/logs")
+async def admin_get_logs(limit: int = 100, db: Session = Depends(get_db),
+                         current_user: Account = Depends(get_current_user)):
+    if current_user.role != AccountRole.admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+    heartbeats = db.query(Heartbeat).order_by(Heartbeat.timestamp.desc()).limit(limit).all()
+    return {"logs": [
+        {"id": h.id, "device_id": h.device_id, "uptime_ms": h.uptime_ms, "ip_address": h.ip_address,
+         "ch1": h.ch1, "ch2": h.ch2, "ch3": h.ch3,
+         "timestamp": h.timestamp.isoformat() if h.timestamp else None}
+        for h in heartbeats
+    ]}
+
+
+@app.put("/api/admin/users/{user_id}")
+async def admin_update_user(user_id: int, payload: dict, db: Session = Depends(get_db),
+                            current_user: Account = Depends(get_current_user)):
+    if current_user.role != AccountRole.admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+    user = db.query(Account).filter(Account.acc_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if "name" in payload:
+        user.name = payload["name"]
+    if "email" in payload:
+        user.email = payload["email"]
+    if "role" in payload:
+        try:
+            user.role = AccountRole(payload["role"])
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid role")
+    if "password" in payload and payload["password"]:
+        user.password = hash_password(payload["password"])
+    db.commit()
+    return {"acc_id": user.acc_id, "email": user.email, "name": user.name, "role": user.role.value}
+
+
+@app.delete("/api/admin/users/{user_id}")
+async def admin_delete_user(user_id: int, db: Session = Depends(get_db),
+                             current_user: Account = Depends(get_current_user)):
+    if current_user.role != AccountRole.admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+    user = db.query(Account).filter(Account.acc_id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    db.delete(user)
+    db.commit()
+    return {"status": "deleted"}
+
+
+# ─── Legacy Status Endpoint (backward compat) ─────────────────
 
 @app.get("/device/{device_id}/status")
-async def get_device_status(device_id: str, db: Session = Depends(get_db)):
-    """Get current LED status for a device"""
-    device_state = (
-        db.query(DeviceState).filter(DeviceState.device_id == device_id).first()
-    )
-    if device_state:
-        return {
-            "device_id": device_id,
-            "led_status": device_state.led_status,
-            "updated_at": device_state.updated_at,
-        }
-    return {"device_id": device_id, "led_status": "unknown"}
-
-
-@app.get("/db")
-async def get_all_data(db: Session = Depends(get_db)):
-    """Get all database records"""
-    heartbeats = db.query(Heartbeat).all()
-    device_states = db.query(DeviceState).all()
+async def get_device_status_legacy(device_id: str, db: Session = Depends(get_db)):
+    info = manager.device_info.get(device_id, {})
+    online = device_id in manager.active_connections
     return {
-        "heartbeats": [
-            {
-                "id": h.id,
-                "device_id": h.device_id,
-                "uptime_ms": h.uptime_ms,
-                "ip_address": h.ip_address,
-                "timestamp": h.timestamp.isoformat() if h.timestamp else None,
-            }
-            for h in heartbeats
-        ],
-        "device_states": [
-            {
-                "id": d.id,
-                "device_id": d.device_id,
-                "led_status": d.led_status,
-                "updated_at": d.updated_at.isoformat() if d.updated_at else None,
-            }
-            for d in device_states
-        ],
+        "device_id": device_id,
+        "online": online,
+        "ip": info.get("ip"),
+        "uptime_ms": info.get("uptime_ms"),
+        "ch1": info.get("ch1", "off"),
+        "ch2": info.get("ch2", "off"),
+        "ch3": info.get("ch3", "off"),
+        "last_heartbeat": info.get("last_heartbeat"),
     }
 
 
-# ─── WebSocket Handler ───────────────────────────────────────
+# ─── DB Dump ──────────────────────────────────────────────────
 
-async def _handle_websocket(websocket: WebSocket, db: Session = Depends(get_db)):
-    """Shared WebSocket handler for both '/' and '/ws' endpoints."""
+@app.get("/db")
+async def get_all_data(db: Session = Depends(get_db), current_user: Account = Depends(get_current_user)):
+    if current_user.role != AccountRole.admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+    heartbeats = db.query(Heartbeat).all()
+    devices = db.query(Device).all()
+    accounts = db.query(Account).all()
+    children = db.query(Child).all()
+    return {
+        "heartbeats": [
+            {"id": h.id, "device_id": h.device_id, "uptime_ms": h.uptime_ms,
+             "ip_address": h.ip_address, "ch1": h.ch1, "ch2": h.ch2, "ch3": h.ch3,
+             "timestamp": h.timestamp.isoformat() if h.timestamp else None}
+            for h in heartbeats
+        ],
+        "devices": [{"device_id": d.device_id, "name": d.name, "status": d.status, "blocked": d.blocked} for d in devices],
+        "accounts": [{"acc_id": a.acc_id, "email": a.email, "name": a.name, "role": a.role.value} for a in accounts],
+        "children": [{"child_id": c.child_id, "name": c.name, "house_id": c.house_id} for c in children],
+    }
+
+
+# ─── WebSocket Handler ────────────────────────────────────────
+
+async def _handle_websocket(websocket: WebSocket):
     await manager.connect(websocket)
     try:
         while True:
             data = await websocket.receive_text()
             print(f"Received data: {data}")
 
+            db = SessionLocal()
             try:
                 json_data = json.loads(data)
                 device_id = json_data.get("id")
@@ -191,93 +753,242 @@ async def _handle_websocket(websocket: WebSocket, db: Session = Depends(get_db))
                     print("Received message without 'id'")
                     continue
 
-                # Identify the connection if not already done
                 if websocket not in manager.active_connections.values():
                     manager.identify(websocket, device_id)
 
-                # Handle heartbeat
                 if json_data.get("type") == "heartbeat":
                     uptime = json_data.get("uptime_ms", 0)
-                    print(f"Heartbeat from {device_id}, uptime: {uptime}ms")
+                    ch1 = json_data.get("ch1", "off")
+                    ch2 = json_data.get("ch2", "off")
+                    ch3 = json_data.get("ch3", "off")
+                    print(f"Heartbeat from {device_id}, uptime: {uptime}ms, ch1={ch1} ch2={ch2} ch3={ch3}")
 
-                    # Update live device info
-                    manager.update_device_info(device_id, uptime_ms=uptime)
+                    manager.update_device_info(device_id, uptime_ms=uptime, ch1=ch1, ch2=ch2, ch3=ch3)
 
-                    # Log to DB
-                    db_heartbeat = Heartbeat(device_id=device_id, uptime_ms=uptime)
-                    db.add(db_heartbeat)
+                    hb = Heartbeat(device_id=device_id, uptime_ms=uptime, ch1=ch1, ch2=ch2, ch3=ch3)
+                    db.add(hb)
+                    
+                    ext = db.query(SmartExtension).filter(SmartExtension.device_id == device_id).first()
+                    if ext:
+                        for ch_num, val in [(1, ch1), (2, ch2), (3, ch3)]:
+                            relay = db.query(Relay).filter(Relay.se_id == ext.se_id, Relay.channel_number == ch_num).first()
+                            if relay:
+                                relay.is_on = (val == "on")
                     db.commit()
+                    
+                    # Broadcast status update to all mobile clients in the same house
+                    device_db = db.query(Device).filter(Device.device_id == device_id).first()
+                    if device_db and device_db.house_id:
+                        await manager.broadcast_to_house(device_db.house_id, {
+                            "type": "device_update",
+                            "device_id": device_id,
+                            "ch1": ch1,
+                            "ch2": ch2,
+                            "ch3": ch3,
+                            "online": True,
+                            "last_heartbeat": datetime.now(timezone.utc).isoformat()
+                        })
 
-                # Handle initial connection status from ESP32
                 elif json_data.get("status") == "online":
                     ip = json_data.get("ip")
+                    ch1 = json_data.get("ch1", "off")
+                    ch2 = json_data.get("ch2", "off")
+                    ch3 = json_data.get("ch3", "off")
                     print(f"Device {device_id} is online at {ip}")
 
-                    # Update live device info
-                    manager.update_device_info(device_id, ip=ip)
+                    manager.update_device_info(device_id, ip=ip, ch1=ch1, ch2=ch2, ch3=ch3)
 
-                    # Log to DB
-                    db_heartbeat = Heartbeat(device_id=device_id, ip_address=ip)
-                    db.add(db_heartbeat)
+                    hb = Heartbeat(device_id=device_id, ip_address=ip, ch1=ch1, ch2=ch2, ch3=ch3)
+                    db.add(hb)
+
+                    device_db = db.query(Device).filter(Device.device_id == device_id).first()
+                    if not device_db:
+                        device_db = Device(device_id=device_id, name="Smart Extension", status="registered")
+                        db.add(device_db)
+                    device_db.status = "online"
+                    
+                    ext = db.query(SmartExtension).filter(SmartExtension.device_id == device_id).first()
+                    if ext:
+                        for ch_num, val in [(1, ch1), (2, ch2), (3, ch3)]:
+                            relay = db.query(Relay).filter(Relay.se_id == ext.se_id, Relay.channel_number == ch_num).first()
+                            if relay:
+                                relay.is_on = (val == "on")
                     db.commit()
 
-                # Handle command routing (e.g. from Mobile app to ESP32)
-                elif "cmd" in json_data:
-                    target_id = json_data.get(
-                        "target_id", device_id
-                    )  # if mobile sends target_id, else assume direct
+                    # Broadcast status update to all mobile clients in the same house
+                    device_db = db.query(Device).filter(Device.device_id == device_id).first()
+                    if device_db and device_db.house_id:
+                        await manager.broadcast_to_house(device_db.house_id, {
+                            "type": "device_update",
+                            "device_id": device_id,
+                            "ch1": ch1,
+                            "ch2": ch2,
+                            "ch3": ch3,
+                            "online": True,
+                            "last_heartbeat": datetime.now(timezone.utc).isoformat()
+                        })
 
+                elif "cmd" in json_data:
+                    target_id = json_data.get("target_id", device_id)
                     if target_id != device_id:
                         print(f"Routing command to {target_id}: {json_data}")
-                        # Include PIN in command payload
-                        cmd_payload = json.dumps(
-                            {
-                                "id": target_id,
-                                "cmd": json_data["cmd"],
-                                "pin": json_data.get("pin", ""),
-                            }
-                        )
-                        success = await manager.send_personal_message(
-                            cmd_payload, target_id
-                        )
+                        cmd_payload = json.dumps({
+                            "id": target_id,
+                            "cmd": json_data["cmd"],
+                            "channel": json_data.get("channel", 1),
+                            "pin": json_data.get("pin", ""),
+                        })
+                        success = await manager.send_personal_message(cmd_payload, target_id)
                         if not success:
                             print(f"Target device {target_id} not connected")
                     else:
                         print(f"Command intended for self?: {json_data}")
 
-                # Handle ack from ESP32 back to mobile
                 elif json_data.get("status") == "ok":
                     print(f"Ack from {device_id}: {json_data}")
+                    ch1 = json_data.get("ch1", "off")
+                    ch2 = json_data.get("ch2", "off")
+                    ch3 = json_data.get("ch3", "off")
 
-                    # Update LED status in DB if present
-                    if "led" in json_data:
-                        led_state = (
-                            db.query(DeviceState)
-                            .filter(DeviceState.device_id == device_id)
-                            .first()
-                        )
-                        if led_state:
-                            led_state.led_status = json_data["led"]
-                        else:
-                            led_state = DeviceState(
-                                device_id=device_id, led_status=json_data["led"]
-                            )
-                            db.add(led_state)
-                        db.commit()
-                        print(f"Updated LED status: {json_data['led']}")
+                    manager.update_device_info(device_id, ch1=ch1, ch2=ch2, ch3=ch3)
+                    manager.resolve_ack(device_id, json_data)
+
+                    hb = db.query(Heartbeat).filter(Heartbeat.device_id == device_id).order_by(Heartbeat.timestamp.desc()).first()
+                    if hb:
+                        hb.ch1 = ch1
+                        hb.ch2 = ch2
+                        hb.ch3 = ch3
+                    
+                    ext = db.query(SmartExtension).filter(SmartExtension.device_id == device_id).first()
+                    if ext:
+                        for ch_num, val in [(1, ch1), (2, ch2), (3, ch3)]:
+                            relay = db.query(Relay).filter(Relay.se_id == ext.se_id, Relay.channel_number == ch_num).first()
+                            if relay:
+                                relay.is_on = (val == "on")
+                    db.commit()
+                    print(f"Updated channel states: ch1={ch1} ch2={ch2} ch3={ch3}")
+
+                    # Broadcast status update to all mobile clients in the same house
+                    device_db = db.query(Device).filter(Device.device_id == device_id).first()
+                    if device_db and device_db.house_id:
+                        await manager.broadcast_to_house(device_db.house_id, {
+                            "type": "device_update",
+                            "device_id": device_id,
+                            "ch1": ch1,
+                            "ch2": ch2,
+                            "ch3": ch3,
+                            "online": True,
+                        })
 
             except json.JSONDecodeError:
                 print(f"Failed to parse JSON: {data}")
+            except Exception as e:
+                db.rollback()
+                print(f"Error handling websocket message: {e}")
+            finally:
+                db.close()
 
     except WebSocketDisconnect:
+        disconnected_id = None
+        for cid, ws in list(manager.active_connections.items()):
+            if ws == websocket:
+                disconnected_id = cid
+                break
         manager.disconnect(websocket)
+        if disconnected_id:
+            db = SessionLocal()
+            try:
+                device_db = db.query(Device).filter(Device.device_id == disconnected_id).first()
+                if device_db:
+                    device_db.status = "offline"
+                    db.commit()
+                    if device_db.house_id:
+                        await manager.broadcast_to_house(device_db.house_id, {
+                            "type": "device_offline",
+                            "device_id": disconnected_id,
+                            "online": False,
+                        })
+            finally:
+                db.close()
+
+
+@app.websocket("/ws/mobile")
+async def mobile_websocket_endpoint(websocket: WebSocket):
+    await websocket.accept()
+    try:
+        # Wait for first message with the auth token
+        auth_msg = await asyncio.wait_for(websocket.receive_text(), timeout=10.0)
+        auth_data = json.loads(auth_msg)
+        token = auth_data.get("token", "")
+
+        from jose import jwt as jose_jwt, JWTError
+        try:
+            payload = jose_jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+            sub = payload.get("sub")
+            if sub is None:
+                await websocket.close(code=4001, reason="Invalid token")
+                return
+        except JWTError:
+            await websocket.close(code=4001, reason="Invalid token")
+            return
+
+        db = SessionLocal()
+        try:
+            house_id = None
+            if isinstance(sub, str) and sub.startswith("child_"):
+                try:
+                    child_id = int(sub.split("_")[1])
+                except (ValueError, IndexError):
+                    await websocket.close(code=4001, reason="Invalid child ID")
+                    return
+                child = db.query(Child).filter(Child.child_id == child_id).first()
+                if not child:
+                    await websocket.close(code=4001, reason="Child not found")
+                    return
+                acc_id = child_id
+                house_id = child.house_id
+            else:
+                try:
+                    acc_id = int(sub)
+                except ValueError:
+                    await websocket.close(code=4001, reason="Invalid account ID")
+                    return
+                account = db.query(Account).filter(Account.acc_id == acc_id).first()
+                if not account:
+                    await websocket.close(code=4001, reason="User not found")
+                    return
+                house_id = account.house_id
+        finally:
+            db.close()
+
+        if house_id is None:
+            await websocket.close(code=4001, reason="No house associated")
+            return
+
+        await manager.connect_mobile(websocket, acc_id, house_id)
+        await websocket.send_text(json.dumps({"type": "auth_ok", "house_id": house_id}))
+
+        while True:
+            await websocket.receive_text()
+
+    except asyncio.TimeoutError:
+        try:
+            await websocket.close(code=4002, reason="Auth timeout")
+        except Exception:
+            pass
+    except WebSocketDisconnect:
+        pass
+    except Exception as e:
+        print(f"Error in mobile websocket: {e}")
+    finally:
+        manager.disconnect_mobile(websocket)
 
 
 @app.websocket("/ws")
-async def websocket_endpoint_ws(websocket: WebSocket, db: Session = Depends(get_db)):
-    await _handle_websocket(websocket, db)
+async def websocket_endpoint_ws(websocket: WebSocket):
+    await _handle_websocket(websocket)
 
 
 @app.websocket("/")
-async def websocket_endpoint_root(websocket: WebSocket, db: Session = Depends(get_db)):
-    await _handle_websocket(websocket, db)
+async def websocket_endpoint_root(websocket: WebSocket):
+    await _handle_websocket(websocket)

@@ -1,6 +1,6 @@
-name: mobile
-description: "A new Flutter project."
-publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+name: maya_smart_home
+description: "Maya Smart Home mobile app - BLE provisioning and 3-channel relay control."
+publish_to: 'none'
 version: 1.0.0+1
 
 environment:

@@ -57,7 +57,7 @@ flowchart LR
 Key ideas:
 - **Provisioning path** (one-time / occasional): Mobile → ESP32 over BLE to set WiFi credentials, server WebSocket URL, and a security PIN.
 - **Control path** (runtime): Mobile sends commands via server WebSocket; server forwards to the device WebSocket by `target_id`.
-- **State persistence**: Server records device heartbeats and the most recent LED status in SQLite.
+- **State persistence**: Server records device heartbeats, channel relay states, accounts, children profiles, and permissions in SQLite.
 
 ## Module Responsibilities
 
@@ -67,9 +67,9 @@ Primary responsibilities:
 - Host a BLE “setup” service for provisioning (SSID/PASS/WS URL/PIN).
 - Persist settings to ESP32 Preferences storage.
 - Connect/reconnect WiFi, then connect/reconnect a WebSocket client to the backend.
-- Validate incoming commands with a PIN and control the onboard LED (`LED_PIN=2`).
+- Validate incoming commands with a PIN and control 3 output channels (GPIO 2, 4, 5).
 
-Entrypoint: [smartextension.ino](file:///workspace/hardware/smartextension/smartextension.ino)
+Entrypoint: [smartextension.ino](file:///c:/dev/fyp/Maya-Smarthome-AI/hardware/smartextension/smartextension.ino)
 
 ### Software: FastAPI server
 
@@ -77,10 +77,10 @@ Primary responsibilities:
 - Accept WebSocket connections from multiple clients (devices and mobile clients).
 - Identify each connection by an `id` received in JSON messages.
 - Route “command” messages from a sender (mobile) to a target device.
-- Persist heartbeats and LED state changes to SQLite.
-- Serve an HTTP endpoint for mobile UI to query the latest LED status.
+- Persist heartbeats, message history, user accounts, and relay state changes to SQLite.
+- Serve HTTP endpoints for mobile and web clients to authenticate, log in, register devices, and query status.
 
-Entrypoint: [main.py](file:///workspace/software/server/main.py)
+Entrypoint: [main.py](file:///c:/dev/fyp/Maya-Smarthome-AI/software/server/main.py)
 
 ### Software: Flutter mobile app
 
@@ -88,15 +88,15 @@ Primary responsibilities:
 - Provide a BLE provisioning UI to send WiFi credentials, WebSocket URL, and PIN to the ESP32.
 - Save WebSocket URL / PIN / device ID locally using shared preferences.
 - Provide a WebSocket control UI to send commands to the server.
-- Fetch LED status via HTTP to render current state.
+- Fetch device status via HTTP or WebSocket to render current state.
 
-Entrypoint: [main.dart](file:///workspace/software/mobile/lib/main.dart)
+Entrypoint: [main.dart](file:///c:/dev/fyp/Maya-Smarthome-AI/software/mobile/lib/main.dart)
 
 ## Cross-Component Protocols
 
 ### BLE provisioning (Mobile → ESP32)
 
-The mobile app scans for an ESP32 advertising as **`MyIoT-Setup`**, connects, discovers a custom service, then writes characteristics:
+The mobile app scans for an ESP32 advertising as **`Maya-Setup`**, connects, discovers a custom service, then writes characteristics:
 - Service UUID: `12345678-1234-1234-1234-123456789000`
 - SSID UUID: `...9001`
 - Password UUID: `...9002`
@@ -104,8 +104,8 @@ The mobile app scans for an ESP32 advertising as **`MyIoT-Setup`**, connects, di
 - WebSocket URL UUID: `...9004`
 
 References:
-- Flutter constants: [provision_screen.dart](file:///workspace/software/mobile/lib/screens/provision_screen.dart#L8-L12)
-- Firmware UUIDs: [smartextension.ino](file:///workspace/hardware/smartextension/smartextension.ino#L32-L39)
+- Flutter constants: [provision_screen.dart](file:///c:/dev/fyp/Maya-Smarthome-AI/software/mobile/lib/screens/provision_screen.dart#L9-L13)
+- Firmware UUIDs: [smartextension.ino](file:///c:/dev/fyp/Maya-Smarthome-AI/hardware/smartextension/smartextension.ino#L56-L61)
 
 Provisioning flow:
 1. ESP32 starts advertising when no WiFi SSID exists in storage, or after repeated WiFi failures.
@@ -116,205 +116,225 @@ Provisioning flow:
 4. ESP32 stores SSID/PASS/WS/PIN in Preferences and stops BLE provisioning.
 
 Reference implementation:
-- ESP32 provisioning loop: [startBLEProvisioning](file:///workspace/hardware/smartextension/smartextension.ino#L127-L211)
-- Flutter write sequence: [_provisionDevice](file:///workspace/software/mobile/lib/screens/provision_screen.dart#L129-L167)
+- ESP32 provisioning loop: [startBLEProvisioning](file:///c:/dev/fyp/Maya-Smarthome-AI/hardware/smartextension/smartextension.ino#L135-L199)
+- Flutter write sequence: [_provisionDevice](file:///c:/dev/fyp/Maya-Smarthome-AI/software/mobile/lib/screens/provision_screen.dart#L135-L193)
 
 ### WebSocket runtime control (Mobile ⇄ Server ⇄ ESP32)
 
 Both the mobile app and the ESP32 connect to the server WebSocket endpoint:
-- Server endpoint: [websocket_endpoint](file:///workspace/software/server/main.py#L94-L183) (`/ws`)
+- Server endpoint: [websocket_endpoint](file:///c:/dev/fyp/Maya-Smarthome-AI/software/server/main.py#L814-L821) (`/ws` or `/`)
 
 Identification message:
 - On first message, the server expects a JSON payload containing an `id`.
 - The server uses `id` to register the WebSocket for later routing.
 
 Reference:
-- Server identification logic: [ConnectionManager.identify](file:///workspace/software/server/main.py#L13-L47)
+- Server identification logic: [ConnectionManager.identify](file:///c:/dev/fyp/Maya-Smarthome-AI/software/server/main.py#L50-L55)
 
 Common message shapes:
 
 1) Device online announcement (ESP32 → Server)
 
 ```json
-{ "id": "esp32-9f83b1c1", "status": "online", "ip": "192.168.1.50" }
+{ "id": "esp32-9f83b1c1", "status": "online", "ip": "192.168.1.50", "ch1": "off", "ch2": "off", "ch3": "off" }
 ```
 
 References:
-- ESP32 send on connect: [webSocketEvent](file:///workspace/hardware/smartextension/smartextension.ino#L242-L262)
-- Server handling: [main.py](file:///workspace/software/server/main.py#L124-L133)
+- ESP32 send on connect: [webSocketEvent](file:///c:/dev/fyp/Maya-Smarthome-AI/hardware/smartextension/smartextension.ino#L266-L282)
+- Server handling: [main.py](file:///c:/dev/fyp/Maya-Smarthome-AI/software/server/main.py#L736-L761)
 
 2) Heartbeat (ESP32 → Server)
 
 ```json
-{ "id": "esp32-9f83b1c1", "type": "heartbeat", "uptime_ms": 123456 }
+{ "id": "esp32-9f83b1c1", "type": "heartbeat", "uptime_ms": 123456, "ch1": "off", "ch2": "off", "ch3": "off" }
 ```
 
 References:
-- ESP32 periodic send: [smartextension.ino](file:///workspace/hardware/smartextension/smartextension.ino#L461-L471)
-- Server handling: [main.py](file:///workspace/software/server/main.py#L114-L123)
+- ESP32 periodic send: [smartextension.ino](file:///c:/dev/fyp/Maya-Smarthome-AI/hardware/smartextension/smartextension.ino#L475-L488)
+- Server handling: [main.py](file:///c:/dev/fyp/Maya-Smarthome-AI/software/server/main.py#L716-L734)
 
 3) Command (Mobile → Server) and routing (Server → ESP32)
 
-Mobile sends:
+Mobile sends command payload via WebSocket or HTTP `/api/devices/{device_id}/command`.
+For WebSocket forwarding, the server routes the message:
 
 ```json
-{
-  "id": "mobile-client-01",
-  "target_id": "esp32-9f83b1c1",
-  "cmd": "led_on",
-  "pin": "0000"
-}
-```
-
-Server forwards (note: server rewrites the payload to target the device ID):
-
-```json
-{ "id": "esp32-9f83b1c1", "cmd": "led_on", "pin": "0000" }
+{ "id": "esp32-9f83b1c1", "cmd": "output_on", "channel": 1, "pin": "0000" }
 ```
 
 References:
-- Mobile send: [_sendCommand](file:///workspace/software/mobile/lib/screens/control_screen.dart#L115-L128)
-- Server route: [main.py](file:///workspace/software/server/main.py#L134-L155)
-- Device receive + enforce PIN: [webSocketEvent](file:///workspace/hardware/smartextension/smartextension.ino#L285-L337)
+- Mobile send command over WS: [_sendCommand](file:///c:/dev/fyp/Maya-Smarthome-AI/software/mobile/lib/screens/control_screen.dart#L123-L139)
+- Server WebSocket command route: [main.py](file:///c:/dev/fyp/Maya-Smarthome-AI/software/server/main.py#L762-L777)
+- Device receive + enforce PIN: [webSocketEvent](file:///c:/dev/fyp/Maya-Smarthome-AI/hardware/smartextension/smartextension.ino#L284-L370)
 
 4) Acknowledgement (ESP32 → Server)
 
 ```json
-{ "id": "esp32-9f83b1c1", "led": "on", "status": "ok" }
+{ "id": "esp32-9f83b1c1", "status": "ok", "ch1": "on", "ch2": "off", "ch3": "off" }
 ```
 
-Server uses this to persist LED state, which enables the mobile app to fetch the last known state via HTTP.
+Server uses this to persist relay states and update database.
 
 References:
-- ESP32 ack: [smartextension.ino](file:///workspace/hardware/smartextension/smartextension.ino#L303-L327)
-- Server persistence: [main.py](file:///workspace/software/server/main.py#L158-L178)
+- ESP32 ack: [smartextension.ino](file:///c:/dev/fyp/Maya-Smarthome-AI/hardware/smartextension/smartextension.ino#L245-L255)
+- Server updates: [main.py](file:///c:/dev/fyp/Maya-Smarthome-AI/software/server/main.py#L778-L800)
 
 ### HTTP status query (Mobile → Server)
 
-Mobile uses HTTP to fetch the last persisted LED status:
-- `GET /device/{device_id}/status`
+Mobile uses HTTP to fetch the last persisted relay statuses:
+- `GET /device/{device_id}/status` (Legacy) or `/api/devices/{device_id}`
 
 References:
-- Server endpoint: [get_device_status](file:///workspace/software/server/main.py#L51-L64)
-- Mobile fetch: [_fetchLedStatus](file:///workspace/software/mobile/lib/screens/control_screen.dart#L42-L65)
+- Server legacy endpoint: [get_device_status_legacy](file:///c:/dev/fyp/Maya-Smarthome-AI/software/server/main.py#L656-L669)
+- Mobile fetch: [_fetchChannelStates](file:///c:/dev/fyp/Maya-Smarthome-AI/software/mobile/lib/screens/control_screen.dart#L52-L69)
+
+---
 
 ## Backend (FastAPI) Deep Dive
 
 ### Key modules
 
-- [main.py](file:///workspace/software/server/main.py): API surface and WebSocket routing loop.
-- [database.py](file:///workspace/software/server/database.py): SQLAlchemy engine + `get_db()` dependency injection.
-- [models.py](file:///workspace/software/server/models.py): ORM models `Heartbeat` and `DeviceState`.
+- [main.py](file:///c:/dev/fyp/Maya-Smarthome-AI/software/server/main.py): API endpoints, WebSocket connection and message router loop.
+- [database.py](file:///c:/dev/fyp/Maya-Smarthome-AI/software/server/database.py): SQLite database configuration and session helpers.
+- [models.py](file:///c:/dev/fyp/Maya-Smarthome-AI/software/server/models.py): Object Relational Mapping (ORM) models for all 9 database tables.
+- [auth.py](file:///c:/dev/fyp/Maya-Smarthome-AI/software/server/auth.py): JWT token utility functions and dependency injections for authenticating user and child roles.
 
 ### Key classes and functions
 
 #### `ConnectionManager`
 
-File: [main.py](file:///workspace/software/server/main.py#L13-L48)
+File: [main.py](file:///c:/dev/fyp/Maya-Smarthome-AI/software/server/main.py#L24-L78)
 
 Responsibilities:
-- Track **identified** connections (`active_connections[id] = websocket`).
-- Track **unidentified** connections (connected but no `id` message received yet).
-- Send a message to a specific connection by ID (`send_personal_message`).
+- Track active and unidentified WebSocket connections.
+- Keep in-memory device metadata (e.g. status, IP address, uptime).
+- Support bidirectional synchronization, waiting for command execution acknowledgements (`wait_for_ack`, `resolve_ack`).
 
-Notes:
-- Identification happens opportunistically when the first JSON message with `id` arrives.
+#### `_handle_websocket`
 
-#### `websocket_endpoint`
-
-File: [main.py](file:///workspace/software/server/main.py#L94-L183)
+File: [main.py](file:///c:/dev/fyp/Maya-Smarthome-AI/software/server/main.py#L697-L813)
 
 Responsibilities:
-- Accept WebSocket connections and wait in a receive loop.
-- Parse incoming JSON messages and classify them by content:
-  - `type == "heartbeat"` → insert a `Heartbeat` row.
-  - `status == "online"` → insert a `Heartbeat` row with IP.
-  - `"cmd" in json` → route to `target_id` device via `ConnectionManager`.
-  - `status == "ok"` and `"led" in json` → upsert `DeviceState`.
+- Manage the main WebSocket event router loop.
+- Process `"heartbeat"`, `"status" == "online"`, and ack `"status" == "ok"` messages.
+- Updates device state configurations (`Device` and `Relay` fields) in SQLite and appends logs to `Heartbeat`.
 
-#### `get_device_status`
-
-File: [main.py](file:///workspace/software/server/main.py#L51-L64)
-
-Responsibilities:
-- Query `DeviceState` by `device_id` and return the last known `led_status`.
-
-#### `get_db`
-
-File: [database.py](file:///workspace/software/server/database.py#L13-L18)
-
-Responsibilities:
-- Provide a SQLAlchemy session via FastAPI dependency injection and ensure it is closed.
+---
 
 ## Mobile (Flutter) Deep Dive
 
 ### Screens and responsibilities
 
-- [HomeScreen](file:///workspace/software/mobile/lib/screens/home_screen.dart#L5-L40): entry navigation between provisioning and control screens.
-- [ProvisionScreen](file:///workspace/software/mobile/lib/screens/provision_screen.dart#L14-L238): BLE scan/connect + characteristic writes; stores settings in shared preferences.
-- [ControlScreen](file:///workspace/software/mobile/lib/screens/control_screen.dart#L8-L259): WebSocket connect + command sending; HTTP status polling.
+- [HomeScreen](file:///c:/dev/fyp/Maya-Smarthome-AI/software/mobile/lib/screens/home_screen.dart): Landing panel for navigating between BLE setup, authentication, and output controls.
+- [ProvisionScreen](file:///c:/dev/fyp/Maya-Smarthome-AI/software/mobile/lib/screens/provision_screen.dart): Discovers and binds WiFi/WebSocket credentials over BLE to the device.
+- [ControlScreen](file:///c:/dev/fyp/Maya-Smarthome-AI/software/mobile/lib/screens/control_screen.dart): Provides controls for toggling outputs (CH1, CH2, CH3) over WebSockets and polls status.
+- [AuthScreen](file:///c:/dev/fyp/Maya-Smarthome-AI/software/mobile/lib/screens/auth_screen.dart): Authenticates or registers parent and home details on the server.
 
-### Key functions
-
-#### Provisioning flow
-
-File: [provision_screen.dart](file:///workspace/software/mobile/lib/screens/provision_screen.dart)
-- `_checkPermissions()` requests Bluetooth scan/connect and location permissions (Android needs these for BLE scanning).
-- `_startScan()` scans for a device whose `platformName` is `MyIoT-Setup`.
-- `_connectToDevice()` connects, discovers the custom provisioning service and characteristic UUIDs.
-- `_provisionDevice()` writes SSID/PASS/WS URL/PIN, then persists `ws_url`, `device_pin`, and a hard-coded `device_id`.
-
-#### Control flow
-
-File: [control_screen.dart](file:///workspace/software/mobile/lib/screens/control_screen.dart)
-- `_loadSettings()` populates UI fields from shared preferences.
-- `_connect()` creates a WebSocket connection and sends an initial `{id,status}` online message.
-- `_sendCommand(cmd)` sends `{id,target_id,cmd,pin}` commands to the server.
-- `_fetchLedStatus()` converts `ws://host:port/ws` to `http://host:port` and requests `GET /device/{device_id}/status`.
+---
 
 ## Device (ESP32) Deep Dive
 
 ### Key functions
 
-File: [smartextension.ino](file:///workspace/hardware/smartextension/smartextension.ino)
-- `loadSettings()` / `saveSettings()` read/write WiFi/WS/PIN from ESP32 Preferences.
-- `startBLEProvisioning()` starts a BLE server and blocks in a provisioning loop until all required values are received (or timeout).
-- `connectToWiFiOnce()` attempts WiFi connection with a limited retry loop.
-- `startWebSocket()` parses `ws_url` into host/port/path and creates a WebSocket connection (SSL for `wss://`).
-- `webSocketEvent()` handles connect/disconnect and incoming command JSON; enforces PIN and produces acknowledgements.
-- `setup()` boots, enters provisioning if needed, then connects WiFi and starts WebSocket.
-- `loop()` watchdogs WiFi, runs `webSocket.loop()`, and sends heartbeat periodically.
+File: [smartextension.ino](file:///c:/dev/fyp/Maya-Smarthome-AI/hardware/smartextension/smartextension.ino)
+- `setup()` initializes output pins (GPIO 2, 4, and 5) and starts connectivity modules.
+- `startBLEProvisioning()` boots BLE server to advertise characteristics.
+- `webSocketEvent()` handles incoming JSON commands (`output_on`, `output_off`, `output_toggle`, `all_on`, `all_off`) and validates security credentials (PIN).
+- `loop()` ensures connection survival and emits heartbeats every 30 seconds.
 
-### Device identity
-
-The firmware uses a hard-coded ID:
-- `DEVICE_ID = "esp32-9f83b1c1"` in [smartextension.ino](file:///workspace/hardware/smartextension/smartextension.ino#L29-L31)
-
-The mobile app default device ID matches this:
-- [ProvisionScreen](file:///workspace/software/mobile/lib/screens/provision_screen.dart#L158-L162)
-- [ControlScreen](file:///workspace/software/mobile/lib/screens/control_screen.dart#L18-L20)
-
-If you need multiple devices, the firmware and mobile app must be updated to support unique IDs per device.
+---
 
 ## Data Model (SQLite)
 
 Database file:
-- `iot_data.db` in the server working directory (created at runtime)
+- `iot_data.db` (created in the server directory at runtime)
 
-Models:
-- [Heartbeat](file:///workspace/software/server/models.py#L6-L14)
-- [DeviceState](file:///workspace/software/server/models.py#L16-L22)
+The system defines 9 interdependent tables representing households, accounts, devices, child logins, permissions, logs, and messaging history.
 
-Tables:
-- `heartbeats`
-  - `device_id`: ID for ESP32 or other clients (mobile also identifies, but only heartbeats/online are stored)
-  - `uptime_ms`: optional
-  - `ip_address`: optional
-  - `timestamp`: server timestamp
-- `device_states`
-  - `device_id`: unique device key
-  - `led_status`: `"on"|"off"|...`
-  - `updated_at`: timestamp (note: current code does not update this field when changing `led_status`)
+### Database Schema Details & Field Map
+
+```mermaid
+erDiagram
+    houses ||--o{ accounts : "contains"
+    houses ||--o{ children : "registers"
+    houses ||--o{ devices : "owns"
+    houses ||--o{ msg_history : "logs"
+    children ||--o{ permissions : "has"
+    devices ||--o{ smart_extensions : "contains"
+    smart_extensions ||--o{ relays : "contains"
+    relays ||--o{ permissions : "governs"
+```
+
+1. **`accounts`** (`Account` model):
+   * `acc_id` (Primary Key)
+   * `house_id` (Foreign Key referencing `houses.house_id`)
+   * `email` (Unique login email)
+   * `password` (Hashed password string)
+   * `name` (User display name)
+   * `role` (Enum: `parent`, `admin`, `child`)
+   * `is_master` / `is_home` (Boolean flags)
+   * `created_at` (Timestamp)
+
+2. **`houses`** (`House` model):
+   * `house_id` (Primary Key)
+   * `location` (String physical location details)
+   * `created_at` (Timestamp)
+
+3. **`children`** (`Child` model):
+   * `child_id` (Primary Key)
+   * `house_id` (Foreign Key referencing `houses.house_id`)
+   * `name` (Child display name)
+   * `pin` (Hashed PIN for login validation)
+   * `is_home` (Boolean location state)
+   * `created_at` (Timestamp)
+
+4. **`devices`** (`Device` model):
+   * `device_id` (Primary Key string, e.g., `esp32-9f83b1c1`)
+   * `house_id` (Foreign Key referencing `houses.house_id`)
+   * `name` (Custom extension name)
+   * `status` (Offline/Online/Registered text state)
+   * `price` (Price variable)
+   * `blocked` (Boolean lockout flag managed by admins)
+   * `created_at` (Timestamp)
+
+5. **`smart_extensions`** (`SmartExtension` model):
+   * `se_id` (Primary Key)
+   * `device_id` (Foreign Key referencing `devices.device_id`)
+   * `name` (Name string)
+   * `created_at` (Timestamp)
+
+6. **`relays`** (`Relay` model):
+   * `relay_id` (Primary Key)
+   * `se_id` (Foreign Key referencing `smart_extensions.se_id`)
+   * `name` (Name string)
+   * `channel_number` (Integer identifier: 1, 2, or 3)
+   * `is_on` (Boolean relay activation state)
+   * *Constraint:* Unique combo of `se_id` + `channel_number`
+
+7. **`permissions`** (`Permission` model):
+   * `permission_id` (Primary Key)
+   * `child_id` (Foreign Key referencing `children.child_id`)
+   * `relay_id` (Foreign Key referencing `relays.relay_id`)
+   * `is_allowed` (Boolean authorization flag)
+   * *Constraint:* Unique combo of `child_id` + `relay_id`
+
+8. **`msg_history`** (`MsgHistory` model):
+   * `msg_id` (Primary Key)
+   * `house_id` (Foreign Key referencing `houses.house_id`)
+   * `sender_id` (ID of the account or child profile)
+   * `sender_type` (Sender type tag)
+   * `message` (Log / message body text)
+   * `timestamp` (Timestamp)
+
+9. **`heartbeats`** (`Heartbeat` model):
+   * `id` (Primary Key)
+   * `device_id` (Device identifier)
+   * `uptime_ms` (Current uptime duration)
+   * `ip_address` (Network IP string)
+   * `ch1`, `ch2`, `ch3` (Output channel states: `"on"` or `"off"`)
+   * `timestamp` (Timestamp)
+
+---
 
 ## Dependency Relationships
 
@@ -333,17 +353,17 @@ Tables:
 
 ### Code dependencies (by package/module)
 
-- Server Python deps: [requirements.txt](file:///workspace/software/server/requirements.txt)
+- Server Python deps: [requirements.txt](file:///c:/dev/fyp/Maya-Smarthome-AI/software/server/requirements.txt)
   - `fastapi` + `uvicorn` for serving HTTP/WebSocket
   - `websockets` as WebSocket support
   - `sqlalchemy` for persistence
-- Flutter deps: [pubspec.yaml](file:///workspace/software/mobile/pubspec.yaml)
+- Flutter deps: [pubspec.yaml](file:///c:/dev/fyp/Maya-Smarthome-AI/software/mobile/pubspec.yaml)
   - `flutter_blue_plus` for BLE
   - `web_socket_channel` for WebSocket client
   - `http` for HTTP calls
   - `shared_preferences` for local settings
   - `permission_handler` for Android runtime permissions
-- ESP32 Arduino libs (by include): [smartextension.ino](file:///workspace/hardware/smartextension/smartextension.ino#L15-L22)
+- ESP32 Arduino libs (by include): [smartextension.ino](file:///c:/dev/fyp/Maya-Smarthome-AI/hardware/smartextension/smartextension.ino#L18-L25)
   - `WiFi`, `Preferences`, ESP32 BLE (`BLEDevice`, `BLEServer`, …)
   - `WebSocketsClient`
   - `ArduinoJson`
@@ -364,7 +384,8 @@ uvicorn main:app --host 0.0.0.0 --port 8000
 
 Endpoints:
 - WebSocket: `ws://<server-ip>:8000/ws`
-- Device status: `http://<server-ip>:8000/device/esp32-9f83b1c1/status`
+- Device status: `http://<server-ip>:8000/api/devices/esp32-9f83b1c1`
+- Admin dashboard: `http://<server-ip>:8000/admin`
 - Debug DB dump: `http://<server-ip>:8000/db`
 
 ### 2) Flash the ESP32 firmware
@@ -374,12 +395,12 @@ Prereqs:
 - Libraries: ArduinoJson, WebSocketsClient (and ESP32 BLE support enabled by ESP32 core)
 
 Steps (Arduino IDE):
-1. Open [smartextension.ino](file:///workspace/hardware/smartextension/smartextension.ino).
+1. Open [smartextension.ino](file:///c:/dev/fyp/Maya-Smarthome-AI/hardware/smartextension/smartextension.ino).
 2. Select the correct ESP32 board + serial port.
 3. Upload the sketch.
 
 Runtime behavior:
-- If no SSID is saved, the device advertises BLE name `MyIoT-Setup`.
+- If no SSID is saved, the device advertises BLE name `Maya-Setup`.
 - After provisioning, the device connects to WiFi and then to the server WebSocket URL.
 
 ### 3) Run the Flutter mobile app
@@ -394,11 +415,11 @@ flutter run
 
 Usage:
 1. Use “Provision Device (BLE)” to configure SSID/PASS, WebSocket URL (e.g. `ws://192.168.1.100:8000/ws`), and PIN.
-2. Use “Control Device (WebSocket)” to connect to the server and send LED commands.
+2. Use “Control Device (WebSocket)” to connect to the server and send commands.
 
 ## Troubleshooting
 
-- BLE scan does not find `MyIoT-Setup`
+- BLE scan does not find `Maya-Setup`
   - Confirm the ESP32 is powered and in provisioning mode (no saved SSID or forced provisioning).
   - On Android, ensure Bluetooth and Location are enabled and permissions are granted.
 - Mobile connects to WebSocket but commands do nothing
@@ -407,4 +428,4 @@ Usage:
   - Confirm the device is connected to the server (server logs should show it identified).
 - LED status shows as `unknown`
   - The server only updates LED state after receiving an ESP32 `{"status":"ok","led":"..."}` acknowledgement.
-  - Trigger a command (LED ON/OFF) to cause an acknowledgement and persistence.
+  - Trigger a command (turn channel ON/OFF) to cause an acknowledgement and persistence.

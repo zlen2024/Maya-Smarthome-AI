@@ -1,256 +1,288 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:web_socket_channel/web_socket_channel.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
-import 'package:http/http.dart' as http;
+import '../services/api_service.dart';
 
 class ControlScreen extends StatefulWidget {
-  const ControlScreen({super.key});
+  final String deviceId;
+  final String deviceName;
+
+  const ControlScreen({
+    super.key,
+    required this.deviceId,
+    required this.deviceName,
+  });
 
   @override
   State<ControlScreen> createState() => _ControlScreenState();
 }
 
 class _ControlScreenState extends State<ControlScreen> {
-  final TextEditingController _urlController = TextEditingController();
   final TextEditingController _pinController = TextEditingController();
-  final TextEditingController _deviceIdController = TextEditingController(
-    text: "esp32-9f83b1c1",
-  );
+  StreamSubscription? _broadcastSubscription;
 
-  WebSocketChannel? _channel;
-  bool _isConnected = false;
-  String _statusLog = "Disconnected";
-  String _ledStatus = "unknown";
+  String _statusLog = "Loading device status...";
+  String _ch1 = "off";
+  String _ch2 = "off";
+  String _ch3 = "off";
 
   @override
   void initState() {
     super.initState();
     _loadSettings();
-  }
-
-  Future<void> _loadSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    _urlController.text =
-        prefs.getString('ws_url') ?? "ws://192.168.1.100:8000/ws";
-    _pinController.text = prefs.getString('device_pin') ?? "0000";
-    _deviceIdController.text = prefs.getString('device_id') ?? "esp32-9f83b1c1";
-    setState(() {});
-  }
-
-  Future<void> _fetchLedStatus() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final url = prefs.getString('ws_url') ?? "ws://192.168.1.100:8000/ws";
-      final uri = Uri.parse(
-        url.replaceFirst('ws://', 'http://').replaceFirst('/ws', ''),
-      );
-      final deviceId = _deviceIdController.text;
-
-      final response = await http.get(
-        Uri.parse(
-          '${uri.toString().replaceAll(uri.path, '')}/device/$deviceId/status',
-        ),
-      );
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        setState(() {
-          _ledStatus = data['led_status'] ?? 'unknown';
-        });
-      }
-    } catch (e) {
-      print("Failed to fetch LED status: $e");
-    }
-  }
-
-  void _connect() {
-    if (_urlController.text.isEmpty) return;
-
-    try {
-      _channel = WebSocketChannel.connect(Uri.parse(_urlController.text));
-
-      setState(() {
-        _isConnected = true;
-        _statusLog = "Connected to Server";
-      });
-
-      _channel!.stream.listen((message) {
-        print("Received: $message");
-        final data = jsonDecode(message);
-        if (data['led'] != null) {
-          setState(() {
-            _ledStatus = data['led'];
-          });
-        }
-        if (data['status'] == 'pin_mismatch') {
-          setState(() {
-            _statusLog = "ERROR: PIN Mismatch!";
-          });
-        }
-      });
-
-      _channel!.sink.add(
-        jsonEncode({"id": "mobile-client-01", "status": "online"}),
-      );
-
-      _fetchLedStatus();
-    } catch (e) {
-      setState(() {
-        _statusLog = "Connection Error: $e";
-      });
-    }
-  }
-
-  void _disconnect() {
-    if (_channel != null) {
-      _channel!.sink.close();
-      setState(() {
-        _isConnected = false;
-        _statusLog = "Disconnected";
-      });
-    }
-  }
-
-  void _sendCommand(String cmd) {
-    if (_channel != null && _deviceIdController.text.isNotEmpty) {
-      final payload = jsonEncode({
-        "id": "mobile-client-01",
-        "target_id": _deviceIdController.text,
-        "cmd": cmd,
-        "pin": _pinController.text,
-      });
-      _channel!.sink.add(payload);
-      setState(() {
-        _statusLog = "Sent command: $cmd to ${_deviceIdController.text}";
-      });
-    }
+    _fetchChannelStates();
+    _listenToBroadcasts();
   }
 
   @override
   void dispose() {
-    _channel?.sink.close();
+    _broadcastSubscription?.cancel();
+    _pinController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    _pinController.text = prefs.getString('device_pin') ?? "0000";
+    setState(() {});
+  }
+
+  void _listenToBroadcasts() {
+    _broadcastSubscription = ApiService.broadcasts.listen((data) {
+      if (data['device_id'] == widget.deviceId) {
+        setState(() {
+          if (data['type'] == 'device_update') {
+            _ch1 = data['ch1'] ?? _ch1;
+            _ch2 = data['ch2'] ?? _ch2;
+            _ch3 = data['ch3'] ?? _ch3;
+            _statusLog = "Status updated in real-time";
+          } else if (data['type'] == 'device_offline') {
+            _statusLog = "Device went offline";
+          }
+        });
+      }
+    });
+  }
+
+  Future<void> _fetchChannelStates() async {
+    try {
+      final response = await ApiService.get('/api/devices/${widget.deviceId}');
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        setState(() {
+          _ch1 = data['ch1'] ?? 'off';
+          _ch2 = data['ch2'] ?? 'off';
+          _ch3 = data['ch3'] ?? 'off';
+          final online = data['online'] ?? false;
+          _statusLog = online ? "Connected / Online" : "Offline";
+        });
+      } else {
+        setState(() {
+          _statusLog = "Failed to load device: ${response.statusCode}";
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _statusLog = "Error checking status: $e";
+      });
+    }
+  }
+
+  Future<void> _sendCommand(String cmd, {int? channel}) async {
+    setState(() {
+      _statusLog = "Sending command: $cmd...";
+    });
+
+    try {
+      // Save device_pin for convenience
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('device_pin', _pinController.text);
+
+      final body = {
+        "cmd": cmd,
+        if (channel != null) "channel": channel,
+        "pin": _pinController.text,
+      };
+
+      final response = await ApiService.post('/api/devices/${widget.deviceId}/command', body);
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        final status = data['status'] ?? '';
+
+        if (status == 'ok') {
+          setState(() {
+            _ch1 = data['ch1'] ?? _ch1;
+            _ch2 = data['ch2'] ?? _ch2;
+            _ch3 = data['ch3'] ?? _ch3;
+            _statusLog = "Command successful: $cmd";
+          });
+        } else if (status == 'blocked') {
+          setState(() => _statusLog = "ERROR: Device is blocked by admin");
+        } else if (status == 'not_connected') {
+          setState(() => _statusLog = "ERROR: Device is not connected");
+        } else if (status == 'timeout') {
+          setState(() => _statusLog = "ERROR: Device timeout");
+        } else {
+          setState(() => _statusLog = "ERROR: $status");
+        }
+      } else {
+        final data = jsonDecode(response.body);
+        final detail = data['detail'] ?? "Error ${response.statusCode}";
+        setState(() => _statusLog = "ERROR: $detail");
+      }
+    } catch (e) {
+      setState(() {
+        _statusLog = "Connection error: $e";
+      });
+    }
+  }
+
+  void _sendChannelCommand(int channel, bool turnOn) {
+    _sendCommand(turnOn ? "output_on" : "output_off", channel: channel);
+    setState(() {
+      if (channel == 1) _ch1 = turnOn ? "on" : "off";
+      if (channel == 2) _ch2 = turnOn ? "on" : "off";
+      if (channel == 3) _ch3 = turnOn ? "on" : "off";
+    });
+  }
+
+  Color _chColor(int ch) {
+    return [Colors.blue, Colors.green, Colors.orange][ch - 1];
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Device Control")),
+      appBar: AppBar(
+        title: Text(widget.deviceName),
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20.0),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Container(
-              padding: const EdgeInsets.all(10),
-              color: Colors.grey[200],
-              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey[200],
+                borderRadius: BorderRadius.circular(8),
+              ),
               child: Text(
                 _statusLog,
-                style: const TextStyle(fontWeight: FontWeight.bold),
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                textAlign: TextAlign.center,
               ),
             ),
             const SizedBox(height: 20),
-
-            TextField(
-              controller: _urlController,
-              decoration: const InputDecoration(
-                labelText: "WebSocket Server URL",
-              ),
-              enabled: !_isConnected,
-            ),
             TextField(
               controller: _pinController,
-              decoration: const InputDecoration(labelText: "PIN"),
-            ),
-            TextField(
-              controller: _deviceIdController,
-              decoration: const InputDecoration(labelText: "Target Device ID"),
-            ),
-            const SizedBox(height: 20),
-
-            if (!_isConnected)
-              ElevatedButton(
-                onPressed: _connect,
-                child: const Text("Connect to Server"),
-              )
-            else
-              ElevatedButton(
-                onPressed: _disconnect,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  foregroundColor: Colors.white,
-                ),
-                child: const Text("Disconnect"),
+              decoration: const InputDecoration(
+                labelText: "Device PIN (For Relay Access)",
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.lock_outline),
               ),
-
-            const SizedBox(height: 40),
-
-            if (_isConnected) ...[
-              const Text(
-                "LED Status",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 10),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    _ledStatus == "on"
-                        ? Icons.lightbulb
-                        : Icons.lightbulb_outline,
-                    size: 60,
-                    color: _ledStatus == "on" ? Colors.amber : Colors.grey,
+              obscureText: true,
+            ),
+            const SizedBox(height: 30),
+            const Text(
+              "Relay Channels",
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            _channelCard(1, "Channel 1", _ch1, _chColor(1), Icons.power_settings_new),
+            const SizedBox(height: 10),
+            _channelCard(2, "Channel 2", _ch2, _chColor(2), Icons.power_settings_new),
+            const SizedBox(height: 10),
+            _channelCard(3, "Channel 3", _ch3, _chColor(3), Icons.power_settings_new),
+            const SizedBox(height: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () => _sendCommand("all_on"),
+                    icon: const Icon(Icons.check_circle_outline, color: Colors.white),
+                    label: const Text("All On"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
                   ),
-                  const SizedBox(width: 20),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: () => _sendCommand("all_off"),
+                    icon: const Icon(Icons.remove_circle_outline, color: Colors.white),
+                    label: const Text("All Off"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+            OutlinedButton.icon(
+              onPressed: _fetchChannelStates,
+              icon: const Icon(Icons.refresh),
+              label: const Text("Refresh Status"),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _channelCard(int ch, String label, String state, Color color, IconData icon) {
+    final isOn = state == "on";
+    return Card(
+      elevation: isOn ? 3 : 1,
+      color: isOn ? color.withOpacity(0.12) : Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(
+          color: isOn ? color.withOpacity(0.5) : Colors.grey[300]!,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: Row(
+          children: [
+            CircleAvatar(
+              backgroundColor: isOn ? color.withOpacity(0.2) : Colors.grey[200],
+              child: Icon(icon, color: isOn ? color : Colors.grey[600]),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
                   Text(
-                    _ledStatus.toUpperCase(),
+                    isOn ? "ON" : "OFF",
                     style: TextStyle(
-                      fontSize: 24,
+                      fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: _ledStatus == "on" ? Colors.amber : Colors.grey,
+                      color: isOn ? color : Colors.grey[600],
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 20),
-              Switch(
-                value: _ledStatus == "on",
-                onChanged: (value) {
-                  _sendCommand(value ? "led_on" : "led_off");
-                },
-              ),
-              const SizedBox(height: 20),
-              const Text(
-                "Device Commands",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  ElevatedButton(
-                    onPressed: () => _sendCommand("led_on"),
-                    child: const Text("LED ON"),
-                  ),
-                  ElevatedButton(
-                    onPressed: () => _sendCommand("led_off"),
-                    child: const Text("LED OFF"),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: () => _sendCommand("toggle"),
-                child: const Text("TOGGLE LED"),
-              ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: () => _sendCommand("reboot"),
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.orange),
-                child: const Text("REBOOT DEVICE"),
-              ),
-            ],
+            ),
+            Switch(
+              value: isOn,
+              activeColor: color,
+              onChanged: (val) => _sendChannelCommand(ch, val),
+            ),
           ],
         ),
       ),

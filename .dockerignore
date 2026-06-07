@@ -1,0 +1,29 @@
+# Version control
+.git
+.gitignore
+
+# Python caches and local virtual environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+software/server/.venv/
+.python-version
+uv.lock
+
+# Databases (prevent overwriting remote production db with a local one)
+*.db
+*.sqlite
+software/server/iot_data.db
+
+# Other subprojects in the monorepo (not needed by backend container)
+hardware/
+software/mobile/
+
+# Documentation and notes
+*.md
+enhanced_plan.md
+models_usage.md
+plan.md
+CODE_WIKI.md

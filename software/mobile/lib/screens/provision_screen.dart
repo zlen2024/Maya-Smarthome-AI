@@ -69,7 +69,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
 
     _scanSubscription = FlutterBluePlus.onScanResults.listen((results) {
       for (ScanResult r in results) {
-        if (r.device.platformName == "MyIoT-Setup") {
+        if (r.device.platformName == "Maya-Setup") {
           _connectToDevice(r.device);
           FlutterBluePlus.stopScan();
           break;
