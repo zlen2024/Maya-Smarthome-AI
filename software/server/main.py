@@ -719,6 +719,26 @@ async def block_device(device_id: str, payload: dict, db: Session = Depends(get_
     return {"device_id": device_id, "blocked": device.blocked}
 
 
+@app.delete("/api/devices/{device_id}")
+async def delete_device(device_id: str, db: Session = Depends(get_db),
+                        current_user: Account = Depends(get_current_user)):
+    if current_user.role not in (AccountRole.parent, AccountRole.admin):
+        raise HTTPException(status_code=403, detail="Only parents/admins can unregister devices")
+    device = db.query(Device).filter(Device.device_id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    if current_user.role != AccountRole.admin and device.house_id is not None and device.house_id != current_user.house_id:
+        raise HTTPException(status_code=403, detail="Device does not belong to your house")
+        
+    ext = db.query(SmartExtension).filter(SmartExtension.device_id == device_id).first()
+    if ext:
+        db.query(Relay).filter(Relay.se_id == ext.se_id).delete()
+        db.delete(ext)
+    db.delete(device)
+    db.commit()
+    return {"status": "deleted", "device_id": device_id}
+
+
 @app.post("/api/devices/{device_id}/command")
 async def send_device_command(device_id: str, payload: dict,
                               db: Session = Depends(get_db),

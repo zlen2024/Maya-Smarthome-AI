@@ -49,6 +49,46 @@ class _DeviceManagementTabState extends State<DeviceManagementTab>
     _fetchDevices(); // Refresh after returning
   }
 
+  Future<void> _confirmDelete(String deviceId, String name) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove Device'),
+        content: Text('Are you sure you want to remove "$name" (ID: $deviceId) from your house?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+              foregroundColor: Theme.of(ctx).colorScheme.onError,
+            ),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true && mounted) {
+      setState(() => _loading = true);
+      try {
+        await ApiService.deleteDevice(deviceId);
+        _fetchDevices();
+      } catch (e) {
+        if (mounted) {
+          setState(() => _loading = false);
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(e.toString().replaceFirst('Exception: ', '')),
+            behavior: SnackBarBehavior.floating,
+          ));
+        }
+      }
+    }
+  }
+
   String _formatUptime(dynamic ms) {
     if (ms == null) return '—';
     final secs = (ms as num).toInt() ~/ 1000;
@@ -162,6 +202,16 @@ class _DeviceManagementTabState extends State<DeviceManagementTab>
                     ),
                   ),
                 ),
+                if (!ApiService.isChild) ...[
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: Icon(Icons.delete_outline_rounded, color: cs.error, size: 20),
+                    onPressed: () => _confirmDelete(device['device_id'], device['name'] ?? 'Unnamed Device'),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
               ],
             ),
             const SizedBox(height: 14),

@@ -241,20 +241,27 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
 
     setState(() {
       _submitting = true;
-      _currentStep = 'registering';
-      _statusMsg = 'Registering device with server...';
+      if (_statusChar == null) {
+        _currentStep = 'registering';
+        _statusMsg = 'Registering device with server...';
+      } else {
+        _currentStep = 'writing';
+        _statusMsg = 'Writing credentials over Bluetooth...';
+      }
     });
 
     try {
-      // 1. REST Register Device to User Account
-      await ApiService.registerDevice(deviceId, name);
+      if (_statusChar == null) {
+        // For older firmware, register first to authorize polling status
+        await ApiService.registerDevice(deviceId, name);
+      }
 
       // ─── Set up notifications BEFORE writing to prevent race conditions ───
       if (_statusChar != null) {
         _statusNotificationSub = _statusChar!.onValueReceived.listen((value) {
           if (!mounted) return;
           final code = utf8.decode(value);
-          _handleBleStatusCode(code);
+          _handleBleStatusCode(code, deviceId, name);
         }, onError: (e) {
           _handleFailure('BLE notification error: $e');
         });
@@ -265,10 +272,12 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
         await Future.delayed(const Duration(milliseconds: 150));
       }
 
-      setState(() {
-        _currentStep = 'writing';
-        _statusMsg = 'Writing credentials over Bluetooth...';
-      });
+      if (_statusChar == null) {
+        setState(() {
+          _currentStep = 'writing';
+          _statusMsg = 'Writing credentials over Bluetooth...';
+        });
+      }
 
       // 2. Write Credentials over BLE
       // Server WebSocket URL: dynamically derived from base API Url (replaces /ws/device)
@@ -302,11 +311,30 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
       }
 
     } catch (e) {
+      if (_statusChar == null) {
+        // Clean up registration on failure for older firmware
+        try {
+          await ApiService.deleteDevice(deviceId);
+        } catch (_) {}
+      }
       _handleFailure(e.toString().replaceFirst('Exception: ', ''));
     }
   }
 
-  void _handleBleStatusCode(String code) {
+  Future<void> _registerDeviceOnSuccessAndComplete(String deviceId, String name) async {
+    setState(() {
+      _currentStep = 'registering';
+      _statusMsg = 'Registering device with your account...';
+    });
+    try {
+      await ApiService.registerDevice(deviceId, name);
+      _handleSuccess();
+    } catch (e) {
+      _handleFailure('WiFi connected successfully, but server registration failed: $e');
+    }
+  }
+
+  void _handleBleStatusCode(String code, String deviceId, String name) {
     switch (code) {
       case '1':
         setState(() {
@@ -321,7 +349,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
         });
         break;
       case '3':
-        _handleSuccess();
+        _registerDeviceOnSuccessAndComplete(deviceId, name);
         break;
       case '4':
         _handleFailure('Wi-Fi connection failed. Double-check SSID and password.');
@@ -339,6 +367,16 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
         // Ignore other codes
         break;
     }
+  }
+
+  Future<void> _cleanupAndFail(String deviceId, String error) async {
+    setState(() {
+      _statusMsg = 'Setup failed. Cleaning up registration...';
+    });
+    try {
+      await ApiService.deleteDevice(deviceId);
+    } catch (_) {}
+    _handleFailure(error);
   }
 
   void _startServerPollingFallback(String deviceId) async {
@@ -369,7 +407,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
 
       if (attempts >= 10) { // 20 seconds timeout
         timer.cancel();
-        _handleSuccess(isWarning: true); // Warn that device credentials were sent, but not verified
+        _cleanupAndFail(deviceId, 'Server polling timed out. Device failed to connect online.');
       }
     });
   }
@@ -705,20 +743,26 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
   Widget _buildProgressOverlay(ColorScheme cs, TextTheme tt) {
     bool isStepDone(String stepName) {
       if (_currentStep == 'success') return true;
-      if (stepName == 'registering') return _currentStep != 'registering';
-      if (stepName == 'writing') {
-        return _currentStep != 'registering' && _currentStep != 'writing';
-      }
-      if (stepName == 'connecting_wifi') {
-        return _currentStep == 'connecting_ws' || _currentStep == 'success';
-      }
-      if (stepName == 'connecting_ws') {
-        return _currentStep == 'success';
+      final isNew = _statusChar != null;
+
+      if (isNew) {
+        if (stepName == 'writing') return _currentStep != 'writing';
+        if (stepName == 'connecting_wifi') {
+          return _currentStep == 'connecting_ws' || _currentStep == 'registering';
+        }
+        if (stepName == 'connecting_ws') return _currentStep == 'registering';
+        if (stepName == 'registering') return false;
+      } else {
+        if (stepName == 'registering') return _currentStep != 'registering';
+        if (stepName == 'writing') return _currentStep == 'connecting_ws';
+        if (stepName == 'connecting_wifi') return true;
+        if (stepName == 'connecting_ws') return false;
       }
       return false;
     }
 
     bool isStepActive(String stepName) {
+      if (stepName == 'connecting_wifi' && _statusChar == null) return false;
       return _currentStep == stepName;
     }
 
@@ -780,10 +824,16 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
             ),
             const SizedBox(height: 24),
 
-            buildStepRow('Server Registration', 'registering'),
-            buildStepRow('Sending Credentials via BLE', 'writing'),
-            buildStepRow('WiFi Connection Establishment', 'connecting_wifi'),
-            buildStepRow('Server Connection Sync', 'connecting_ws'),
+            if (_statusChar == null) ...[
+              buildStepRow('Server Registration', 'registering'),
+              buildStepRow('Sending Credentials via BLE', 'writing'),
+              buildStepRow('Server Connection Sync', 'connecting_ws'),
+            ] else ...[
+              buildStepRow('Sending Credentials via BLE', 'writing'),
+              buildStepRow('WiFi Connection Establishment', 'connecting_wifi'),
+              buildStepRow('Server Connection Sync', 'connecting_ws'),
+              buildStepRow('Server Registration', 'registering'),
+            ],
 
             const SizedBox(height: 32),
             Container(
