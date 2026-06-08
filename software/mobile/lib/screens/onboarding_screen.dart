@@ -90,7 +90,7 @@ class OnboardingScreen extends StatelessWidget {
   // ── Create House Dialog ──────────────────────────────────────────
   void _showCreateDialog(BuildContext context) {
     final controller = TextEditingController();
-    final cs = Theme.of(context).colorScheme;
+
     bool loading = false;
 
     showDialog(

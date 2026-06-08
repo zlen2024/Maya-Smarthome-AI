@@ -495,6 +495,7 @@ class _SettingsTabState extends State<SettingsTab> {
 
     if (result == true && context.mounted) {
       await ApiService.logout();
+      if (!context.mounted) return;
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(builder: (_) => const LoginScreen()),

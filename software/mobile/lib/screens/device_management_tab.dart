@@ -49,19 +49,6 @@ class _DeviceManagementTabState extends State<DeviceManagementTab>
     _fetchDevices(); // Refresh after returning
   }
 
-
-
-  void _snack(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..clearSnackBars()
-      ..showSnackBar(SnackBar(
-        content: Text(msg),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      ));
-  }
-
   String _formatUptime(dynamic ms) {
     if (ms == null) return '—';
     final secs = (ms as num).toInt() ~/ 1000;

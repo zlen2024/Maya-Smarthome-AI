@@ -1,3 +1,4 @@
+// ignore_for_file: constant_identifier_names
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -248,6 +249,22 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
       // 1. REST Register Device to User Account
       await ApiService.registerDevice(deviceId, name);
 
+      // ─── Set up notifications BEFORE writing to prevent race conditions ───
+      if (_statusChar != null) {
+        _statusNotificationSub = _statusChar!.onValueReceived.listen((value) {
+          if (!mounted) return;
+          final code = utf8.decode(value);
+          _handleBleStatusCode(code);
+        }, onError: (e) {
+          _handleFailure('BLE notification error: $e');
+        });
+
+        _connectedDevice?.cancelWhenDisconnected(_statusNotificationSub!);
+        await _statusChar!.setNotifyValue(true);
+        // Wait briefly for setup to register
+        await Future.delayed(const Duration(milliseconds: 150));
+      }
+
       setState(() {
         _currentStep = 'writing';
         _statusMsg = 'Writing credentials over Bluetooth...';
@@ -255,7 +272,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
 
       // 2. Write Credentials over BLE
       // Server WebSocket URL: dynamically derived from base API Url (replaces /ws/device)
-      final wsTargetUrl = '${ApiService.wsUrl}/ws';
+      const wsTargetUrl = '${ApiService.wsUrl}/ws';
 
       await _ssidChar!.write(utf8.encode(ssid), withoutResponse: false);
       await Future.delayed(const Duration(milliseconds: 150));
@@ -271,23 +288,10 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
 
       // 3. Start Connection Feedback Loop
       if (_statusChar != null) {
-        // Real-time status update loop via firmware STATUS_UUID characteristic
         setState(() {
           _currentStep = 'connecting_wifi';
           _statusMsg = 'Validating PIN and connecting to Wi-Fi...';
         });
-
-        _statusNotificationSub = _statusChar!.lastValueStream.listen((value) {
-          if (!mounted) return;
-          final code = utf8.decode(value);
-          _handleBleStatusCode(code);
-        }, onError: (e) {
-          _handleFailure('BLE notification error: $e');
-        });
-
-        _connectedDevice?.cancelWhenDisconnected(_statusNotificationSub!);
-        await _statusChar!.setNotifyValue(true);
-
       } else {
         // Fallback for older firmware: Poll the server API for device status
         setState(() {
@@ -328,14 +332,23 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
       case '6':
         _handleFailure('Incorrect Security PIN. Device rejected credentials.');
         break;
+      case '7':
+        _handleFailure('Failed to connect to new Wi-Fi. Reverted to previous connection successfully.');
+        break;
       default:
         // Ignore other codes
         break;
     }
   }
 
-  void _startServerPollingFallback(String deviceId) {
+  void _startServerPollingFallback(String deviceId) async {
     int attempts = 0;
+    String? initialHeartbeat;
+    try {
+      final initialDev = await ApiService.getDevice(deviceId);
+      initialHeartbeat = initialDev['last_heartbeat'];
+    } catch (_) {}
+
     Timer.periodic(const Duration(seconds: 2), (timer) async {
       attempts++;
       if (!_submitting || !mounted) {
@@ -345,13 +358,16 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
 
       try {
         final dev = await ApiService.getDevice(deviceId);
-        if (dev['online'] == true) {
+        final newHeartbeat = dev['last_heartbeat'];
+        // Ensure the device is online and the heartbeat timestamp has updated since we started
+        if (dev['online'] == true && newHeartbeat != initialHeartbeat) {
           timer.cancel();
           _handleSuccess();
+          return;
         }
       } catch (_) {}
 
-      if (attempts >= 8) { // 16 seconds timeout
+      if (attempts >= 10) { // 20 seconds timeout
         timer.cancel();
         _handleSuccess(isWarning: true); // Warn that device credentials were sent, but not verified
       }
@@ -589,7 +605,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
         // Connected info header
         Row(
           children: [
-            Icon(Icons.check_circle_rounded, color: Colors.green, size: 20),
+            const Icon(Icons.check_circle_rounded, color: Colors.green, size: 20),
             const SizedBox(width: 8),
             Text(
               'Connected to Maya BLE setup',

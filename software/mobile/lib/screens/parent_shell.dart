@@ -442,11 +442,7 @@ class _ParentShellState extends State<ParentShell> {
       ),
     );
   }
-
   Widget _buildHouseDropdown(ColorScheme cs) {
-    final activeLocation =
-        ApiService.activeHouse?['location'] ?? 'Maya Smart Home';
-
     return DropdownButtonHideUnderline(
       child: DropdownButton<int>(
         value: ApiService.houseId,

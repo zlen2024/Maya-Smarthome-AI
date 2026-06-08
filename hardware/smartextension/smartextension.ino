@@ -142,6 +142,71 @@ class GenericWriteCallback : public BLECharacteristicCallbacks {
     }
 };
 
+// Helper to reconnect to old credentials if new ones fail
+bool attemptFallback(String old_ssid, String old_pass, String old_ws) {
+  if (old_ssid.length() == 0) return false;
+  
+  Serial.printf("Attempting fallback to previous WiFi '%s'...\n", old_ssid.c_str());
+  setStatus("7"); // Reverting to old WiFi code
+  delay(500);
+  
+  wifi_ssid = old_ssid;
+  wifi_pass = old_pass;
+  ws_url    = old_ws;
+  
+  bool fallbackWifiOk = false;
+  int fallbackWiFiRetries = 3;
+  for (int r = 0; r < fallbackWiFiRetries; r++) {
+    Serial.printf("Attempting fallback WiFi connect to '%s' (try %d/%d)...\n", wifi_ssid.c_str(), r + 1, fallbackWiFiRetries);
+    WiFi.disconnect(true);
+    delay(150);
+    WiFi.begin(wifi_ssid.c_str(), wifi_pass.c_str());
+    
+    int fallbackAttempts = 0;
+    while (fallbackAttempts < WIFI_CONNECT_TRIES) {
+      delay(500);
+      if (WiFi.status() == WL_CONNECTED) {
+        fallbackWifiOk = true;
+        break;
+      }
+      fallbackAttempts++;
+    }
+    if (fallbackWifiOk) {
+      break;
+    }
+    Serial.println("Fallback WiFi connect try failed.");
+  }
+  
+  if (fallbackWifiOk) {
+    Serial.println("Reconnected to old WiFi! Attempting WebSocket connect...");
+    startWebSocket();
+    int fallbackWsAttempts = 0;
+    bool fallbackWsOk = false;
+    while (fallbackWsAttempts < 30) {
+      webSocket.loop();
+      if (wsConnected) {
+        fallbackWsOk = true;
+        break;
+      }
+      delay(200);
+      fallbackWsAttempts++;
+    }
+    
+    if (fallbackWsOk) {
+      Serial.println("Fallback success! Device back online. Exiting BLE.");
+      setStatus("7"); // Reverted successfully and online code
+      delay(1500);
+      BLEDevice::stopAdvertising();
+      delay(100);
+      BLEDevice::deinit();
+      haveSSID = havePASS = haveWS = havePIN = false;
+      recvPIN = recvSSID = recvPASS = recvWS = "";
+      return true;
+    }
+  }
+  return false;
+}
+
 // ─── BLE Provisioning ────────────────────────────────────────
 void startBLEProvisioning() {
   String advName = "Maya-" + String(DEVICE_ID);
@@ -200,27 +265,41 @@ void startBLEProvisioning() {
       wifi_pass = recvPASS;
       ws_url    = recvWS;
 
-      Serial.printf("Attempting WiFi connect to '%s'...\n", wifi_ssid.c_str());
-      WiFi.persistent(false);
-      WiFi.mode(WIFI_STA);
-      WiFi.disconnect(true);
-      delay(150);
-      WiFi.begin(wifi_ssid.c_str(), wifi_pass.c_str());
-
-      int attempts = 0;
       bool wifiOk = false;
-      while (attempts < WIFI_CONNECT_TRIES) {
-        delay(500);
-        if (WiFi.status() == WL_CONNECTED) {
-          wifiOk = true;
+      int connectRetries = 3;
+      for (int r = 0; r < connectRetries; r++) {
+        Serial.printf("Attempting WiFi connect to '%s' (try %d/%d)...\n", wifi_ssid.c_str(), r + 1, connectRetries);
+        WiFi.persistent(false);
+        WiFi.mode(WIFI_STA);
+        WiFi.disconnect(true);
+        delay(150);
+        WiFi.begin(wifi_ssid.c_str(), wifi_pass.c_str());
+
+        int attempts = 0;
+        while (attempts < WIFI_CONNECT_TRIES) {
+          delay(500);
+          if (WiFi.status() == WL_CONNECTED) {
+            wifiOk = true;
+            break;
+          }
+          attempts++;
+        }
+        if (wifiOk) {
           break;
         }
-        attempts++;
+        Serial.println("WiFi connect attempt failed.");
       }
 
       if (!wifiOk) {
         Serial.println("WiFi connection failed during BLE setup.");
         setStatus("4"); // WiFi failed
+        delay(1000); // Give the mobile app time to receive the failure status
+        
+        if (attemptFallback(old_ssid, old_pass, old_ws)) {
+          return;
+        }
+
+        WiFi.disconnect(true);
         wifi_ssid = old_ssid;
         wifi_pass = old_pass;
         ws_url    = old_ws;
@@ -248,6 +327,13 @@ void startBLEProvisioning() {
       if (!wsOk) {
         Serial.println("WebSocket connection failed during BLE setup.");
         setStatus("5"); // WebSocket failed
+        webSocket.disconnect();
+        delay(1000); // Give the mobile app time to receive the failure status
+        
+        if (attemptFallback(old_ssid, old_pass, old_ws)) {
+          return;
+        }
+
         webSocket.disconnect();
         WiFi.disconnect(true);
         wifi_ssid = old_ssid;

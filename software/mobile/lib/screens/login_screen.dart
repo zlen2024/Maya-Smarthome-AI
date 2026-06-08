@@ -118,7 +118,7 @@ class _LoginScreenState extends State<LoginScreen>
 
   // ── Open Registration on Web ───────────────────────────────────
   Future<void> _openWebRegistration() async {
-    final uri = Uri.parse('${ApiService.baseUrl}');
+    final uri = Uri.parse(ApiService.baseUrl);
     if (await canLaunchUrl(uri)) {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
     } else {
