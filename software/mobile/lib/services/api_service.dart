@@ -334,14 +334,6 @@ class ApiService {
     return data;
   }
 
-  static Future<void> deleteDevice(String deviceId) async {
-    final res = await delete('/api/devices/$deviceId');
-    if (res.statusCode != 200) {
-      final data = jsonDecode(res.body);
-      throw Exception(data['detail'] ?? 'Failed to delete device');
-    }
-  }
-
   // ── Children ────────────────────────────────────────────────────
   static Future<List<dynamic>> getChildren() async {
     final res = await get('/api/children');
