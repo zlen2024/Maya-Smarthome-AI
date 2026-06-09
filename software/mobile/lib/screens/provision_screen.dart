@@ -35,6 +35,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
   BluetoothDevice? _connectedDevice;
   bool _connecting = false;
   String? _deviceId;
+  StreamSubscription? _connectionStateSub;
 
   // Form Controllers
   final _nameCtrl = TextEditingController();
@@ -157,6 +158,15 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
 
     try {
       await device.connect(timeout: const Duration(seconds: 8));
+
+      // Listen for spontaneous disconnections
+      _connectionStateSub?.cancel();
+      _connectionStateSub = device.connectionState.listen((state) {
+        if (state == BluetoothConnectionState.disconnected) {
+          _handleBleDisconnected();
+        }
+      });
+
       if (Platform.isAndroid) {
         await device.requestMtu(512);
       }
@@ -212,6 +222,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
 
   Future<void> _disconnectDevice() async {
     _statusNotificationSub?.cancel();
+    _connectionStateSub?.cancel(); // Cancel first to prevent triggering _handleBleDisconnected
     await _connectedDevice?.disconnect();
     if (mounted) {
       setState(() {
@@ -224,6 +235,26 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
         _statusChar = null;
       });
     }
+  }
+
+  void _handleBleDisconnected() {
+    if (!mounted) return;
+    _statusNotificationSub?.cancel();
+    _connectionStateSub?.cancel();
+    
+    setState(() {
+      _connectedDevice = null;
+      _deviceId = null;
+      _ssidChar = null;
+      _passChar = null;
+      _urlChar = null;
+      _pinChar = null;
+      _statusChar = null;
+      _submitting = false;
+      _currentStep = 'idle'; // Return user to device list screen
+    });
+
+    _showSnack('Bluetooth connection lost');
   }
 
   // ── Unified Registration & Provision Flow ───────────────────────

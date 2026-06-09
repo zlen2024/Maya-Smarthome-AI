@@ -294,10 +294,6 @@ void startBLEProvisioning() {
         Serial.println("WiFi connection failed during BLE setup.");
         setStatus("4"); // WiFi failed
         delay(1000); // Give the mobile app time to receive the failure status
-        
-        if (attemptFallback(old_ssid, old_pass, old_ws)) {
-          return;
-        }
 
         WiFi.disconnect(true);
         wifi_ssid = old_ssid;
@@ -305,6 +301,7 @@ void startBLEProvisioning() {
         ws_url    = old_ws;
         haveSSID = havePASS = haveWS = havePIN = false;
         recvPIN = recvSSID = recvPASS = recvWS = "";
+        start = millis(); // Reset BLE provisioning timeout so user can try again
         continue;
       }
 
@@ -329,10 +326,6 @@ void startBLEProvisioning() {
         setStatus("5"); // WebSocket failed
         webSocket.disconnect();
         delay(1000); // Give the mobile app time to receive the failure status
-        
-        if (attemptFallback(old_ssid, old_pass, old_ws)) {
-          return;
-        }
 
         webSocket.disconnect();
         WiFi.disconnect(true);
@@ -341,6 +334,7 @@ void startBLEProvisioning() {
         ws_url    = old_ws;
         haveSSID = havePASS = haveWS = havePIN = false;
         recvPIN = recvSSID = recvPASS = recvWS = "";
+        start = millis(); // Reset BLE provisioning timeout so user can try again
         continue;
       }
 
