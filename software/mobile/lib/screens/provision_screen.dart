@@ -14,6 +14,7 @@ const PASS_UUID = "12345678-1234-1234-1234-123456789002";
 const PIN_UUID = "12345678-1234-1234-1234-123456789003";
 const WSURL_UUID = "12345678-1234-1234-1234-123456789004";
 const STATUS_UUID = "12345678-1234-1234-1234-123456789006";
+const NEWPIN_UUID = "12345678-1234-1234-1234-123456789007";
 
 class ProvisionScreen extends StatefulWidget {
   const ProvisionScreen({super.key});
@@ -42,16 +43,19 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
   final _ssidCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
   final _pinCtrl = TextEditingController(text: '0000');
+  final _newPinCtrl = TextEditingController(); // optional — change the device PIN
 
   // Characteristic References
   BluetoothCharacteristic? _ssidChar;
   BluetoothCharacteristic? _passChar;
   BluetoothCharacteristic? _urlChar;
   BluetoothCharacteristic? _pinChar;
+  BluetoothCharacteristic? _newPinChar;
   BluetoothCharacteristic? _statusChar;
 
   // Progress/Feedback Loop States
   bool _submitting = false;
+  bool _wasNewRegistration = false; // true if this attempt created the server record (rolled back on failure)
   String _currentStep = 'idle'; // 'idle', 'registering', 'writing', 'connecting_wifi', 'connecting_ws', 'success', 'failed'
   String _statusMsg = '';
   StreamSubscription? _statusNotificationSub;
@@ -71,6 +75,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
     _ssidCtrl.dispose();
     _passCtrl.dispose();
     _pinCtrl.dispose();
+    _newPinCtrl.dispose();
     _disconnectDevice();
     super.dispose();
   }
@@ -191,6 +196,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
         if (uuid == PASS_UUID.toLowerCase()) _passChar = c;
         if (uuid == WSURL_UUID.toLowerCase()) _urlChar = c;
         if (uuid == PIN_UUID.toLowerCase()) _pinChar = c;
+        if (uuid == NEWPIN_UUID.toLowerCase()) _newPinChar = c;
         if (uuid == STATUS_UUID.toLowerCase()) _statusChar = c;
       }
 
@@ -200,11 +206,10 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
 
       // Auto-extract device ID from name
       final name = device.platformName; // e.g. Maya-esp32-9f83b1c1
-      String id = 'esp32-9f83b1c1'; // Default fallback
-      if (name.startsWith('Maya-') && name != 'Maya-Setup') {
-        id = name.substring(5);
+      if (!name.startsWith('Maya-') || name == 'Maya-Setup') {
+        throw Exception('Could not read device ID from "$name". Please update the device firmware.');
       }
-      _deviceId = id;
+      _deviceId = name.substring(5);
 
       setState(() {
         _connecting = false;
@@ -232,6 +237,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
         _passChar = null;
         _urlChar = null;
         _pinChar = null;
+        _newPinChar = null;
         _statusChar = null;
       });
     }
@@ -241,7 +247,9 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
     if (!mounted) return;
     _statusNotificationSub?.cancel();
     _connectionStateSub?.cancel();
-    
+
+    if (_submitting) _rollbackRegistrationIfNew();
+
     setState(() {
       _connectedDevice = null;
       _deviceId = null;
@@ -249,6 +257,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
       _passChar = null;
       _urlChar = null;
       _pinChar = null;
+      _newPinChar = null;
       _statusChar = null;
       _submitting = false;
       _currentStep = 'idle'; // Return user to device list screen
@@ -263,12 +272,23 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
     final ssid = _ssidCtrl.text.trim();
     final pass = _passCtrl.text.trim();
     final pin = _pinCtrl.text.trim();
+    final newPin = _newPinCtrl.text.trim();
     final deviceId = _deviceId;
 
     if (name.isEmpty || ssid.isEmpty || pass.isEmpty || pin.isEmpty || deviceId == null) {
       _showSnack('Please fill in all fields');
       return;
     }
+    if (newPin.isNotEmpty && newPin.length != 4) {
+      _showSnack('New PIN must be exactly 4 digits');
+      return;
+    }
+    if (newPin.isNotEmpty && _newPinChar == null) {
+      _showSnack('This device firmware does not support PIN change. Please update the firmware.');
+      return;
+    }
+    // The PIN that will be active after provisioning succeeds
+    final effectivePin = newPin.isNotEmpty ? newPin : pin;
 
     setState(() {
       _submitting = true;
@@ -277,8 +297,9 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
     });
 
     try {
-      // 1. REST Register Device to User Account
-      await ApiService.registerDevice(deviceId, name);
+      // 1. REST Register Device to User Account (PIN stored for WS identify verification)
+      final regResult = await ApiService.registerDevice(deviceId, name, pin: effectivePin);
+      _wasNewRegistration = regResult['created'] == true;
 
       // ─── Set up notifications BEFORE writing to prevent race conditions ───
       if (_statusChar != null) {
@@ -313,6 +334,13 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
 
       await _urlChar!.write(utf8.encode(wsTargetUrl), withoutResponse: false);
       await Future.delayed(const Duration(milliseconds: 150));
+
+      // Optional PIN change — must be written BEFORE the current PIN, since the
+      // current-PIN write is what triggers the device to start provisioning
+      if (newPin.isNotEmpty && _newPinChar != null) {
+        await _newPinChar!.write(utf8.encode(newPin), withoutResponse: false);
+        await Future.delayed(const Duration(milliseconds: 150));
+      }
 
       await _pinChar!.write(utf8.encode(pin), withoutResponse: false);
       await Future.delayed(const Duration(milliseconds: 150));
@@ -364,7 +392,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
         _handleFailure('Incorrect Security PIN. Device rejected credentials.');
         break;
       case '7':
-        _handleFailure('Failed to connect to new Wi-Fi. Reverted to previous connection successfully.');
+        _handleFailure('Could not connect. Please re-enter your credentials.');
         break;
       default:
         // Ignore other codes
@@ -406,6 +434,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
   }
 
   void _handleSuccess({bool isWarning = false}) {
+    _wasNewRegistration = false; // keep the registration — provisioning succeeded
     setState(() {
       _currentStep = 'success';
       _statusMsg = isWarning
@@ -432,7 +461,19 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
     });
 
     _statusNotificationSub?.cancel();
+    _rollbackRegistrationIfNew();
     _showSnack(error);
+  }
+
+  /// If this attempt created the server record, delete it so failed
+  /// provisioning doesn't leave a stray offline device on the dashboard.
+  void _rollbackRegistrationIfNew() {
+    if (!_wasNewRegistration || _deviceId == null) return;
+    final id = _deviceId!;
+    _wasNewRegistration = false;
+    ApiService.deleteDevice(id).catchError((_) {
+      // Best-effort: device can be re-registered on the next attempt anyway
+    });
   }
 
   void _showSnack(String msg) {
@@ -719,6 +760,19 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
             prefixIcon: Icon(Icons.pin_outlined),
             counterText: '',
             helperText: 'Default PIN is 0000',
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        TextField(
+          controller: _newPinCtrl,
+          maxLength: 4,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'New PIN (optional)',
+            prefixIcon: Icon(Icons.lock_reset_rounded),
+            counterText: '',
+            helperText: 'Set a new device PIN — leave empty to keep the current one',
           ),
         ),
         const SizedBox(height: 28),

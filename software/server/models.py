@@ -80,6 +80,7 @@ class Device(Base):
     device_id = Column(String, primary_key=True, index=True)
     house_id = Column(Integer, ForeignKey("houses.house_id"), nullable=True)
     name = Column(String, default="Smart Extension")
+    pin = Column(String, default="0000")  # device security PIN, set at provisioning; verified on WS identify
     status = Column(String, default="offline")
     price = Column(Float, default=0.0)
     blocked = Column(Boolean, default=False)

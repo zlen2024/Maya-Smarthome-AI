@@ -1,13 +1,13 @@
 /*
   ESP32 BLE Provisioning + WebSocket client
-  DEVICE_ID hardcoded: "esp32-9f83b1c1"
+  DEVICE_ID derived from chip MAC at boot (e.g. "esp32-9f83b1c1") — unique per board
 
   Features:
   - BLE provisioning for SSID / PASS / WS_URL / BLE_PIN
-  - BLE PIN protection (default "0000", dev override "9999")
-  - Save settings to Preferences
-  - WiFi auto-reconnect with BLE fallback
-  - WebSocket client (5-failure fallback to BLE re-provisioning)
+  - BLE PIN protection (default "0000"; also verified server-side at WS identify)
+  - Save settings to Preferences (only committed after WiFi + WS verified)
+  - WiFi auto-reconnect; BLE provisioning re-opens on boot/persistent WiFi failure
+  - WebSocket client with background retry (never falls back to old WiFi)
   - 3-channel output control (LED1/LED2/LED3 — can be swapped for relays)
   - Commands: output_on / output_off / output_toggle (with "channel": 1|2|3)
   - Backward compat: led_on/led_off/toggle → channel 1
@@ -50,7 +50,9 @@ const char* pinStateStr(int pin) {
 }
 
 // ─── Device ID ───────────────────────────────────────────────
-const char* DEVICE_ID = "esp32-9f83b1c1";
+// Derived from the chip's factory MAC in setup() — unique per board,
+// so multiple extensions can coexist on one server.
+String DEVICE_ID;
 
 // ─── BLE UUIDs ───────────────────────────────────────────────
 #define SERVICE_UUID  "12345678-1234-1234-1234-123456789000"
@@ -60,6 +62,7 @@ const char* DEVICE_ID = "esp32-9f83b1c1";
 #define PIN_UUID      "12345678-1234-1234-1234-123456789003"
 #define CMD_UUID      "12345678-1234-1234-1234-123456789005"
 #define STATUS_UUID   "12345678-1234-1234-1234-123456789006"
+#define NEWPIN_UUID   "12345678-1234-1234-1234-123456789007" // optional: change PIN (current PIN still required)
 
 // ─── Runtime Settings ─────────────────────────────────────────
 String wifi_ssid = "";
@@ -69,6 +72,7 @@ String ble_pin   = "";
 
 // ─── Provisioning Buffers ────────────────────────────────────
 String recvSSID = "", recvPASS = "", recvWS = "", recvPIN = "";
+String recvNEWPIN = ""; // optional — only sent when the owner wants to change the PIN
 bool haveSSID = false, havePASS = false, haveWS = false, havePIN = false;
 
 // ─── Connection State ─────────────────────────────────────────
@@ -87,6 +91,7 @@ BLECharacteristic* ssidChar;
 BLECharacteristic* passChar;
 BLECharacteristic* wsChar;
 BLECharacteristic* pinChar;
+BLECharacteristic* newpinChar;
 BLECharacteristic* cmdChar;
 BLECharacteristic* statusChar;
 
@@ -100,6 +105,21 @@ void setStatus(const char* code) {
 }
 
 // ─── Settings Persistence ────────────────────────────────────
+// NVS Preferences survive sketch uploads, so a reflashed (or factory-fresh)
+// board could keep an old owner's PIN/WiFi. Wipe everything whenever the
+// firmware build fingerprint changes — every flash starts clean: PIN "0000",
+// no WiFi, BLE provisioning mode.
+void resetPrefsIfNewFirmware() {
+  const String buildTag = String(__DATE__) + " " + String(__TIME__);
+  prefs.begin("iotdata", false);
+  if (prefs.getString("build", "") != buildTag) {
+    prefs.clear();
+    prefs.putString("build", buildTag);
+    Serial.println("New firmware build detected. Settings wiped: PIN=0000, no WiFi config.");
+  }
+  prefs.end();
+}
+
 void saveSettings() {
   prefs.begin("iotdata", false);
   prefs.putString("ssid", wifi_ssid);
@@ -138,80 +158,16 @@ class GenericWriteCallback : public BLECharacteristicCallbacks {
       else if (uuid == PASS_UUID)  { recvPASS = s; havePASS = true; Serial.printf("BLE PASS (len=%d)\n", (int)s.length()); }
       else if (uuid == WSURL_UUID) { recvWS   = s; haveWS   = true; Serial.printf("BLE WSURL: %s\n", s.c_str()); }
       else if (uuid == PIN_UUID)   { recvPIN  = s; havePIN  = true; Serial.printf("BLE PIN (len=%d)\n", (int)s.length()); }
+      else if (uuid == NEWPIN_UUID){ recvNEWPIN = s;               Serial.printf("BLE NEW PIN (len=%d)\n", (int)s.length()); }
       else if (uuid == CMD_UUID)   { Serial.printf("BLE CMD: %s\n", s.c_str()); }
     }
 };
-
-// Helper to reconnect to old credentials if new ones fail
-bool attemptFallback(String old_ssid, String old_pass, String old_ws) {
-  if (old_ssid.length() == 0) return false;
-  
-  Serial.printf("Attempting fallback to previous WiFi '%s'...\n", old_ssid.c_str());
-  setStatus("7"); // Reverting to old WiFi code
-  delay(500);
-  
-  wifi_ssid = old_ssid;
-  wifi_pass = old_pass;
-  ws_url    = old_ws;
-  
-  bool fallbackWifiOk = false;
-  int fallbackWiFiRetries = 3;
-  for (int r = 0; r < fallbackWiFiRetries; r++) {
-    Serial.printf("Attempting fallback WiFi connect to '%s' (try %d/%d)...\n", wifi_ssid.c_str(), r + 1, fallbackWiFiRetries);
-    WiFi.disconnect(true);
-    delay(150);
-    WiFi.begin(wifi_ssid.c_str(), wifi_pass.c_str());
-    
-    int fallbackAttempts = 0;
-    while (fallbackAttempts < WIFI_CONNECT_TRIES) {
-      delay(500);
-      if (WiFi.status() == WL_CONNECTED) {
-        fallbackWifiOk = true;
-        break;
-      }
-      fallbackAttempts++;
-    }
-    if (fallbackWifiOk) {
-      break;
-    }
-    Serial.println("Fallback WiFi connect try failed.");
-  }
-  
-  if (fallbackWifiOk) {
-    Serial.println("Reconnected to old WiFi! Attempting WebSocket connect...");
-    startWebSocket();
-    int fallbackWsAttempts = 0;
-    bool fallbackWsOk = false;
-    while (fallbackWsAttempts < 30) {
-      webSocket.loop();
-      if (wsConnected) {
-        fallbackWsOk = true;
-        break;
-      }
-      delay(200);
-      fallbackWsAttempts++;
-    }
-    
-    if (fallbackWsOk) {
-      Serial.println("Fallback success! Device back online. Exiting BLE.");
-      setStatus("7"); // Reverted successfully and online code
-      delay(1500);
-      BLEDevice::stopAdvertising();
-      delay(100);
-      BLEDevice::deinit();
-      haveSSID = havePASS = haveWS = havePIN = false;
-      recvPIN = recvSSID = recvPASS = recvWS = "";
-      return true;
-    }
-  }
-  return false;
-}
 
 // ─── BLE Provisioning ────────────────────────────────────────
 void startBLEProvisioning() {
   String advName = "Maya-" + String(DEVICE_ID);
   Serial.printf("Starting BLE provisioning mode. Advertising as '%s'...\n", advName.c_str());
-  Serial.printf("Dev Note: Stored PIN='%s' | Override PIN='9999'\n", ble_pin.c_str());
+  Serial.printf("PIN protection: %s\n", (ble_pin == "" || ble_pin == "0000") ? "default (unset)" : "enabled");
 
   BLEDevice::setMTU(517);
   BLEDevice::init(advName.c_str());
@@ -222,12 +178,14 @@ void startBLEProvisioning() {
   passChar   = pService->createCharacteristic(PASS_UUID,   BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
   wsChar     = pService->createCharacteristic(WSURL_UUID,  BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
   pinChar    = pService->createCharacteristic(PIN_UUID,    BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  newpinChar = pService->createCharacteristic(NEWPIN_UUID, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
   cmdChar    = pService->createCharacteristic(CMD_UUID,    BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
   statusChar = pService->createCharacteristic(STATUS_UUID, BLECharacteristic::PROPERTY_READ  | BLECharacteristic::PROPERTY_NOTIFY);
 
   GenericWriteCallback* cb = new GenericWriteCallback();
   ssidChar->setCallbacks(cb); passChar->setCallbacks(cb);
-  wsChar->setCallbacks(cb);   pinChar->setCallbacks(cb); cmdChar->setCallbacks(cb);
+  wsChar->setCallbacks(cb);   pinChar->setCallbacks(cb);
+  newpinChar->setCallbacks(cb); cmdChar->setCallbacks(cb);
 
   ssidChar->addDescriptor(new BLE2902()); passChar->addDescriptor(new BLE2902());
   wsChar->addDescriptor(new BLE2902());   pinChar->addDescriptor(new BLE2902());
@@ -245,35 +203,28 @@ void startBLEProvisioning() {
     if (haveSSID && havePASS && haveWS && havePIN) {
       Serial.println("All provisioning values received.");
 
-      // PIN validation
-      if (ble_pin != "" && ble_pin != "0000" && recvPIN != ble_pin && recvPIN != "9999") {
+      // PIN validation (no dev override — server also verifies this PIN on WS identify)
+      if (ble_pin != "" && ble_pin != "0000" && recvPIN != ble_pin) {
         Serial.println("PIN mismatch. Rejecting.");
         setStatus("6"); // PIN mismatch code
         havePIN = haveSSID = havePASS = haveWS = false;
-        recvPIN = recvSSID = recvPASS = recvWS = "";
+        recvPIN = recvSSID = recvPASS = recvWS = recvNEWPIN = "";
         continue;
       }
 
       setStatus("1"); // PIN verified, connecting to WiFi
       delay(200);
 
-      String old_ssid = wifi_ssid;
-      String old_pass = wifi_pass;
-      String old_ws   = ws_url;
-
-      wifi_ssid = recvSSID;
-      wifi_pass = recvPASS;
-      ws_url    = recvWS;
-
+      // Test new WiFi credentials WITHOUT overwriting live vars until everything succeeds
       bool wifiOk = false;
       int connectRetries = 3;
       for (int r = 0; r < connectRetries; r++) {
-        Serial.printf("Attempting WiFi connect to '%s' (try %d/%d)...\n", wifi_ssid.c_str(), r + 1, connectRetries);
+        Serial.printf("Attempting WiFi connect to '%s' (try %d/%d)...\n", recvSSID.c_str(), r + 1, connectRetries);
         WiFi.persistent(false);
         WiFi.mode(WIFI_STA);
         WiFi.disconnect(true);
         delay(150);
-        WiFi.begin(wifi_ssid.c_str(), wifi_pass.c_str());
+        WiFi.begin(recvSSID.c_str(), recvPASS.c_str());
 
         int attempts = 0;
         while (attempts < WIFI_CONNECT_TRIES) {
@@ -284,39 +235,40 @@ void startBLEProvisioning() {
           }
           attempts++;
         }
-        if (wifiOk) {
-          break;
-        }
+        if (wifiOk) break;
         Serial.println("WiFi connect attempt failed.");
       }
 
       if (!wifiOk) {
         Serial.println("WiFi connection failed during BLE setup.");
         setStatus("4"); // WiFi failed
-        delay(1000); // Give the mobile app time to receive the failure status
-
         WiFi.disconnect(true);
-        wifi_ssid = old_ssid;
-        wifi_pass = old_pass;
-        ws_url    = old_ws;
+        delay(1000);
         haveSSID = havePASS = haveWS = havePIN = false;
-        recvPIN = recvSSID = recvPASS = recvWS = "";
-        start = millis(); // Reset BLE provisioning timeout so user can try again
+        recvPIN = recvSSID = recvPASS = recvWS = recvNEWPIN = "";
+        start = millis(); // Reset timeout so user can try again
         continue;
       }
 
       setStatus("2"); // WiFi connected, connecting to server WebSocket
       Serial.println("WiFi connected. Verifying WebSocket server connection...");
+
+      // Temporarily apply new ws_url and PIN for the test (restored on failure).
+      // The PIN must be live BEFORE connecting: the server verifies it against
+      // the value the app just registered, via the identify message.
+      // If the owner supplied a NEW PIN (current PIN already validated above),
+      // it takes effect here — this is the PIN-change path.
+      String prev_ws_url = ws_url;
+      String prev_pin    = ble_pin;
+      ws_url  = recvWS;
+      ble_pin = recvNEWPIN.length() > 0 ? recvNEWPIN : recvPIN;
       startWebSocket();
 
       int wsAttempts = 0;
       bool wsOk = false;
-      while (wsAttempts < 30) { // wait up to 6 seconds
+      while (wsAttempts < 150) { // up to 30 seconds
         webSocket.loop();
-        if (wsConnected) {
-          wsOk = true;
-          break;
-        }
+        if (wsConnected) { wsOk = true; break; }
         delay(200);
         wsAttempts++;
       }
@@ -325,26 +277,19 @@ void startBLEProvisioning() {
         Serial.println("WebSocket connection failed during BLE setup.");
         setStatus("5"); // WebSocket failed
         webSocket.disconnect();
-        delay(1000); // Give the mobile app time to receive the failure status
-
-        webSocket.disconnect();
         WiFi.disconnect(true);
-        wifi_ssid = old_ssid;
-        wifi_pass = old_pass;
-        ws_url    = old_ws;
+        ws_url  = prev_ws_url; // restore — new credentials are only committed on full success
+        ble_pin = prev_pin;
+        delay(1000);
         haveSSID = havePASS = haveWS = havePIN = false;
-        recvPIN = recvSSID = recvPASS = recvWS = "";
-        start = millis(); // Reset BLE provisioning timeout so user can try again
+        recvPIN = recvSSID = recvPASS = recvWS = recvNEWPIN = "";
+        start = millis();
         continue;
       }
 
-      // Everything succeeded!
-      if (ble_pin == "" || ble_pin == "0000") {
-        if (recvPIN.length() > 0) {
-          ble_pin = recvPIN;
-          Serial.printf("First-time PIN set (len=%d)\n", (int)ble_pin.length());
-        }
-      }
+      // Everything succeeded — commit new credentials (ws_url and ble_pin already applied above)
+      wifi_ssid = recvSSID;
+      wifi_pass = recvPASS;
 
       setStatus("3"); // Full success
       Serial.println("Provisioning accepted and verified. Saving settings.");
@@ -358,8 +303,9 @@ void startBLEProvisioning() {
       BLEDevice::stopAdvertising();
       delay(100);
       BLEDevice::deinit();
+      statusChar = ssidChar = passChar = wsChar = pinChar = newpinChar = cmdChar = nullptr;
       haveSSID = havePASS = haveWS = havePIN = false;
-      recvPIN = recvSSID = recvPASS = recvWS = "";
+      recvPIN = recvSSID = recvPASS = recvWS = recvNEWPIN = "";
       return;
     }
     delay(200);
@@ -368,10 +314,12 @@ void startBLEProvisioning() {
   Serial.println("Provisioning timed out.");
   BLEDevice::stopAdvertising();
   BLEDevice::deinit();
+  statusChar = ssidChar = passChar = wsChar = pinChar = newpinChar = cmdChar = nullptr;
 }
 
 // ─── WiFi ─────────────────────────────────────────────────────
 bool connectToWiFiOnce() {
+  if (WiFi.status() == WL_CONNECTED) { wifiConnected = true; return true; } // already online (e.g. just provisioned)
   if (wifi_ssid.length() == 0) { Serial.println("No SSID saved."); return false; }
   wifi_ssid = sanitizeBleText(wifi_ssid);
   wifi_pass = sanitizeBleText(wifi_pass);
@@ -440,10 +388,11 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
       wsConnected  = true;
       wsFailCycles = 0;
 
-      // Send identify + all output states
+      // Send identify + all output states; PIN verified by server at identify
       StaticJsonDocument<384> doc;
       doc["id"]     = DEVICE_ID;
       doc["status"] = "online";
+      doc["pin"]    = ble_pin;
       doc["ip"]     = WiFi.localIP().toString();
       for (int i = 0; i < NUM_OUTPUTS; i++) {
         doc[OUTPUT_NAMES[i]] = pinStateStr(OUTPUT_PINS[i]);
@@ -472,20 +421,8 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
 
       if (!root.containsKey("cmd")) return;
 
-      // PIN check
-      if (root.containsKey("pin")) {
-        String providedPin = root["pin"].as<const char*>();
-        if (providedPin != ble_pin && providedPin != "" ) {
-          // Only reject if a non-empty PIN was provided and it doesn't match
-          if (providedPin != ble_pin) {
-            Serial.println("[WS] PIN mismatch! Rejecting.");
-            StaticJsonDocument<256> er;
-            er["id"] = DEVICE_ID; er["status"] = "pin_mismatch";
-            char b[256]; size_t s = serializeJson(er, b); webSocket.sendTXT(b, s);
-            return;
-          }
-        }
-      }
+      // No per-command PIN check: commands are authorized server-side (JWT +
+      // child permissions), and this connection was PIN-verified at identify.
 
       String cmd = root["cmd"].as<const char*>();
       // Channel defaults to 1 if not specified
@@ -544,6 +481,7 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
 
 // ─── WebSocket Init ───────────────────────────────────────────
 void startWebSocket() {
+  if (wsConnected) return; // already connected (e.g. verified during provisioning)
   if (ws_url.length() == 0) { Serial.println("No WS URL configured."); return; }
 
   bool useSSL = false;
@@ -564,8 +502,12 @@ void startWebSocket() {
   Serial.printf("Starting WebSocket: host='%s', port=%d, path='%s', ssl=%d\n",
     host.c_str(), port, path.c_str(), useSSL);
 
-  if (useSSL) webSocket.beginSSL(host.c_str(), port, path.c_str());
-  else        webSocket.begin(host.c_str(), port, path.c_str());
+  if (useSSL) {
+    webSocket.beginSSL(host.c_str(), port, path.c_str());
+    webSocket.setInsecure(); // Skip cert verification — required for Let's Encrypt on Fly.io
+  } else {
+    webSocket.begin(host.c_str(), port, path.c_str());
+  }
 
   webSocket.onEvent(webSocketEvent);
   webSocket.setReconnectInterval(5000);
@@ -576,6 +518,12 @@ void startWebSocket() {
 // ─── Setup ────────────────────────────────────────────────────
 void setup() {
   Serial.begin(115200);
+
+  // Unique per-board ID from the factory MAC (lower 32 bits)
+  DEVICE_ID = "esp32-" + String((uint32_t)ESP.getEfuseMac(), HEX);
+  Serial.printf("Device ID: %s\n", DEVICE_ID.c_str());
+
+  resetPrefsIfNewFirmware();
 
   // Initialise all outputs LOW
   for (int i = 0; i < NUM_OUTPUTS; i++) {
@@ -593,13 +541,11 @@ void setup() {
   }
 
   if (!connectToWiFiOnce()) {
-    wifiFailCycles++;
-    if (wifiFailCycles >= WIFI_RECONNECT_CYCLES_BEFORE_PROVISION) {
-      Serial.println("Repeated WiFi failures. BLE provisioning.");
-      startBLEProvisioning();
-      loadSettings();
-      connectToWiFiOnce();
-    }
+    // Saved credentials exist but WiFi failed on boot — open BLE for reprovisioning
+    Serial.println("Boot WiFi failed. Entering BLE provisioning for re-setup.");
+    startBLEProvisioning();
+    loadSettings();
+    connectToWiFiOnce();
   } else {
     startWebSocket();
   }
@@ -634,14 +580,13 @@ void loop() {
   // WebSocket loop
   webSocket.loop();
 
-  // WS failure fallback after 5 disconnects
+  // WS failure warning — print info but do not enter blocking BLE provisioning
   if (wsFailCycles >= 5) {
-    Serial.println("Too many WS failures. BLE provisioning.");
-    webSocket.disconnect();
-    wsFailCycles = 0;
-    startBLEProvisioning();
-    loadSettings();
-    if (connectToWiFiOnce()) startWebSocket();
+    static unsigned long lastWarning = 0;
+    if (millis() - lastWarning > 30000) {
+      Serial.println("Warning: Multiple WebSocket connection failures. Retrying in background...");
+      lastWarning = millis();
+    }
   }
 
   // Heartbeat every 30s — includes all channel states

@@ -62,6 +62,12 @@ def run_migrations():
                 db.add(assoc)
             db.commit()
 
+        # Add pin to devices if missing
+        device_cols = [c['name'] for c in inspector.get_columns('devices')]
+        if 'pin' not in device_cols:
+            db.execute(text("ALTER TABLE devices ADD COLUMN pin TEXT DEFAULT '0000'"))
+            db.commit()
+
         # Generate PINs for houses missing one
         houses = db.query(House).filter(House.join_pin.is_(None)).all()
         for h in houses:
@@ -565,6 +571,7 @@ async def register_device(payload: dict, db: Session = Depends(get_db),
     device_id = payload.get("device_id", "").strip()
     name = payload.get("name", "Smart Extension")
     price = payload.get("price", 0.0)
+    pin = str(payload.get("pin", "0000")).strip() or "0000"
     if not device_id:
         raise HTTPException(status_code=400, detail="device_id required")
     existing = db.query(Device).filter(Device.device_id == device_id).first()
@@ -572,11 +579,12 @@ async def register_device(payload: dict, db: Session = Depends(get_db),
         existing.house_id = house_id
         existing.name = name
         existing.price = price
+        existing.pin = pin
         existing.status = "registered"
         existing.blocked = False
         device = existing
     else:
-        device = Device(device_id=device_id, house_id=house_id, name=name, price=price, status="registered")
+        device = Device(device_id=device_id, house_id=house_id, name=name, price=price, pin=pin, status="registered")
         db.add(device)
     db.flush()
     
@@ -599,7 +607,26 @@ async def register_device(payload: dict, db: Session = Depends(get_db),
             relay = Relay(se_id=ext.se_id, name=f"Channel {ch}", channel_number=ch, is_on=False)
             db.add(relay)
     db.commit()
-    return {"device_id": device.device_id, "name": device.name, "status": device.status, "house_id": device.house_id}
+    return {"device_id": device.device_id, "name": device.name, "status": device.status,
+            "house_id": device.house_id, "created": existing is None}
+
+
+@app.delete("/api/devices/{device_id}")
+async def delete_device(device_id: str, db: Session = Depends(get_db),
+                        current_user: Account = Depends(get_current_user)):
+    if current_user.role not in (AccountRole.parent, AccountRole.admin):
+        raise HTTPException(status_code=403, detail="Only parents/admins can delete devices")
+    device = db.query(Device).filter(Device.device_id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    if current_user.role != AccountRole.admin and device.house_id != current_user.house_id:
+        raise HTTPException(status_code=403, detail="Device belongs to another house")
+    # ORM cascade removes SmartExtension -> Relays -> Permissions
+    db.delete(device)
+    db.query(Heartbeat).filter(Heartbeat.device_id == device_id).delete()
+    db.commit()
+    manager.device_info.pop(device_id, None)
+    return {"status": "deleted", "device_id": device_id}
 
 
 @app.get("/api/devices")
@@ -760,8 +787,7 @@ async def send_device_command(device_id: str, payload: dict,
             if not perm or not perm.is_allowed:
                 raise HTTPException(status_code=403, detail="You do not have permission to control this channel")
                 
-    pin = payload.get("pin", "")
-    cmd_payload = json.dumps({"id": device_id, "cmd": cmd, "channel": channel, "pin": pin})
+    cmd_payload = json.dumps({"id": device_id, "cmd": cmd, "channel": channel})
     success = await manager.send_personal_message(cmd_payload, device_id)
     if not success:
         return {"status": "not_connected", "device_id": device_id}
@@ -1056,6 +1082,19 @@ async def _handle_websocket(websocket: WebSocket):
                     continue
 
                 if websocket not in manager.active_connections.values():
+                    # Unidentified connections may only identify via an "online"
+                    # message; the device must present its PIN if one is set.
+                    if json_data.get("status") != "online":
+                        print(f"Ignoring message from unidentified connection (id={device_id})")
+                        continue
+                    device_db = db.query(Device).filter(Device.device_id == device_id).first()
+                    stored_pin = (device_db.pin or "").strip() if device_db else ""
+                    if stored_pin and stored_pin != "0000":
+                        if str(json_data.get("pin", "")).strip() != stored_pin:
+                            print(f"Device {device_id} failed PIN verification. Closing connection.")
+                            manager.disconnect(websocket)
+                            await websocket.close(code=1008)
+                            return
                     manager.identify(websocket, device_id)
 
                 if json_data.get("type") == "heartbeat":
@@ -1138,7 +1177,6 @@ async def _handle_websocket(websocket: WebSocket):
                             "id": target_id,
                             "cmd": json_data["cmd"],
                             "channel": json_data.get("channel", 1),
-                            "pin": json_data.get("pin", ""),
                         })
                         success = await manager.send_personal_message(cmd_payload, target_id)
                         if not success:

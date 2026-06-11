@@ -321,17 +321,26 @@ class ApiService {
 
   static Future<Map<String, dynamic>> registerDevice(
       String deviceId, String name,
-      {double price = 0.0}) async {
+      {double price = 0.0, String pin = '0000'}) async {
     final res = await post('/api/devices/register', {
       'device_id': deviceId,
       'name': name,
       'price': price,
+      'pin': pin,
     });
     final data = jsonDecode(res.body);
     if (res.statusCode != 200) {
       throw Exception(data['detail'] ?? 'Device registration failed');
     }
     return data;
+  }
+
+  static Future<void> deleteDevice(String deviceId) async {
+    final res = await delete('/api/devices/$deviceId');
+    if (res.statusCode != 200) {
+      final data = jsonDecode(res.body);
+      throw Exception(data['detail'] ?? 'Failed to delete device');
+    }
   }
 
   // ── Children ────────────────────────────────────────────────────
