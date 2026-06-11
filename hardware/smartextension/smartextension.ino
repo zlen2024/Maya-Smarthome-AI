@@ -503,8 +503,9 @@ void startWebSocket() {
     host.c_str(), port, path.c_str(), useSSL);
 
   if (useSSL) {
+    // beginSSL with no CA cert/fingerprint skips cert verification
+    // (library calls setInsecure() internally) — needed for Fly.io TLS
     webSocket.beginSSL(host.c_str(), port, path.c_str());
-    webSocket.setInsecure(); // Skip cert verification — required for Let's Encrypt on Fly.io
   } else {
     webSocket.begin(host.c_str(), port, path.c_str());
   }
