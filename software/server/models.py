@@ -54,6 +54,7 @@ class AccountHouse(Base):
     acc_id = Column(Integer, ForeignKey("accounts.acc_id"), nullable=False)
     house_id = Column(Integer, ForeignKey("houses.house_id"), nullable=False)
     is_master = Column(Boolean, default=False)
+    can_manage_devices = Column(Boolean, default=False)  # master-granted right to add/remove devices
     joined_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     account = relationship("Account", back_populates="house_associations")

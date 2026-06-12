@@ -541,6 +541,33 @@ class _MembersSheetState extends State<_MembersSheet> {
     if (mounted) setState(() => _loading = false);
   }
 
+  Future<void> _toggleDevicePermission(
+      int accId, String name, bool allow) async {
+    try {
+      await ApiService.setMemberDevicePermission(
+          widget.houseId, accId, allow);
+      setState(() {
+        final idx = _members.indexWhere((m) => m['acc_id'] == accId);
+        if (idx != -1) _members[idx]['can_manage_devices'] = allow;
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(allow
+              ? '$name can now add and remove devices'
+              : '$name can no longer manage devices'),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    }
+  }
+
   Future<void> _kickMember(int accId, String name) async {
     final result = await showDialog<bool>(
       context: context,
@@ -688,12 +715,34 @@ class _MembersSheetState extends State<_MembersSheet> {
                     trailing: isMaster &&
                             !memberIsMaster &&
                             memberId != null
-                        ? IconButton(
-                            icon: Icon(Icons.person_remove_rounded,
-                                color: cs.error),
-                            tooltip: 'Remove',
-                            onPressed: () =>
-                                _kickMember(memberId, name),
+                        ? Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: Icon(
+                                  member['can_manage_devices'] == true
+                                      ? Icons.devices_rounded
+                                      : Icons.devices_other_rounded,
+                                  color: member['can_manage_devices'] == true
+                                      ? cs.primary
+                                      : cs.onSurfaceVariant.withOpacity(0.4),
+                                ),
+                                tooltip: member['can_manage_devices'] == true
+                                    ? 'Can add/remove devices — tap to revoke'
+                                    : 'Tap to allow adding/removing devices',
+                                onPressed: () => _toggleDevicePermission(
+                                    memberId,
+                                    name,
+                                    member['can_manage_devices'] != true),
+                              ),
+                              IconButton(
+                                icon: Icon(Icons.person_remove_rounded,
+                                    color: cs.error),
+                                tooltip: 'Remove',
+                                onPressed: () =>
+                                    _kickMember(memberId, name),
+                              ),
+                            ],
                           )
                         : null,
                   );

@@ -266,6 +266,22 @@ class ApiService {
         .toList();
   }
 
+  /// Whether the logged-in user may add/remove devices in the active house
+  /// (house master, or a member the master granted the right to).
+  static bool get canManageDevices =>
+      !isChild && (activeHouse?['can_manage_devices'] == true || activeHouse?['is_master'] == true);
+
+  static Future<void> setMemberDevicePermission(
+      int houseId, int accId, bool allowed) async {
+    final res = await put(
+        '/api/houses/$houseId/members/$accId/device-permission',
+        {'allowed': allowed});
+    if (res.statusCode != 200) {
+      final data = jsonDecode(res.body);
+      throw Exception(data['detail'] ?? 'Failed to update permission');
+    }
+  }
+
   static Future<void> kickMember(int houseId, int accId) async {
     final res = await delete('/api/houses/$houseId/members/$accId');
     if (res.statusCode != 200) {

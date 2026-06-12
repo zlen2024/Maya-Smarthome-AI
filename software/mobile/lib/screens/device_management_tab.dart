@@ -75,12 +75,34 @@ class _DeviceManagementTabState extends State<DeviceManagementTab>
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          // Action buttons
-          FilledButton.icon(
-            onPressed: _openProvision,
-            icon: const Icon(Icons.bluetooth_connected_rounded),
-            label: const Text('Register New Device'),
-          ),
+          // Action buttons — adding devices requires master (or granted) rights
+          if (ApiService.canManageDevices)
+            FilledButton.icon(
+              onPressed: _openProvision,
+              icon: const Icon(Icons.bluetooth_connected_rounded),
+              label: const Text('Register New Device'),
+            )
+          else
+            Card(
+              color: cs.surfaceContainerLow,
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Row(
+                  children: [
+                    Icon(Icons.lock_outline_rounded,
+                        size: 20, color: cs.onSurfaceVariant),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Only the house owner (or members they authorize) can add or remove devices.',
+                        style: tt.bodySmall
+                            ?.copyWith(color: cs.onSurfaceVariant),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           const SizedBox(height: 20),
 
           // Section header

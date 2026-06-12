@@ -461,6 +461,18 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
       } else if (cmd.equalsIgnoreCase("toggle")) {
         toggleOutput(1);     sendAllStatesAck();
 
+      // ── Factory reset (device removed from house) ──────
+      } else if (cmd.equalsIgnoreCase("factory_reset")) {
+        StaticJsonDocument<128> ack;
+        ack["id"] = DEVICE_ID; ack["status"] = "factory_reset";
+        char b[128]; size_t s = serializeJson(ack, b); webSocket.sendTXT(b, s);
+        Serial.println("[WS] Factory reset requested. Wiping settings and rebooting.");
+        delay(300);
+        prefs.begin("iotdata", false);
+        prefs.clear(); // wipes WiFi, WS URL, PIN, and build tag — boots fresh into BLE provisioning
+        prefs.end();
+        ESP.restart();
+
       // ── Reboot ─────────────────────────────────────────
       } else if (cmd.equalsIgnoreCase("reboot")) {
         StaticJsonDocument<128> ack;

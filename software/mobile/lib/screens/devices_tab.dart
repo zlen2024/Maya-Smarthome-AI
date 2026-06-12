@@ -122,6 +122,54 @@ class _DevicesTabState extends State<DevicesTab>
     return perm != null && perm['is_allowed'] == true;
   }
 
+  // ── Remove Device ──────────────────────────────────────────────
+  Future<void> _removeDevice(String deviceId, String name) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Remove device?'),
+        content: Text(
+            '"$name" will be removed from this house and the device itself '
+            'will be wiped back to setup mode. You can re-register it later '
+            'via Bluetooth provisioning.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      await ApiService.deleteDevice(deviceId);
+      setState(() {
+        _devices.removeWhere((d) => d['device_id'] == deviceId);
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Device removed — it has been reset to setup mode'),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    }
+  }
+
   // ── Toggle Channel ─────────────────────────────────────────────
   Future<void> _toggleChannel(
       String deviceId, int channel, bool newState) async {
@@ -298,6 +346,28 @@ class _DevicesTabState extends State<DevicesTab>
                     ],
                   ),
                 ),
+                if (ApiService.canManageDevices)
+                  PopupMenuButton<String>(
+                    icon: Icon(Icons.more_vert_rounded,
+                        size: 20, color: cs.onSurfaceVariant),
+                    onSelected: (v) {
+                      if (v == 'remove') _removeDevice(deviceId, name);
+                    },
+                    itemBuilder: (ctx) => [
+                      PopupMenuItem(
+                        value: 'remove',
+                        child: Row(
+                          children: [
+                            Icon(Icons.delete_outline_rounded,
+                                size: 18, color: cs.error),
+                            const SizedBox(width: 8),
+                            Text('Remove device',
+                                style: TextStyle(color: cs.error)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
               ],
             ),
             const SizedBox(height: 16),

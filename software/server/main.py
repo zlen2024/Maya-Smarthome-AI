@@ -62,6 +62,12 @@ def run_migrations():
                 db.add(assoc)
             db.commit()
 
+        # Add can_manage_devices to account_houses if missing
+        ah_cols = [c['name'] for c in inspector.get_columns('account_houses')]
+        if 'can_manage_devices' not in ah_cols:
+            db.execute(text("ALTER TABLE account_houses ADD COLUMN can_manage_devices BOOLEAN DEFAULT 0"))
+            db.commit()
+
         # Add pin to devices if missing
         device_cols = [c['name'] for c in inspector.get_columns('devices')]
         if 'pin' not in device_cols:
@@ -326,6 +332,7 @@ async def list_my_houses(db: Session = Depends(get_db),
                 "house_id": house.house_id,
                 "location": house.location,
                 "is_master": a.is_master,
+                "can_manage_devices": bool(a.is_master or a.can_manage_devices),
                 "join_pin": house.join_pin if a.is_master else None,
                 "is_active": current_user.house_id == house.house_id,
             })
@@ -421,8 +428,33 @@ async def list_house_members(house_id: int, db: Session = Depends(get_db),
                 "name": acc.name,
                 "email": acc.email,
                 "is_master": a.is_master,
+                "can_manage_devices": bool(a.is_master or a.can_manage_devices),
             })
     return {"members": members}
+
+
+@app.put("/api/houses/{house_id}/members/{acc_id}/device-permission")
+async def set_member_device_permission(house_id: int, acc_id: int, payload: dict,
+                                       db: Session = Depends(get_db),
+                                       current_user: Account = Depends(get_current_user)):
+    """Grant or revoke a member's right to add/remove devices (master-only)."""
+    caller_assoc = db.query(AccountHouse).filter(
+        AccountHouse.acc_id == current_user.acc_id,
+        AccountHouse.house_id == house_id
+    ).first()
+    if not caller_assoc or not caller_assoc.is_master:
+        raise HTTPException(status_code=403, detail="Only the house master can change device permissions")
+    target = db.query(AccountHouse).filter(
+        AccountHouse.acc_id == acc_id,
+        AccountHouse.house_id == house_id
+    ).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="Member not found in this house")
+    if target.is_master:
+        raise HTTPException(status_code=400, detail="The master always has device permissions")
+    target.can_manage_devices = bool(payload.get("allowed", False))
+    db.commit()
+    return {"acc_id": acc_id, "can_manage_devices": target.can_manage_devices}
 
 
 @app.delete("/api/houses/{house_id}/members/{acc_id}")
@@ -560,11 +592,25 @@ async def child_login(child_id: int, payload: dict, db: Session = Depends(get_db
 
 # ─── Device Registration ──────────────────────────────────────
 
+def _user_can_manage_devices(db: Session, user: Account) -> bool:
+    """Master of the active house, a member the master granted the right to,
+    or a global admin. Children can never manage devices."""
+    if user.role == AccountRole.admin:
+        return True
+    if user.role != AccountRole.parent or not user.house_id:
+        return False
+    assoc = db.query(AccountHouse).filter(
+        AccountHouse.acc_id == user.acc_id,
+        AccountHouse.house_id == user.house_id
+    ).first()
+    return bool(assoc and (assoc.is_master or assoc.can_manage_devices))
+
+
 @app.post("/api/devices/register")
 async def register_device(payload: dict, db: Session = Depends(get_db),
                           current_user: Account = Depends(get_current_user)):
-    if current_user.role not in (AccountRole.parent, AccountRole.admin):
-        raise HTTPException(status_code=403, detail="Only parents/admins can register devices")
+    if not _user_can_manage_devices(db, current_user):
+        raise HTTPException(status_code=403, detail="Only the house owner (or members they've authorized) can add devices")
     house_id = current_user.house_id
     if not house_id:
         raise HTTPException(status_code=400, detail="Account has no house")
@@ -614,19 +660,28 @@ async def register_device(payload: dict, db: Session = Depends(get_db),
 @app.delete("/api/devices/{device_id}")
 async def delete_device(device_id: str, db: Session = Depends(get_db),
                         current_user: Account = Depends(get_current_user)):
-    if current_user.role not in (AccountRole.parent, AccountRole.admin):
-        raise HTTPException(status_code=403, detail="Only parents/admins can delete devices")
+    if not _user_can_manage_devices(db, current_user):
+        raise HTTPException(status_code=403, detail="Only the house owner (or members they've authorized) can remove devices")
     device = db.query(Device).filter(Device.device_id == device_id).first()
     if not device:
         raise HTTPException(status_code=404, detail="Device not found")
     if current_user.role != AccountRole.admin and device.house_id != current_user.house_id:
         raise HTTPException(status_code=403, detail="Device belongs to another house")
+
+    # Tell the device to wipe its credentials and reboot into provisioning mode.
+    # If it's offline now, the unknown-device check at WS identify will
+    # factory-reset it whenever it next connects.
+    device_was_online = device_id in manager.active_connections
+    if device_was_online:
+        await manager.send_personal_message(
+            json.dumps({"id": device_id, "cmd": "factory_reset"}), device_id)
+
     # ORM cascade removes SmartExtension -> Relays -> Permissions
     db.delete(device)
     db.query(Heartbeat).filter(Heartbeat.device_id == device_id).delete()
     db.commit()
     manager.device_info.pop(device_id, None)
-    return {"status": "deleted", "device_id": device_id}
+    return {"status": "deleted", "device_id": device_id, "device_reset": device_was_online}
 
 
 @app.get("/api/devices")
@@ -1088,7 +1143,15 @@ async def _handle_websocket(websocket: WebSocket):
                         print(f"Ignoring message from unidentified connection (id={device_id})")
                         continue
                     device_db = db.query(Device).filter(Device.device_id == device_id).first()
-                    stored_pin = (device_db.pin or "").strip() if device_db else ""
+                    if not device_db:
+                        # Device was deleted (or never registered) — tell it to
+                        # wipe itself and return to provisioning mode.
+                        print(f"Unknown device {device_id} connected. Sending factory_reset.")
+                        await websocket.send_text(json.dumps({"id": device_id, "cmd": "factory_reset"}))
+                        manager.disconnect(websocket)
+                        await websocket.close(code=1008)
+                        return
+                    stored_pin = (device_db.pin or "").strip()
                     if stored_pin and stored_pin != "0000":
                         if str(json_data.get("pin", "")).strip() != stored_pin:
                             print(f"Device {device_id} failed PIN verification. Closing connection.")
