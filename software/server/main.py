@@ -592,6 +592,25 @@ async def child_login(child_id: int, payload: dict, db: Session = Depends(get_db
 
 # ─── Device Registration ──────────────────────────────────────
 
+async def _reset_and_close(websocket: WebSocket, device_id: str, reason: str):
+    """Tell a connecting device to wipe itself back to provisioning mode, then close.
+    Used when the device is unknown or orphaned (no valid house)."""
+    print(f"Device {device_id} rejected at identify ({reason}). Sending factory_reset.")
+    try:
+        await websocket.send_text(json.dumps({"id": device_id, "cmd": "factory_reset"}))
+    except Exception:
+        pass
+    manager.disconnect(websocket)
+    await websocket.close(code=1008)
+
+
+def _device_has_valid_house(db: Session, device_db: Device) -> bool:
+    """A device is only valid if it belongs to a house that still exists."""
+    if not device_db.house_id:
+        return False
+    return db.query(House).filter(House.house_id == device_db.house_id).first() is not None
+
+
 def _user_can_manage_devices(db: Session, user: Account) -> bool:
     """Master of the active house, a member the master granted the right to,
     or a global admin. Children can never manage devices."""
@@ -1144,13 +1163,11 @@ async def _handle_websocket(websocket: WebSocket):
                         continue
                     device_db = db.query(Device).filter(Device.device_id == device_id).first()
                     if not device_db:
-                        # Device was deleted (or never registered) — tell it to
-                        # wipe itself and return to provisioning mode.
-                        print(f"Unknown device {device_id} connected. Sending factory_reset.")
-                        await websocket.send_text(json.dumps({"id": device_id, "cmd": "factory_reset"}))
-                        manager.disconnect(websocket)
-                        await websocket.close(code=1008)
+                        # Device was deleted (or never registered, e.g. a wiped/
+                        # rebuilt server DB) — wipe it back to provisioning mode.
+                        await _reset_and_close(websocket, device_id, "unknown device")
                         return
+                    # PIN proves identity first, so an impostor can't probe house state
                     stored_pin = (device_db.pin or "").strip()
                     if stored_pin and stored_pin != "0000":
                         if str(json_data.get("pin", "")).strip() != stored_pin:
@@ -1158,6 +1175,11 @@ async def _handle_websocket(websocket: WebSocket):
                             manager.disconnect(websocket)
                             await websocket.close(code=1008)
                             return
+                    # Must still belong to a real house — rejects orphaned devices
+                    # (house deleted, stale row, or DB rebuilt without this house).
+                    if not _device_has_valid_house(db, device_db):
+                        await _reset_and_close(websocket, device_id, "no valid house")
+                        return
                     manager.identify(websocket, device_id)
 
                 if json_data.get("type") == "heartbeat":
@@ -1207,8 +1229,11 @@ async def _handle_websocket(websocket: WebSocket):
 
                     device_db = db.query(Device).filter(Device.device_id == device_id).first()
                     if not device_db:
-                        device_db = Device(device_id=device_id, name="Smart Extension", status="registered")
-                        db.add(device_db)
+                        # Removed mid-session — do NOT resurrect it as a houseless
+                        # zombie. The identify gate already validated it at connect,
+                        # so this only happens if a master deleted it just now.
+                        db.rollback()
+                        continue
                     device_db.status = "online"
                     
                     ext = db.query(SmartExtension).filter(SmartExtension.device_id == device_id).first()
