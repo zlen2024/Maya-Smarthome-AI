@@ -1,10 +1,10 @@
-# fly.toml app configuration file generated for maya-smarthome-ai on 2026-06-07T15:44:30Z
+# fly.toml app configuration file generated for maya-smarthome-ai on 2026-06-22T05:10:49Z
 #
 # See https://fly.io/docs/reference/configuration/ for information about how to use this file.
 #
 
 app = 'maya-smarthome-ai'
-primary_region = 'ams'
+primary_region = 'sin'
 
 [build]
 
