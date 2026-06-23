@@ -4,7 +4,7 @@
 #
 
 app = 'maya-smarthome-ai'
-primary_region = 'ams'
+primary_region = 'sin'
 
 [build]
 
@@ -22,14 +22,11 @@ primary_region = 'ams'
   cpus = 1
   memory_mb = 1024
 
-# ==========================================================
-# To persist your SQLite database, create a Fly Volume:
-#   fly volumes create maya_data --size 1
-# And then uncomment the mounts and env sections below:
-# ==========================================================
-# [mounts]
-#   source = "maya_data"
-#   destination = "/data"
-#
-# [env]
-#   DATABASE_URL = "sqlite:////data/iot_data.db"
+# Persist the SQLite database on a Fly Volume mounted at /data.
+# The volume must be created once before deploying (see README/commands).
+[mounts]
+  source = "maya_data"
+  destination = "/data"
+
+[env]
+  DATABASE_URL = "sqlite:////data/iot_data.db"
