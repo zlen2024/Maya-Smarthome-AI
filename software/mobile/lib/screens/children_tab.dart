@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/api_service.dart';
 
 /// Children management tab (Parent-only).
-/// Lists child accounts with permissions management.
+/// Lists child accounts with permissions, homework, screen limits
+/// and last-known location.
 class ChildrenTab extends StatefulWidget {
   const ChildrenTab({super.key});
 
@@ -17,6 +20,7 @@ class _ChildrenTabState extends State<ChildrenTab>
   List<dynamic> _relays = [];
   List<dynamic> _permissions = [];
   bool _loading = true;
+  StreamSubscription? _broadcastSub;
 
   @override
   bool get wantKeepAlive => true;
@@ -25,6 +29,23 @@ class _ChildrenTabState extends State<ChildrenTab>
   void initState() {
     super.initState();
     _fetchAll();
+    _broadcastSub = ApiService.broadcasts.listen((data) {
+      if (data['type'] != 'child_location' || !mounted) return;
+      final idx =
+          _children.indexWhere((c) => c['child_id'] == data['child_id']);
+      if (idx == -1) return;
+      setState(() {
+        _children[idx]['last_lat'] = data['lat'];
+        _children[idx]['last_lng'] = data['lng'];
+        _children[idx]['last_seen_at'] = data['at'];
+      });
+    });
+  }
+
+  @override
+  void dispose() {
+    _broadcastSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _fetchAll() async {
@@ -137,6 +158,106 @@ class _ChildrenTabState extends State<ChildrenTab>
     );
   }
 
+  // ── Screen Limit Dialog ────────────────────────────────────────
+  Future<void> _showScreenLimitDialog(dynamic child) async {
+    final ctrl = TextEditingController(
+        text: (child['daily_screen_limit_min'] ?? '').toString());
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Screen limit: ${child['name']}'),
+        content: TextField(
+          controller: ctrl,
+          decoration: const InputDecoration(
+            labelText: 'Daily limit (minutes)',
+            helperText: 'Leave empty for no limit',
+            prefixIcon: Icon(Icons.timer_outlined),
+          ),
+          keyboardType: TextInputType.number,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == null) return;
+    final limit = result.isEmpty ? null : int.tryParse(result);
+    if (result.isNotEmpty && (limit == null || limit < 0)) {
+      _snack('Enter a valid number of minutes');
+      return;
+    }
+    try {
+      await ApiService.setScreenLimit(child['child_id'] as int, limit);
+      _snack(limit == null
+          ? 'Screen limit removed'
+          : 'Screen limit set to $limit min/day');
+      _fetchAll();
+    } catch (e) {
+      _snack(e.toString().replaceFirst('Exception: ', ''));
+    }
+  }
+
+  // ── Homework Bottom Sheet ──────────────────────────────────────
+  Future<void> _showHomeworkSheet(dynamic child) async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => _HomeworkSheet(
+        childId: child['child_id'] as int,
+        childName: child['name'] as String,
+      ),
+    );
+  }
+
+  // ── Location helpers ───────────────────────────────────────────
+  String _lastSeenText(dynamic child) {
+    final at = child['last_seen_at'];
+    if (at == null) return 'Location: never reported';
+    final t = DateTime.tryParse(at);
+    if (t == null) return 'Location: unknown';
+    final diff = DateTime.now().toUtc().difference(t.toUtc());
+    String ago;
+    if (diff.inMinutes < 1) {
+      ago = 'just now';
+    } else if (diff.inMinutes < 60) {
+      ago = '${diff.inMinutes} min ago';
+    } else if (diff.inHours < 24) {
+      ago = '${diff.inHours} h ago';
+    } else {
+      ago = '${diff.inDays} d ago';
+    }
+    return 'Last seen $ago';
+  }
+
+  String _screenTimeText(dynamic child) {
+    final st = child['screen_time'];
+    if (st == null) return '';
+    final limit = child['daily_screen_limit_min'];
+    final used = st['total_min'];
+    return '  ·  Screen: $used${limit != null ? '/$limit' : ''} min (${st['date']})';
+  }
+
+  Future<void> _openInMaps(dynamic child) async {
+    final lat = child['last_lat'], lng = child['last_lng'];
+    if (lat == null || lng == null) return;
+    final uri = Uri.parse(
+        'https://www.google.com/maps/search/?api=1&query=$lat,$lng');
+    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
+      _snack('Could not open maps');
+    }
+  }
+
   void _snack(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -186,27 +307,69 @@ class _ChildrenTabState extends State<ChildrenTab>
                 itemCount: _children.length,
                 itemBuilder: (ctx, i) {
                   final child = _children[i];
+                  final hasLocation = child['last_lat'] != null;
+                  final limit = child['daily_screen_limit_min'];
                   return Card(
                     margin: const EdgeInsets.only(bottom: 12),
                     color: cs.surfaceContainerLow,
-                    child: ListTile(
-                      contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 18, vertical: 8),
-                      leading: CircleAvatar(
-                        backgroundColor: cs.primaryContainer,
-                        child: Icon(Icons.child_care_rounded,
-                            color: cs.onPrimaryContainer),
-                      ),
-                      title: Text(child['name'] ?? 'Child',
-                          style: const TextStyle(fontWeight: FontWeight.w700)),
-                      subtitle: Text('ID: ${child['child_id']}',
-                          style: tt.labelSmall?.copyWith(
-                              color: cs.onSurfaceVariant,
-                              fontFamily: 'monospace')),
-                      trailing: FilledButton.tonal(
-                        onPressed: () => _showPermissionsSheet(child),
-                        child: const Text('Permissions'),
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        ListTile(
+                          contentPadding: const EdgeInsets.only(
+                              left: 18, right: 8, top: 4),
+                          leading: CircleAvatar(
+                            backgroundColor: cs.primaryContainer,
+                            child: Icon(Icons.child_care_rounded,
+                                color: cs.onPrimaryContainer),
+                          ),
+                          title: Text(child['name'] ?? 'Child',
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w700)),
+                          subtitle: Text(
+                              'ID: ${child['child_id']}'
+                              '${limit != null ? '  ·  $limit min/day' : ''}',
+                              style: tt.labelSmall?.copyWith(
+                                  color: cs.onSurfaceVariant,
+                                  fontFamily: 'monospace')),
+                          trailing: hasLocation
+                              ? TextButton.icon(
+                                  onPressed: () => _openInMaps(child),
+                                  icon: const Icon(Icons.place_outlined,
+                                      size: 18),
+                                  label: const Text('Map'),
+                                )
+                              : null,
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.only(left: 18, bottom: 4),
+                          child: Text(
+                              '${_lastSeenText(child)}${_screenTimeText(child)}',
+                              style: tt.labelSmall
+                                  ?.copyWith(color: cs.onSurfaceVariant)),
+                        ),
+                        Padding(
+                          padding:
+                              const EdgeInsets.only(left: 10, bottom: 6),
+                          child: Wrap(
+                            spacing: 4,
+                            children: [
+                              TextButton(
+                                onPressed: () => _showPermissionsSheet(child),
+                                child: const Text('Permissions'),
+                              ),
+                              TextButton(
+                                onPressed: () => _showHomeworkSheet(child),
+                                child: const Text('Homework'),
+                              ),
+                              TextButton(
+                                onPressed: () => _showScreenLimitDialog(child),
+                                child: const Text('Screen limit'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   );
                 },
@@ -216,6 +379,223 @@ class _ChildrenTabState extends State<ChildrenTab>
         onPressed: _showAddChildDialog,
         tooltip: 'Add Child',
         child: const Icon(Icons.person_add_rounded),
+      ),
+    );
+  }
+}
+
+// ── Homework Sheet ───────────────────────────────────────────────
+class _HomeworkSheet extends StatefulWidget {
+  final int childId;
+  final String childName;
+
+  const _HomeworkSheet({required this.childId, required this.childName});
+
+  @override
+  State<_HomeworkSheet> createState() => _HomeworkSheetState();
+}
+
+class _HomeworkSheetState extends State<_HomeworkSheet> {
+  List<dynamic> _homework = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetch();
+  }
+
+  Future<void> _fetch() async {
+    try {
+      final hw = await ApiService.getHomework(childId: widget.childId);
+      if (mounted) {
+        setState(() {
+          _homework = hw;
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _addHomework() async {
+    final titleCtrl = TextEditingController();
+    final descCtrl = TextEditingController();
+    final dueCtrl = TextEditingController();
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Assign Homework'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: titleCtrl,
+              decoration: const InputDecoration(labelText: 'Title'),
+              textCapitalization: TextCapitalization.sentences,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: descCtrl,
+              decoration:
+                  const InputDecoration(labelText: 'Details (optional)'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: dueCtrl,
+              readOnly: true,
+              decoration: const InputDecoration(
+                labelText: 'Due date (optional)',
+                prefixIcon: Icon(Icons.event_outlined),
+              ),
+              onTap: () async {
+                final now = DateTime.now();
+                final picked = await showDatePicker(
+                  context: ctx,
+                  initialDate: now,
+                  firstDate: now,
+                  lastDate: now.add(const Duration(days: 365)),
+                );
+                if (picked != null) {
+                  dueCtrl.text =
+                      picked.toIso8601String().substring(0, 10);
+                }
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Assign'),
+          ),
+        ],
+      ),
+    );
+
+    if (result == true && titleCtrl.text.trim().isNotEmpty) {
+      try {
+        await ApiService.createHomework(
+          widget.childId,
+          titleCtrl.text.trim(),
+          description: descCtrl.text.trim(),
+          dueDate: dueCtrl.text.isEmpty ? null : dueCtrl.text,
+        );
+        _fetch();
+      } catch (_) {}
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+
+    return Padding(
+      padding:
+          EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: DraggableScrollableSheet(
+        initialChildSize: 0.55,
+        maxChildSize: 0.85,
+        minChildSize: 0.35,
+        expand: false,
+        builder: (ctx, scrollCtrl) => Column(
+          children: [
+            Container(
+              width: 36,
+              height: 5,
+              margin: const EdgeInsets.only(top: 12, bottom: 8),
+              decoration: BoxDecoration(
+                color: cs.onSurfaceVariant.withOpacity(0.25),
+                borderRadius: BorderRadius.circular(3),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Row(
+                children: [
+                  Icon(Icons.menu_book_rounded, color: cs.primary),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Homework: ${widget.childName}',
+                      style:
+                          tt.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  IconButton.filledTonal(
+                    onPressed: _addHomework,
+                    icon: const Icon(Icons.add_rounded),
+                    tooltip: 'Assign homework',
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Divider(),
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _homework.isEmpty
+                      ? Center(
+                          child: Text('No homework assigned',
+                              style: tt.bodyMedium
+                                  ?.copyWith(color: cs.onSurfaceVariant)),
+                        )
+                      : ListView.builder(
+                          controller: scrollCtrl,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 8),
+                          itemCount: _homework.length,
+                          itemBuilder: (ctx, i) {
+                            final hw = _homework[i];
+                            final done = hw['is_done'] == true;
+                            return Card(
+                              color: cs.surfaceContainerLow,
+                              margin: const EdgeInsets.only(bottom: 8),
+                              child: ListTile(
+                                leading: Icon(
+                                  done
+                                      ? Icons.check_circle_rounded
+                                      : Icons.radio_button_unchecked_rounded,
+                                  color:
+                                      done ? Colors.green : cs.onSurfaceVariant,
+                                ),
+                                title: Text(hw['title'] ?? '',
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w600,
+                                      decoration: done
+                                          ? TextDecoration.lineThrough
+                                          : null,
+                                    )),
+                                subtitle: hw['due_date'] != null
+                                    ? Text('Due ${hw['due_date']}',
+                                        style: tt.labelSmall?.copyWith(
+                                            color: cs.onSurfaceVariant))
+                                    : null,
+                                trailing: IconButton(
+                                  icon: const Icon(Icons.delete_outline),
+                                  onPressed: () async {
+                                    try {
+                                      await ApiService.deleteHomework(
+                                          hw['hw_id'] as int);
+                                      _fetch();
+                                    } catch (_) {}
+                                  },
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+            ),
+          ],
+        ),
       ),
     );
   }

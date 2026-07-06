@@ -377,6 +377,110 @@ class ApiService {
     return data;
   }
 
+  static Future<void> reportLocation(double lat, double lng) async {
+    final res = await post('/api/children/location', {'lat': lat, 'lng': lng});
+    if (res.statusCode != 200) throw Exception('Failed to report location');
+  }
+
+  static Future<void> setScreenLimit(int childId, int? dailyLimitMin) async {
+    final res = await put('/api/children/$childId/screen-limit',
+        {'daily_limit_min': dailyLimitMin});
+    if (res.statusCode != 200) {
+      final data = jsonDecode(res.body);
+      throw Exception(data['detail'] ?? 'Failed to set screen limit');
+    }
+  }
+
+  static Future<void> reportScreenTime(String date, int totalMin) async {
+    final res = await post(
+        '/api/screen-time/report', {'date': date, 'total_min': totalMin});
+    if (res.statusCode != 200) throw Exception('Failed to report screen time');
+  }
+
+  static Future<Map<String, dynamic>> getMyScreenTime(String date) async {
+    final res = await get('/api/screen-time/me?date=$date');
+    if (res.statusCode != 200) throw Exception('Failed to fetch screen time');
+    return jsonDecode(res.body);
+  }
+
+  // ── Store (mock marketplace) ────────────────────────────────────
+  static Future<List<dynamic>> getStoreCatalog() async {
+    final res = await get('/api/store/catalog');
+    if (res.statusCode != 200) throw Exception('Failed to fetch catalog');
+    return jsonDecode(res.body)['catalog'] ?? [];
+  }
+
+  static Future<Map<String, dynamic>> placeOrder(String sku) async {
+    final res = await post('/api/store/orders', {'sku': sku});
+    final data = jsonDecode(res.body);
+    if (res.statusCode != 200) {
+      throw Exception(data['detail'] ?? 'Order failed');
+    }
+    return data;
+  }
+
+  static Future<List<dynamic>> getOrders() async {
+    final res = await get('/api/store/orders');
+    if (res.statusCode != 200) throw Exception('Failed to fetch orders');
+    return jsonDecode(res.body)['orders'] ?? [];
+  }
+
+  // ── Open API keys (master only) ─────────────────────────────────
+  static Future<Map<String, dynamic>> createApiKey(
+      int houseId, String name) async {
+    final res = await post('/api/houses/$houseId/api-keys', {'name': name});
+    final data = jsonDecode(res.body);
+    if (res.statusCode != 200) {
+      throw Exception(data['detail'] ?? 'Failed to create API key');
+    }
+    return data;
+  }
+
+  static Future<List<dynamic>> getApiKeys(int houseId) async {
+    final res = await get('/api/houses/$houseId/api-keys');
+    if (res.statusCode != 200) throw Exception('Failed to fetch API keys');
+    return jsonDecode(res.body)['api_keys'] ?? [];
+  }
+
+  static Future<void> revokeApiKey(int houseId, int keyId) async {
+    final res = await delete('/api/houses/$houseId/api-keys/$keyId');
+    if (res.statusCode != 200) throw Exception('Failed to revoke API key');
+  }
+
+  // ── Homework ────────────────────────────────────────────────────
+  static Future<List<dynamic>> getHomework({int? childId}) async {
+    String path = '/api/homework';
+    if (childId != null) path += '?child_id=$childId';
+    final res = await get(path);
+    if (res.statusCode != 200) throw Exception('Failed to fetch homework');
+    final data = jsonDecode(res.body);
+    return data['homework'] ?? [];
+  }
+
+  static Future<void> createHomework(int childId, String title,
+      {String description = '', String? dueDate}) async {
+    final res = await post('/api/homework', {
+      'child_id': childId,
+      'title': title,
+      'description': description,
+      'due_date': dueDate,
+    });
+    if (res.statusCode != 200) {
+      final data = jsonDecode(res.body);
+      throw Exception(data['detail'] ?? 'Failed to create homework');
+    }
+  }
+
+  static Future<void> setHomeworkDone(int hwId, bool isDone) async {
+    final res = await put('/api/homework/$hwId', {'is_done': isDone});
+    if (res.statusCode != 200) throw Exception('Failed to update homework');
+  }
+
+  static Future<void> deleteHomework(int hwId) async {
+    final res = await delete('/api/homework/$hwId');
+    if (res.statusCode != 200) throw Exception('Failed to delete homework');
+  }
+
   // ── Relays & Permissions ────────────────────────────────────────
   static Future<List<dynamic>> getRelays() async {
     final res = await get('/api/relays');

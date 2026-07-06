@@ -152,6 +152,22 @@ class _SettingsTabState extends State<SettingsTab> {
           ),
           const SizedBox(height: 8),
 
+          // API Keys (master only) — third-party Open API access
+          if (isMaster) ...[
+            Card(
+              color: cs.surfaceContainerLow,
+              clipBehavior: Clip.antiAlias,
+              child: ListTile(
+                leading: Icon(Icons.vpn_key_rounded, color: cs.primary),
+                title: const Text('API Keys'),
+                subtitle: const Text('Third-party Open API access'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => _showApiKeysSheet(context),
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+
           // Leave House (non-master only)
           if (!isMaster)
             Card(
@@ -185,7 +201,7 @@ class _SettingsTabState extends State<SettingsTab> {
         // ── App Info ─────────────────────────────────────────────
         Center(
           child: Text(
-            'Maya Smart Home v1.0.0',
+            'Maya Smart Home v1.1.0',
             style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant),
           ),
         ),
@@ -405,6 +421,20 @@ class _SettingsTabState extends State<SettingsTab> {
   }
 
   // ── Members Sheet ──────────────────────────────────────────────
+  void _showApiKeysSheet(BuildContext context) {
+    final houseId = ApiService.houseId;
+    if (houseId == null) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => _ApiKeysSheet(houseId: houseId),
+    );
+  }
+
   void _showMembersSheet(BuildContext context) {
     final houseId = ApiService.houseId;
     if (houseId == null) return;
@@ -749,6 +779,237 @@ class _MembersSheetState extends State<_MembersSheet> {
                 },
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── API Keys Sheet (master only) ──────────────────────────────────
+class _ApiKeysSheet extends StatefulWidget {
+  final int houseId;
+
+  const _ApiKeysSheet({required this.houseId});
+
+  @override
+  State<_ApiKeysSheet> createState() => _ApiKeysSheetState();
+}
+
+class _ApiKeysSheetState extends State<_ApiKeysSheet> {
+  List<dynamic> _keys = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetch();
+  }
+
+  Future<void> _fetch() async {
+    try {
+      final keys = await ApiService.getApiKeys(widget.houseId);
+      if (mounted) {
+        setState(() {
+          _keys = keys;
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _createKey() async {
+    final nameCtrl = TextEditingController();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('New API Key'),
+        content: TextField(
+          controller: nameCtrl,
+          decoration: const InputDecoration(
+            labelText: 'Key name',
+            hintText: 'e.g. Home Assistant',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Create'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    try {
+      final created = await ApiService.createApiKey(
+          widget.houseId,
+          nameCtrl.text.trim().isEmpty ? 'API Key' : nameCtrl.text.trim());
+      _fetch();
+      if (!mounted) return;
+      // Show-once dialog: the plaintext key can never be retrieved again.
+      await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          title: const Text('API key created'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                  'Copy this key now — it is shown only once and cannot be recovered.'),
+              const SizedBox(height: 12),
+              SelectableText(
+                created['api_key'] ?? '',
+                style: const TextStyle(fontFamily: 'monospace', fontSize: 13),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton.icon(
+              onPressed: () {
+                Clipboard.setData(
+                    ClipboardData(text: created['api_key'] ?? ''));
+              },
+              icon: const Icon(Icons.copy_rounded, size: 18),
+              label: const Text('Copy'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Done'),
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(e.toString().replaceFirst('Exception: ', ''))));
+      }
+    }
+  }
+
+  Future<void> _revoke(dynamic key) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Revoke "${key['name']}"?'),
+        content: const Text(
+            'Integrations using this key will immediately lose access.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Revoke'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await ApiService.revokeApiKey(widget.houseId, key['key_id'] as int);
+      _fetch();
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.55,
+      maxChildSize: 0.85,
+      minChildSize: 0.35,
+      expand: false,
+      builder: (ctx, scrollCtrl) => Column(
+        children: [
+          Container(
+            width: 36,
+            height: 5,
+            margin: const EdgeInsets.only(top: 12, bottom: 8),
+            decoration: BoxDecoration(
+              color: cs.onSurfaceVariant.withOpacity(0.25),
+              borderRadius: BorderRadius.circular(3),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              children: [
+                Icon(Icons.vpn_key_rounded, color: cs.primary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text('API Keys',
+                      style: tt.titleMedium
+                          ?.copyWith(fontWeight: FontWeight.w700)),
+                ),
+                IconButton.filledTonal(
+                  onPressed: _createKey,
+                  icon: const Icon(Icons.add_rounded),
+                  tooltip: 'Create API key',
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+            child: Text(
+              'Keys give third-party apps access to this house via the Maya '
+              'Open API (see /docs on the server).',
+              style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Divider(),
+          Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _keys.isEmpty
+                    ? Center(
+                        child: Text('No API keys yet',
+                            style: tt.bodyMedium
+                                ?.copyWith(color: cs.onSurfaceVariant)),
+                      )
+                    : ListView.builder(
+                        controller: scrollCtrl,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 8),
+                        itemCount: _keys.length,
+                        itemBuilder: (ctx, i) {
+                          final key = _keys[i];
+                          return Card(
+                            color: cs.surfaceContainerLow,
+                            margin: const EdgeInsets.only(bottom: 8),
+                            child: ListTile(
+                              leading: const Icon(Icons.key_rounded),
+                              title: Text(key['name'] ?? 'API Key',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w600)),
+                              subtitle: Text('${key['prefix']}…',
+                                  style: tt.labelSmall?.copyWith(
+                                      fontFamily: 'monospace',
+                                      color: cs.onSurfaceVariant)),
+                              trailing: IconButton(
+                                icon: Icon(Icons.delete_outline,
+                                    color: cs.error),
+                                tooltip: 'Revoke',
+                                onPressed: () => _revoke(key),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+          ),
         ],
       ),
     );

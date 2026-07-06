@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
 import 'provision_screen.dart';
+import 'store_screen.dart';
 
 /// Device management tab — view device details and register new devices.
 /// "Provision" opens the BLE provisioning screen.
@@ -76,13 +77,22 @@ class _DeviceManagementTabState extends State<DeviceManagementTab>
         padding: const EdgeInsets.all(16),
         children: [
           // Action buttons — adding devices requires master (or granted) rights
-          if (ApiService.canManageDevices)
+          if (ApiService.canManageDevices) ...[
             FilledButton.icon(
               onPressed: _openProvision,
               icon: const Icon(Icons.bluetooth_connected_rounded),
               label: const Text('Register New Device'),
-            )
-          else
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const StoreScreen()),
+              ),
+              icon: const Icon(Icons.storefront_outlined),
+              label: const Text('Buy Devices'),
+            ),
+          ] else
             Card(
               color: cs.surfaceContainerLow,
               child: Padding(

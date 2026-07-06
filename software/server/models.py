@@ -69,10 +69,15 @@ class Child(Base):
     name = Column(String, nullable=False)
     pin = Column(String, default="0000")
     is_home = Column(Boolean, default=False)
+    last_lat = Column(Float, nullable=True)
+    last_lng = Column(Float, nullable=True)
+    last_seen_at = Column(DateTime, nullable=True)
+    daily_screen_limit_min = Column(Integer, nullable=True)  # null = no limit
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     house = relationship("House", back_populates="children")
     permissions = relationship("Permission", back_populates="child", cascade="all, delete-orphan")
+    homework = relationship("Homework", back_populates="child", cascade="all, delete-orphan")
 
 
 class Device(Base):
@@ -146,6 +151,64 @@ class MsgHistory(Base):
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     house = relationship("House", back_populates="messages")
+
+
+class Homework(Base):
+    __tablename__ = "homework"
+
+    hw_id = Column(Integer, primary_key=True, index=True)
+    house_id = Column(Integer, ForeignKey("houses.house_id"), nullable=False)
+    child_id = Column(Integer, ForeignKey("children.child_id"), nullable=False, index=True)
+    title = Column(String, nullable=False)
+    description = Column(String, default="")
+    due_date = Column(String, nullable=True)  # "YYYY-MM-DD", display-only
+    is_done = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    child = relationship("Child", back_populates="homework")
+
+
+class ScreenTime(Base):
+    """One row per child per local calendar day — upserted, not appended."""
+    __tablename__ = "screen_time"
+    __table_args__ = (
+        UniqueConstraint('child_id', 'date', name='_child_date_uc'),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    child_id = Column(Integer, ForeignKey("children.child_id"), nullable=False, index=True)
+    date = Column(String(10), nullable=False)  # "YYYY-MM-DD" in the child device's timezone
+    total_min = Column(Integer, default=0)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class Order(Base):
+    """Mock-checkout marketplace order — no real payment involved."""
+    __tablename__ = "orders"
+
+    order_id = Column(Integer, primary_key=True, index=True)
+    house_id = Column(Integer, ForeignKey("houses.house_id"), nullable=False)
+    acc_id = Column(Integer, ForeignKey("accounts.acc_id"), nullable=False)
+    sku = Column(String, nullable=False)
+    item_name = Column(String, nullable=False)
+    price = Column(Float, nullable=False)
+    status = Column(String, default="confirmed")
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class ApiKey(Base):
+    """House-scoped key for the public Open API. Only the SHA-256 of the key
+    is stored; the plaintext is shown once at creation."""
+    __tablename__ = "api_keys"
+
+    key_id = Column(Integer, primary_key=True, index=True)
+    house_id = Column(Integer, ForeignKey("houses.house_id"), nullable=False)
+    name = Column(String, default="API Key")
+    prefix = Column(String(12), nullable=False)  # first chars, for display only
+    key_hash = Column(String(64), unique=True, index=True, nullable=False)
+    created_by = Column(Integer, ForeignKey("accounts.acc_id"), nullable=False)
+    revoked = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class Heartbeat(Base):

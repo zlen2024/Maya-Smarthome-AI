@@ -13,12 +13,15 @@ from sqlalchemy.orm import Session
 from database import engine, Base, get_db, SessionLocal
 from models import (
     Account, AccountRole, House, Child, Device, SmartExtension,
-    Relay, Permission, MsgHistory, Heartbeat, AccountHouse
+    Relay, Permission, MsgHistory, Heartbeat, AccountHouse, Homework, ScreenTime, Order
 )
+from models import ApiKey
 from auth import (
     hash_password, verify_password, create_access_token, get_current_user,
-    get_current_user_or_child, SECRET_KEY, ALGORITHM
+    get_current_user_or_child, get_api_key_house, hash_api_key,
+    SECRET_KEY, ALGORITHM
 )
+import secrets
 
 import mimetypes
 mimetypes.add_type('application/vnd.android.package-archive', '.apk')
@@ -49,6 +52,14 @@ def run_migrations():
         if 'account_houses' not in inspector.get_table_names():
             AccountHouse.__table__.create(bind=engine)
 
+        # Add can_manage_devices to account_houses if missing.
+        # Must run BEFORE the populate query below — the ORM selects this
+        # column, so querying an old table without it aborts the migration.
+        ah_cols = [c['name'] for c in inspector.get_columns('account_houses')]
+        if 'can_manage_devices' not in ah_cols:
+            db.execute(text("ALTER TABLE account_houses ADD COLUMN can_manage_devices BOOLEAN DEFAULT 0"))
+            db.commit()
+
         # Populate account_houses from existing accounts
         existing = db.query(AccountHouse).first()
         if not existing:
@@ -62,17 +73,23 @@ def run_migrations():
                 db.add(assoc)
             db.commit()
 
-        # Add can_manage_devices to account_houses if missing
-        ah_cols = [c['name'] for c in inspector.get_columns('account_houses')]
-        if 'can_manage_devices' not in ah_cols:
-            db.execute(text("ALTER TABLE account_houses ADD COLUMN can_manage_devices BOOLEAN DEFAULT 0"))
-            db.commit()
-
         # Add pin to devices if missing
         device_cols = [c['name'] for c in inspector.get_columns('devices')]
         if 'pin' not in device_cols:
             db.execute(text("ALTER TABLE devices ADD COLUMN pin TEXT DEFAULT '0000'"))
             db.commit()
+
+        # Add location/screen-limit columns to children if missing
+        child_cols = [c['name'] for c in inspector.get_columns('children')]
+        for col, ddl in (
+            ('last_lat', 'ALTER TABLE children ADD COLUMN last_lat FLOAT'),
+            ('last_lng', 'ALTER TABLE children ADD COLUMN last_lng FLOAT'),
+            ('last_seen_at', 'ALTER TABLE children ADD COLUMN last_seen_at DATETIME'),
+            ('daily_screen_limit_min', 'ALTER TABLE children ADD COLUMN daily_screen_limit_min INTEGER'),
+        ):
+            if col not in child_cols:
+                db.execute(text(ddl))
+                db.commit()
 
         # Generate PINs for houses missing one
         houses = db.query(House).filter(House.join_pin.is_(None)).all()
@@ -88,7 +105,21 @@ def run_migrations():
 
 run_migrations()
 
-app = FastAPI()
+app = FastAPI(
+    title="Maya Smart Home API",
+    version="1.0.0",
+    description=(
+        "REST + WebSocket backend for the Maya smart-home ecosystem.\n\n"
+        "Third-party integrations should use the **Open API v1** endpoints, "
+        "authenticated with a house-scoped key in the `X-API-Key` header. "
+        "Keys are issued by the house master in the Maya app (Settings → API Keys)."
+    ),
+    openapi_tags=[
+        {"name": "Open API v1",
+         "description": "Stable, key-authenticated endpoints for third-party integrations. "
+                        "All data is scoped to the house the API key belongs to."},
+    ],
+)
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -512,6 +543,111 @@ async def reset_house_pin(house_id: int, db: Session = Depends(get_db),
     return {"house_id": house.house_id, "join_pin": house.join_pin}
 
 
+# ─── API Key Management (Open API) ────────────────────────────
+
+def _require_master(db: Session, current_user: Account, house_id: int):
+    assoc = db.query(AccountHouse).filter(
+        AccountHouse.acc_id == current_user.acc_id,
+        AccountHouse.house_id == house_id
+    ).first()
+    if not assoc or not assoc.is_master:
+        raise HTTPException(status_code=403, detail="Only the house master can manage API keys")
+
+
+@app.post("/api/houses/{house_id}/api-keys")
+async def create_api_key(house_id: int, payload: dict, db: Session = Depends(get_db),
+                         current_user: Account = Depends(get_current_user)):
+    _require_master(db, current_user, house_id)
+    plaintext = "maya_" + secrets.token_urlsafe(32)
+    key = ApiKey(
+        house_id=house_id,
+        name=(payload.get("name") or "API Key").strip(),
+        prefix=plaintext[:12],
+        key_hash=hash_api_key(plaintext),
+        created_by=current_user.acc_id,
+    )
+    db.add(key)
+    db.commit()
+    # The plaintext key is returned exactly once — only its hash is stored.
+    return {"key_id": key.key_id, "name": key.name, "prefix": key.prefix, "api_key": plaintext}
+
+
+@app.get("/api/houses/{house_id}/api-keys")
+async def list_api_keys(house_id: int, db: Session = Depends(get_db),
+                        current_user: Account = Depends(get_current_user)):
+    _require_master(db, current_user, house_id)
+    keys = db.query(ApiKey).filter(ApiKey.house_id == house_id, ApiKey.revoked == False).all()  # noqa: E712
+    return {"api_keys": [{
+        "key_id": k.key_id, "name": k.name, "prefix": k.prefix,
+        "created_at": k.created_at.isoformat() if k.created_at else None,
+    } for k in keys]}
+
+
+@app.delete("/api/houses/{house_id}/api-keys/{key_id}")
+async def revoke_api_key(house_id: int, key_id: int, db: Session = Depends(get_db),
+                         current_user: Account = Depends(get_current_user)):
+    _require_master(db, current_user, house_id)
+    key = db.query(ApiKey).filter(ApiKey.key_id == key_id, ApiKey.house_id == house_id).first()
+    if not key:
+        raise HTTPException(status_code=404, detail="API key not found")
+    key.revoked = True
+    db.commit()
+    return {"status": "revoked"}
+
+
+# ─── Open API v1 (third-party, X-API-Key) ─────────────────────
+
+def _open_device_or_404(db: Session, house: House, device_id: str) -> Device:
+    device = db.query(Device).filter(
+        Device.device_id == device_id, Device.house_id == house.house_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found in this house")
+    return device
+
+
+def _open_device_dict(db: Session, device: Device) -> dict:
+    ext = db.query(SmartExtension).filter(SmartExtension.device_id == device.device_id).first()
+    relays = db.query(Relay).filter(Relay.se_id == ext.se_id).all() if ext else []
+    return {
+        "device_id": device.device_id,
+        "name": device.name,
+        "online": device.device_id in manager.active_connections,
+        "blocked": device.blocked,
+        "channels": [{
+            "channel": r.channel_number, "name": r.name, "is_on": r.is_on,
+        } for r in sorted(relays, key=lambda r: r.channel_number)],
+    }
+
+
+@app.get("/api/open/v1/devices", tags=["Open API v1"])
+async def open_list_devices(db: Session = Depends(get_db),
+                            house: House = Depends(get_api_key_house)):
+    """List every device in the key's house with channel states."""
+    devices = db.query(Device).filter(Device.house_id == house.house_id).all()
+    return {"devices": [_open_device_dict(db, d) for d in devices]}
+
+
+@app.get("/api/open/v1/devices/{device_id}", tags=["Open API v1"])
+async def open_get_device(device_id: str, db: Session = Depends(get_db),
+                          house: House = Depends(get_api_key_house)):
+    """Get one device with channel states."""
+    return _open_device_dict(db, _open_device_or_404(db, house, device_id))
+
+
+@app.post("/api/open/v1/devices/{device_id}/command", tags=["Open API v1"])
+async def open_send_command(device_id: str, payload: dict, db: Session = Depends(get_db),
+                            house: House = Depends(get_api_key_house)):
+    """Switch a channel: body {"cmd": "on"|"off"|"all_on"|"all_off", "channel": 1-3}."""
+    device = _open_device_or_404(db, house, device_id)
+    if device.blocked:
+        return {"status": "blocked", "device_id": device_id}
+    cmd = payload.get("cmd", "")
+    channel = payload.get("channel", 1)
+    if cmd not in ("on", "off", "all_on", "all_off"):
+        raise HTTPException(status_code=400, detail="cmd must be on/off/all_on/all_off")
+    return await _dispatch_command(device_id, cmd, channel)
+
+
 @app.get("/api/houses/{house_id}/chat")
 async def get_chat_history(house_id: int, before: int = None, db: Session = Depends(get_db),
                           user_info: dict = Depends(get_current_user_or_child)):
@@ -574,7 +710,19 @@ async def list_children(db: Session = Depends(get_db),
     if not house_id:
         return {"children": []}
     children = db.query(Child).filter(Child.house_id == house_id).all()
-    return {"children": [{"child_id": c.child_id, "name": c.name, "is_home": c.is_home} for c in children]}
+
+    def latest_screen_time(child_id: int):
+        row = db.query(ScreenTime).filter(ScreenTime.child_id == child_id) \
+            .order_by(ScreenTime.date.desc()).first()
+        return {"date": row.date, "total_min": row.total_min} if row else None
+
+    return {"children": [{
+        "child_id": c.child_id, "name": c.name, "is_home": c.is_home,
+        "last_lat": c.last_lat, "last_lng": c.last_lng,
+        "last_seen_at": c.last_seen_at.isoformat() if c.last_seen_at else None,
+        "daily_screen_limit_min": c.daily_screen_limit_min,
+        "screen_time": latest_screen_time(c.child_id),
+    } for c in children]}
 
 
 @app.get("/api/children/{child_id}")
@@ -598,6 +746,165 @@ async def child_login(child_id: int, payload: dict, db: Session = Depends(get_db
         raise HTTPException(status_code=401, detail="Invalid PIN")
     token = create_access_token({"sub": f"child_{child.child_id}", "role": "child", "house_id": child.house_id})
     return {"child_id": child.child_id, "name": child.name, "token": token}
+
+
+@app.post("/api/children/location")
+async def report_child_location(payload: dict, db: Session = Depends(get_db),
+                                current_auth: dict = Depends(get_current_user_or_child)):
+    if current_auth["type"] != "child":
+        raise HTTPException(status_code=403, detail="Only child devices report location")
+    lat, lng = payload.get("lat"), payload.get("lng")
+    if not isinstance(lat, (int, float)) or not isinstance(lng, (int, float)):
+        raise HTTPException(status_code=400, detail="lat and lng required")
+    child = current_auth["child"]
+    child.last_lat = float(lat)
+    child.last_lng = float(lng)
+    child.last_seen_at = datetime.now(timezone.utc)
+    db.commit()
+    await manager.broadcast_to_house(child.house_id, {
+        "type": "child_location", "child_id": child.child_id,
+        "lat": child.last_lat, "lng": child.last_lng,
+        "at": child.last_seen_at.isoformat(),
+    })
+    return {"status": "ok"}
+
+
+@app.put("/api/children/{child_id}/screen-limit")
+async def set_screen_limit(child_id: int, payload: dict, db: Session = Depends(get_db),
+                           current_user: Account = Depends(get_current_user)):
+    child = db.query(Child).filter(Child.child_id == child_id).first()
+    if not child:
+        raise HTTPException(status_code=404, detail="Child not found")
+    if current_user.role != AccountRole.admin and child.house_id != current_user.house_id:
+        raise HTTPException(status_code=403, detail="Access denied to this child")
+    limit = payload.get("daily_limit_min")
+    if limit is not None and (not isinstance(limit, int) or limit < 0):
+        raise HTTPException(status_code=400, detail="daily_limit_min must be a non-negative integer or null")
+    child.daily_screen_limit_min = limit
+    db.commit()
+    return {"child_id": child.child_id, "daily_screen_limit_min": child.daily_screen_limit_min}
+
+
+# ─── Screen Time ──────────────────────────────────────────────
+
+@app.post("/api/screen-time/report")
+async def report_screen_time(payload: dict, db: Session = Depends(get_db),
+                             current_auth: dict = Depends(get_current_user_or_child)):
+    if current_auth["type"] != "child":
+        raise HTTPException(status_code=403, detail="Only child devices report screen time")
+    date = payload.get("date", "")
+    total_min = payload.get("total_min")
+    if len(date) != 10 or not isinstance(total_min, int) or total_min < 0:
+        raise HTTPException(status_code=400, detail="date (YYYY-MM-DD) and total_min required")
+    child = current_auth["child"]
+    row = db.query(ScreenTime).filter(
+        ScreenTime.child_id == child.child_id, ScreenTime.date == date).first()
+    if row:
+        row.total_min = total_min
+        row.updated_at = datetime.now(timezone.utc)
+    else:
+        db.add(ScreenTime(child_id=child.child_id, date=date, total_min=total_min))
+    db.commit()
+    return {"status": "ok"}
+
+
+@app.get("/api/screen-time/me")
+async def my_screen_time(date: str, db: Session = Depends(get_db),
+                         current_auth: dict = Depends(get_current_user_or_child)):
+    if current_auth["type"] != "child":
+        raise HTTPException(status_code=403, detail="Child endpoint")
+    child = current_auth["child"]
+    row = db.query(ScreenTime).filter(
+        ScreenTime.child_id == child.child_id, ScreenTime.date == date).first()
+    used = row.total_min if row else 0
+    limit = child.daily_screen_limit_min
+    return {
+        "date": date, "used_min": used, "limit_min": limit,
+        "remaining_min": max(0, limit - used) if limit is not None else None,
+    }
+
+
+# ─── Homework ─────────────────────────────────────────────────
+
+def _get_house_child_or_403(db: Session, current_user: Account, child_id: int) -> Child:
+    child = db.query(Child).filter(Child.child_id == child_id).first()
+    if not child:
+        raise HTTPException(status_code=404, detail="Child not found")
+    if current_user.role != AccountRole.admin and child.house_id != current_user.house_id:
+        raise HTTPException(status_code=403, detail="Access denied to this child")
+    return child
+
+
+@app.post("/api/homework")
+async def create_homework(payload: dict, db: Session = Depends(get_db),
+                          current_user: Account = Depends(get_current_user)):
+    child_id = payload.get("child_id")
+    title = (payload.get("title") or "").strip()
+    if not child_id or not title:
+        raise HTTPException(status_code=400, detail="child_id and title required")
+    child = _get_house_child_or_403(db, current_user, child_id)
+    hw = Homework(
+        house_id=child.house_id, child_id=child.child_id, title=title,
+        description=payload.get("description", ""), due_date=payload.get("due_date"),
+    )
+    db.add(hw)
+    db.commit()
+    return {"hw_id": hw.hw_id}
+
+
+@app.get("/api/homework")
+async def list_homework(child_id: int | None = None, db: Session = Depends(get_db),
+                        current_auth: dict = Depends(get_current_user_or_child)):
+    if current_auth["type"] == "child":
+        q = db.query(Homework).filter(Homework.child_id == current_auth["child"].child_id)
+    else:
+        current_user = current_auth["user"]
+        if child_id:
+            _get_house_child_or_403(db, current_user, child_id)
+            q = db.query(Homework).filter(Homework.child_id == child_id)
+        elif current_user.role == AccountRole.admin:
+            q = db.query(Homework)
+        else:
+            q = db.query(Homework).filter(Homework.house_id == current_user.house_id)
+    return {"homework": [{
+        "hw_id": h.hw_id, "child_id": h.child_id, "title": h.title,
+        "description": h.description, "due_date": h.due_date, "is_done": h.is_done,
+        "created_at": h.created_at.isoformat() if h.created_at else None,
+    } for h in q.order_by(Homework.is_done, Homework.created_at.desc()).all()]}
+
+
+@app.put("/api/homework/{hw_id}")
+async def update_homework(hw_id: int, payload: dict, db: Session = Depends(get_db),
+                          current_auth: dict = Depends(get_current_user_or_child)):
+    hw = db.query(Homework).filter(Homework.hw_id == hw_id).first()
+    if not hw:
+        raise HTTPException(status_code=404, detail="Homework not found")
+    if current_auth["type"] == "child":
+        if hw.child_id != current_auth["child"].child_id:
+            raise HTTPException(status_code=403, detail="Not your homework")
+        if "is_done" in payload:  # children may only toggle completion
+            hw.is_done = bool(payload["is_done"])
+    else:
+        _get_house_child_or_403(db, current_auth["user"], hw.child_id)
+        for field in ("title", "description", "due_date"):
+            if field in payload:
+                setattr(hw, field, payload[field])
+        if "is_done" in payload:
+            hw.is_done = bool(payload["is_done"])
+    db.commit()
+    return {"hw_id": hw.hw_id, "is_done": hw.is_done}
+
+
+@app.delete("/api/homework/{hw_id}")
+async def delete_homework(hw_id: int, db: Session = Depends(get_db),
+                          current_user: Account = Depends(get_current_user)):
+    hw = db.query(Homework).filter(Homework.hw_id == hw_id).first()
+    if not hw:
+        raise HTTPException(status_code=404, detail="Homework not found")
+    _get_house_child_or_403(db, current_user, hw.child_id)
+    db.delete(hw)
+    db.commit()
+    return {"status": "deleted"}
 
 
 # ─── Device Registration ──────────────────────────────────────
@@ -871,6 +1178,12 @@ async def send_device_command(device_id: str, payload: dict,
             if not perm or not perm.is_allowed:
                 raise HTTPException(status_code=403, detail="You do not have permission to control this channel")
                 
+    return await _dispatch_command(device_id, cmd, channel)
+
+
+async def _dispatch_command(device_id: str, cmd: str, channel: int) -> dict:
+    """Send a relay command to a connected device and wait for its ack.
+    Shared by the JWT command endpoint and the Open API."""
     cmd_payload = json.dumps({"id": device_id, "cmd": cmd, "channel": channel})
     success = await manager.send_personal_message(cmd_payload, device_id)
     if not success:
@@ -879,6 +1192,54 @@ async def send_device_command(device_id: str, payload: dict,
     if ack:
         return {"status": "ok", "device_id": device_id, **{k: ack.get(k) for k in ("ch1", "ch2", "ch3") if k in ack}}
     return {"status": "timeout", "device_id": device_id}
+
+
+# ─── Store (mock marketplace) ─────────────────────────────────
+# ponytail: hardcoded catalog — swap for a Product table when real inventory exists
+STORE_CATALOG = [
+    {"sku": "maya-ext-3ch", "name": "Maya Smart Extension (3-Channel)",
+     "description": "WiFi smart power extension with 3 individually switchable channels, BLE setup and PIN security.", "price": 149.00},
+    {"sku": "maya-ext-3ch-pro", "name": "Maya Smart Extension Pro",
+     "description": "3-channel smart extension with surge protection and energy monitoring.", "price": 219.00},
+    {"sku": "maya-starter-kit", "name": "Maya Starter Kit",
+     "description": "Two 3-channel smart extensions plus quick-start guide — everything to smarten one room.", "price": 279.00},
+]
+
+
+@app.get("/api/store/catalog")
+async def store_catalog(current_user: Account = Depends(get_current_user)):
+    return {"catalog": STORE_CATALOG}
+
+
+@app.post("/api/store/orders")
+async def create_order(payload: dict, db: Session = Depends(get_db),
+                       current_user: Account = Depends(get_current_user)):
+    if not current_user.house_id:
+        raise HTTPException(status_code=400, detail="Account has no house")
+    sku = payload.get("sku", "")
+    item = next((i for i in STORE_CATALOG if i["sku"] == sku), None)
+    if not item:
+        raise HTTPException(status_code=404, detail="Unknown product")
+    order = Order(
+        house_id=current_user.house_id, acc_id=current_user.acc_id,
+        sku=item["sku"], item_name=item["name"], price=item["price"],  # price from catalog, never the client
+    )
+    db.add(order)
+    db.commit()
+    return {"order_id": order.order_id, "status": order.status,
+            "item_name": order.item_name, "price": order.price}
+
+
+@app.get("/api/store/orders")
+async def list_orders(db: Session = Depends(get_db),
+                      current_user: Account = Depends(get_current_user)):
+    orders = db.query(Order).filter(Order.house_id == current_user.house_id) \
+        .order_by(Order.created_at.desc()).all()
+    return {"orders": [{
+        "order_id": o.order_id, "sku": o.sku, "item_name": o.item_name,
+        "price": o.price, "status": o.status,
+        "created_at": o.created_at.isoformat() if o.created_at else None,
+    } for o in orders]}
 
 
 # ─── Permission Endpoints ─────────────────────────────────────

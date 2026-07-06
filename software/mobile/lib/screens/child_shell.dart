@@ -1,14 +1,18 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../services/api_service.dart';
 import 'devices_tab.dart';
+import 'child_tasks_tab.dart';
 import 'chat_tab.dart';
 import 'settings_tab.dart';
 
-/// Child shell with 3-tab bottom navigation (Devices + Chat + Settings).
+/// Child shell with 4-tab bottom navigation (Devices + Tasks + Chat + Settings).
 /// Children see only their permitted channels — no Children or Device tabs.
+/// While this shell is alive it also reports the device's GPS position to the
+/// server every few minutes so parents can see a last-known location.
 class ChildShell extends StatefulWidget {
   const ChildShell({super.key});
 
@@ -21,9 +25,11 @@ class _ChildShellState extends State<ChildShell> {
   WebSocketChannel? _channel;
   bool _wsConnected = false;
   Timer? _reconnectTimer;
+  Timer? _locationTimer;
 
   final List<Widget> _tabs = const [
     DevicesTab(), // Child filter is applied inside DevicesTab
+    ChildTasksTab(),
     ChatTab(),
     SettingsTab(),
   ];
@@ -32,14 +38,44 @@ class _ChildShellState extends State<ChildShell> {
   void initState() {
     super.initState();
     _connectWebSocket();
+    _startLocationReporting();
   }
 
   @override
   void dispose() {
     _reconnectTimer?.cancel();
+    _locationTimer?.cancel();
     _channel?.sink.close();
     ApiService.activeChannel = null;
     super.dispose();
+  }
+
+  // ── Location Reporting (foreground only) ───────────────────────
+  Future<void> _startLocationReporting() async {
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) return;
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        return; // no permission — silently skip reporting
+      }
+      _reportLocation();
+      _locationTimer =
+          Timer.periodic(const Duration(minutes: 3), (_) => _reportLocation());
+    } catch (_) {}
+  }
+
+  Future<void> _reportLocation() async {
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+        locationSettings:
+            const LocationSettings(accuracy: LocationAccuracy.medium),
+      ).timeout(const Duration(seconds: 20));
+      await ApiService.reportLocation(pos.latitude, pos.longitude);
+    } catch (_) {} // GPS or network hiccup — try again next tick
   }
 
   // ── WebSocket ──────────────────────────────────────────────────
@@ -157,6 +193,11 @@ class _ChildShellState extends State<ChildShell> {
             icon: Icon(Icons.power_settings_new_outlined),
             selectedIcon: Icon(Icons.power_settings_new_rounded),
             label: 'Devices',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.task_alt_outlined),
+            selectedIcon: Icon(Icons.task_alt_rounded),
+            label: 'Tasks',
           ),
           NavigationDestination(
             icon: Icon(Icons.chat_outlined),

@@ -69,7 +69,9 @@ class _ParentShellState extends State<ParentShell> {
           final type = data['type'];
           if (type == 'auth_ok') {
             if (mounted) setState(() => _wsConnected = true);
-          } else if (type == 'device_update' || type == 'device_offline') {
+          } else if (type == 'device_update' ||
+              type == 'device_offline' ||
+              type == 'child_location') {
             ApiService.emitBroadcast(data);
           } else if (type == 'chat_message') {
             ApiService.emitChat(data);
