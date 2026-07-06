@@ -349,6 +349,8 @@ void sendAllStatesAck(const char* status = "ok") {
 }
 
 // ─── WebSocket Event Handler ──────────────────────────────────
+unsigned long lastServerContact = 0; // millis of last frame heard from the server
+
 void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
   switch (type) {
     case WStype_DISCONNECTED:
@@ -357,10 +359,15 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
       wsFailCycles++;
       break;
 
+    case WStype_PONG:
+      lastServerContact = millis();
+      break;
+
     case WStype_CONNECTED: {
       Serial.println("[WS] Connected");
       wsConnected  = true;
       wsFailCycles = 0;
+      lastServerContact = millis();
 
       // Send identify + all output states; PIN verified by server at identify
       StaticJsonDocument<384> doc;
@@ -377,6 +384,7 @@ void webSocketEvent(WStype_t type, uint8_t * payload, size_t length) {
     }
 
     case WStype_TEXT: {
+      lastServerContact = millis();
       String msg((char*)payload, length);
       Serial.printf("[WS] Message: %s\n", msg.c_str());
 
@@ -498,6 +506,11 @@ void startWebSocket() {
 
   webSocket.onEvent(webSocketEvent);
   webSocket.setReconnectInterval(5000);
+  // Protocol-level ping/pong: detects half-open ("zombie") sockets the TCP
+  // stack never reports — e.g. server stopped (Fly scale-to-zero) or NAT
+  // mapping silently dropped. Ping every 15s; 2 missed pongs (3s timeout
+  // each) → library fires WStype_DISCONNECTED → auto-reconnect kicks in.
+  webSocket.enableHeartbeat(15000, 3000, 2);
   // Required for ngrok free tier to bypass browser warning interstitial
   webSocket.setExtraHeaders("ngrok-skip-browser-warning: true");
 }
@@ -566,6 +579,16 @@ void loop() {
 
   // WebSocket loop
   webSocket.loop();
+
+  // Zombie-link watchdog: with pings every 15s the server should never be
+  // silent for long while "connected". If it is, the link is dead in a way
+  // even ping/pong missed — force a disconnect so the reconnect timer takes
+  // over. Deliberately NOT ESP.restart(): that would flip all outputs LOW.
+  if (wsConnected && millis() - lastServerContact > 180000) {
+    Serial.println("[WS] No server contact for 3 min. Forcing reconnect.");
+    wsConnected = false;
+    webSocket.disconnect();
+  }
 
   // WS failure warning — print info but do not enter blocking BLE provisioning
   if (wsFailCycles >= 5) {
