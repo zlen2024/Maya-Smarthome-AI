@@ -274,7 +274,17 @@ async def login(payload: dict, db: Session = Depends(get_db)):
 
 
 @app.get("/api/auth/me")
-async def get_me(current_user: Account = Depends(get_current_user)):
+async def get_me(auth: dict = Depends(get_current_user_or_child)):
+    if auth["type"] == "child":
+        child = auth["child"]
+        return {
+            "child_id": child.child_id,
+            "name": child.name,
+            "role": "child",
+            "house_id": child.house_id,
+            "is_home": child.is_home,
+        }
+    current_user = auth["user"]
     return {
         "acc_id": current_user.acc_id,
         "email": current_user.email,
@@ -910,7 +920,16 @@ async def create_permission(payload: dict, db: Session = Depends(get_db),
 
 @app.get("/api/permissions")
 async def list_permissions(child_id: int | None = None, db: Session = Depends(get_db),
-                           current_user: Account = Depends(get_current_user)):
+                           current_auth: dict = Depends(get_current_user_or_child)):
+    if current_auth["type"] == "child":
+        # Children can only ever see their own permissions.
+        perms = db.query(Permission).filter(
+            Permission.child_id == current_auth["child"].child_id).all()
+        return {"permissions": [
+            {"permission_id": p.permission_id, "child_id": p.child_id, "relay_id": p.relay_id, "is_allowed": p.is_allowed}
+            for p in perms
+        ]}
+    current_user = current_auth["user"]
     if current_user.role == AccountRole.admin:
         q = db.query(Permission)
         if child_id:
