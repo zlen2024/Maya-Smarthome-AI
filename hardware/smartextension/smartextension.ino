@@ -5,7 +5,8 @@
   Features:
   - BLE provisioning for SSID / PASS / WS_URL / BLE_PIN
   - BLE PIN protection (default "0000"; also verified server-side at WS identify)
-  - Save settings to Preferences (only committed after WiFi + WS verified)
+  - Save settings to Preferences (committed once WiFi verifies; server
+    reachability is then confirmed after an automatic reboot, BLE off)
   - WiFi auto-reconnect; BLE provisioning re-opens on boot/persistent WiFi failure
   - WebSocket client with background retry (never falls back to old WiFi)
   - 3-channel output control (LED1/LED2/LED3 — can be swapped for relays)
@@ -250,63 +251,36 @@ void startBLEProvisioning() {
         continue;
       }
 
-      setStatus("2"); // WiFi connected, connecting to server WebSocket
-      Serial.println("WiFi connected. Verifying WebSocket server connection...");
+      setStatus("2"); // WiFi connected
+      Serial.println("WiFi connected during provisioning.");
 
-      // Temporarily apply new ws_url and PIN for the test (restored on failure).
-      // The PIN must be live BEFORE connecting: the server verifies it against
-      // the value the app just registered, via the identify message.
+      // ── Commit credentials, then reboot to reach the server ──────
+      // We deliberately do NOT open the TLS WebSocket while BLE is still up.
+      // The ESP32 has a single 2.4GHz radio shared between WiFi and the live
+      // BLE link to the phone; a TLS handshake (Fly's multi-KB certificate
+      // chain) gets corrupted under that coexistence, and Bluedroid + mbedTLS
+      // also compete for heap — both make an in-BLE handshake unreliable.
+      // Instead we save the freshly-verified WiFi credentials, tell the app to
+      // confirm the device via the server, then reboot into a clean WiFi-only
+      // state where the WebSocket connects reliably with full heap and radio.
       // If the owner supplied a NEW PIN (current PIN already validated above),
       // it takes effect here — this is the PIN-change path.
-      String prev_ws_url = ws_url;
-      String prev_pin    = ble_pin;
-      ws_url  = recvWS;
-      ble_pin = recvNEWPIN.length() > 0 ? recvNEWPIN : recvPIN;
-      startWebSocket();
-
-      int wsAttempts = 0;
-      bool wsOk = false;
-      while (wsAttempts < 150) { // up to 30 seconds
-        webSocket.loop();
-        if (wsConnected) { wsOk = true; break; }
-        delay(200);
-        wsAttempts++;
-      }
-
-      if (!wsOk) {
-        Serial.println("WebSocket connection failed during BLE setup.");
-        setStatus("5"); // WebSocket failed
-        webSocket.disconnect();
-        WiFi.disconnect(true);
-        ws_url  = prev_ws_url; // restore — new credentials are only committed on full success
-        ble_pin = prev_pin;
-        delay(1000);
-        haveSSID = havePASS = haveWS = havePIN = false;
-        recvPIN = recvSSID = recvPASS = recvWS = recvNEWPIN = "";
-        start = millis();
-        continue;
-      }
-
-      // Everything succeeded — commit new credentials (ws_url and ble_pin already applied above)
       wifi_ssid = recvSSID;
       wifi_pass = recvPASS;
-
-      setStatus("3"); // Full success
-      Serial.println("Provisioning accepted and verified. Saving settings.");
+      ws_url    = recvWS;
+      ble_pin   = recvNEWPIN.length() > 0 ? recvNEWPIN : recvPIN;
       saveSettings();
       wifiFailCycles = 0;
-      wsFailCycles = 0;
-      wifiConnected = true;
+      wsFailCycles   = 0;
+      wifiConnected  = true;
 
-      delay(1500); // Give the mobile app time to read status 3 before we shut down BLE
+      setStatus("8"); // Saved — BLE shutting down; app confirms device online via server
+      Serial.println("Credentials saved. Rebooting to connect to the server with BLE off.");
+      delay(1500); // let the phone receive status 8 and switch to server polling
 
       BLEDevice::stopAdvertising();
       delay(100);
-      BLEDevice::deinit();
-      statusChar = ssidChar = passChar = wsChar = pinChar = newpinChar = cmdChar = nullptr;
-      haveSSID = havePASS = haveWS = havePIN = false;
-      recvPIN = recvSSID = recvPASS = recvWS = recvNEWPIN = "";
-      return;
+      ESP.restart(); // clean boot → connectToWiFiOnce() + startWebSocket() (full heap/radio)
     }
     delay(200);
   }

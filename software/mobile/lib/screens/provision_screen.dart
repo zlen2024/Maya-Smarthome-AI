@@ -60,6 +60,15 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
   String _statusMsg = '';
   StreamSubscription? _statusNotificationSub;
 
+  // Once the device reports its credentials are saved (status 8), it reboots and
+  // the BLE link drops on purpose — from here we confirm success via the server,
+  // and a BLE disconnect must NOT be treated as a failure.
+  bool _finalizing = false;
+
+  // Live activity log shown during provisioning (serial-monitor style).
+  final List<String> _log = [];
+  final ScrollController _logScroll = ScrollController();
+
   @override
   void initState() {
     super.initState();
@@ -76,8 +85,34 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
     _passCtrl.dispose();
     _pinCtrl.dispose();
     _newPinCtrl.dispose();
+    _logScroll.dispose();
     _disconnectDevice();
     super.dispose();
+  }
+
+  // ── Live Activity Log ───────────────────────────────────────────
+  /// Append a timestamped line to the on-screen provisioning log so the user
+  /// can follow progress in real time, mirroring what the serial monitor shows.
+  void _appendLog(String line) {
+    String two(int v) => v.toString().padLeft(2, '0');
+    final now = DateTime.now();
+    final ts = '${two(now.hour)}:${two(now.minute)}:${two(now.second)}'
+        '.${now.millisecond.toString().padLeft(3, '0')}';
+    final entry = '$ts  $line';
+    if (!mounted) {
+      _log.add(entry);
+      return;
+    }
+    setState(() => _log.add(entry));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_logScroll.hasClients) {
+        _logScroll.animateTo(
+          _logScroll.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.easeOut,
+        );
+      }
+    });
   }
 
   // ── Bluetooth Check & Setup ─────────────────────────────────────
@@ -155,7 +190,10 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
   }
 
   // ── Connect & Discover Services ─────────────────────────────────
-  Future<void> _connectDevice(BluetoothDevice device) async {
+  // [advName] is the name from the advertisement (ScanResult). On Android,
+  // device.platformName is often empty right after connecting (the GAP name
+  // isn't cached yet), so we rely on the advertised name we already scanned.
+  Future<void> _connectDevice(BluetoothDevice device, {String advName = ''}) async {
     setState(() {
       _connecting = true;
       _connectedDevice = device;
@@ -204,8 +242,9 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
         throw Exception('BLE characteristics missing. Old firmware?');
       }
 
-      // Auto-extract device ID from name
-      final name = device.platformName; // e.g. Maya-esp32-9f83b1c1
+      // Auto-extract device ID from name. Prefer the advertised name (always
+      // populated from the scan); fall back to platformName only if needed.
+      final name = advName.isNotEmpty ? advName : device.platformName; // e.g. Maya-esp32-9f83b1c1
       if (!name.startsWith('Maya-') || name == 'Maya-Setup') {
         throw Exception('Could not read device ID from "$name". Please update the device firmware.');
       }
@@ -247,6 +286,22 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
     if (!mounted) return;
     _statusNotificationSub?.cancel();
     _connectionStateSub?.cancel();
+
+    // During finalizing the device reboots and drops BLE on purpose — this is
+    // expected. Keep the flow alive and let server polling confirm success.
+    if (_finalizing) {
+      _appendLog('Bluetooth disconnected (expected — device rebooting).');
+      setState(() {
+        _connectedDevice = null;
+        _ssidChar = null;
+        _passChar = null;
+        _urlChar = null;
+        _pinChar = null;
+        _newPinChar = null;
+        _statusChar = null;
+      });
+      return;
+    }
 
     if (_submitting) _rollbackRegistrationIfNew();
 
@@ -292,14 +347,19 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
 
     setState(() {
       _submitting = true;
+      _finalizing = false;
+      _log.clear();
       _currentStep = 'registering';
       _statusMsg = 'Registering device with server...';
     });
+    _appendLog('Starting setup for $deviceId');
+    _appendLog('Registering device with server...');
 
     try {
       // 1. REST Register Device to User Account (PIN stored for WS identify verification)
       final regResult = await ApiService.registerDevice(deviceId, name, pin: effectivePin);
       _wasNewRegistration = regResult['created'] == true;
+      _appendLog('Server registration OK.');
 
       // ─── Set up notifications BEFORE writing to prevent race conditions ───
       if (_statusChar != null) {
@@ -321,6 +381,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
         _currentStep = 'writing';
         _statusMsg = 'Writing credentials over Bluetooth...';
       });
+      _appendLog('Sending Wi-Fi credentials over Bluetooth...');
 
       // 2. Write Credentials over BLE
       // Server WebSocket URL: dynamically derived from base API Url (replaces /ws/device)
@@ -345,6 +406,8 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
       await _pinChar!.write(utf8.encode(pin), withoutResponse: false);
       await Future.delayed(const Duration(milliseconds: 150));
 
+      _appendLog('Credentials sent. Waiting for device...');
+
       // 3. Start Connection Feedback Loop
       if (_statusChar != null) {
         setState(() {
@@ -357,6 +420,8 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
           _currentStep = 'connecting_ws';
           _statusMsg = 'Connecting to server (polling status)...';
         });
+        _appendLog('Device firmware has no live status — polling server.');
+        _finalizing = true;
         _startServerPollingFallback(deviceId);
       }
 
@@ -368,30 +433,52 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
   void _handleBleStatusCode(String code) {
     switch (code) {
       case '1':
+        _appendLog('PIN accepted by device.');
         setState(() {
           _currentStep = 'connecting_wifi';
           _statusMsg = 'PIN accepted. Connecting device to Wi-Fi...';
         });
         break;
       case '2':
+        _appendLog('Device connected to Wi-Fi.');
         setState(() {
           _currentStep = 'connecting_ws';
-          _statusMsg = 'Wi-Fi connected. Establishing WebSocket connection...';
+          _statusMsg = 'Wi-Fi connected. Saving and connecting to server...';
         });
         break;
+      case '8':
+        // Credentials saved on the device. It now reboots (BLE drops on purpose)
+        // and connects to the server on its own — we confirm via server polling.
+        _appendLog('Credentials saved. Device is rebooting to reach the server...');
+        _finalizing = true;
+        setState(() {
+          _currentStep = 'connecting_ws';
+          _statusMsg = 'Device is connecting to the server. Confirming...';
+        });
+        if (_deviceId != null) {
+          _appendLog('Waiting for device to come online...');
+          _startServerPollingFallback(_deviceId!);
+        }
+        break;
       case '3':
+        // Legacy firmware: device verified the server itself over BLE.
+        _appendLog('Device reported a verified server connection.');
         _handleSuccess();
         break;
       case '4':
+        _appendLog('✗ Wi-Fi connection failed.');
         _handleFailure('Wi-Fi connection failed. Double-check SSID and password.');
         break;
       case '5':
+        _appendLog('✗ Server connection failed.');
         _handleFailure('Server WebSocket connection failed. Verify server URL/status.');
         break;
       case '6':
+        _appendLog('✗ Incorrect security PIN.');
         _handleFailure('Incorrect Security PIN. Device rejected credentials.');
         break;
       case '7':
+        _appendLog('✗ Could not connect.');
         _handleFailure('Could not connect. Please re-enter your credentials.');
         break;
       default:
@@ -400,7 +487,11 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
     }
   }
 
+  bool _polling = false;
+
   void _startServerPollingFallback(String deviceId) async {
+    if (_polling) return; // never run two pollers at once
+    _polling = true;
     int attempts = 0;
     String? initialHeartbeat;
     try {
@@ -408,10 +499,14 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
       initialHeartbeat = initialDev['last_heartbeat'];
     } catch (_) {}
 
+    // The device reboots, rejoins Wi-Fi, then opens the WebSocket — allow enough
+    // time (~40s) for that whole sequence before warning.
+    const maxAttempts = 20;
     Timer.periodic(const Duration(seconds: 2), (timer) async {
       attempts++;
       if (!_submitting || !mounted) {
         timer.cancel();
+        _polling = false;
         return;
       }
 
@@ -421,13 +516,21 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
         // Ensure the device is online and the heartbeat timestamp has updated since we started
         if (dev['online'] == true && newHeartbeat != initialHeartbeat) {
           timer.cancel();
+          _polling = false;
+          _appendLog('✓ Device is online and connected to the server.');
           _handleSuccess();
           return;
         }
       } catch (_) {}
 
-      if (attempts >= 10) { // 20 seconds timeout
+      if (attempts % 3 == 0) {
+        _appendLog('Still waiting for device to report online... (${attempts * 2}s)');
+      }
+
+      if (attempts >= maxAttempts) {
         timer.cancel();
+        _polling = false;
+        _appendLog('! Timed out waiting for the device to report online.');
         _handleSuccess(isWarning: true); // Warn that device credentials were sent, but not verified
       }
     });
@@ -435,6 +538,8 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
 
   void _handleSuccess({bool isWarning = false}) {
     _wasNewRegistration = false; // keep the registration — provisioning succeeded
+    _finalizing = false;
+    _polling = false;
     setState(() {
       _currentStep = 'success';
       _statusMsg = isWarning
@@ -454,6 +559,8 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
   }
 
   void _handleFailure(String error) {
+    _finalizing = false;
+    _polling = false;
     setState(() {
       _submitting = false;
       _currentStep = 'failed';
@@ -661,7 +768,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
                         child: CircularProgressIndicator(strokeWidth: 2.5),
                       )
                     : Icon(Icons.arrow_forward_ios_rounded, size: 16, color: cs.onSurfaceVariant),
-                onTap: _connecting ? null : () => _connectDevice(r.device),
+                onTap: _connecting ? null : () => _connectDevice(r.device, advName: r.advertisementData.advName),
               ),
             );
           }),
@@ -851,15 +958,16 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
     }
 
     return Center(
-      child: Container(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
-        constraints: const BoxConstraints(maxWidth: 320),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              'Registering Device',
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 320),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Registering Device',
               style: tt.headlineSmall?.copyWith(fontWeight: FontWeight.bold),
               textAlign: TextAlign.center,
             ),
@@ -885,6 +993,59 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
             ),
             const SizedBox(height: 24),
 
+            // ── Live activity log (serial-monitor style) ──────────
+            if (_log.isNotEmpty) ...[
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text('Activity log',
+                    style: tt.labelMedium?.copyWith(color: cs.onSurfaceVariant)),
+              ),
+              const SizedBox(height: 6),
+              Container(
+                height: 170,
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0E1116),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: cs.outlineVariant.withOpacity(0.4)),
+                ),
+                child: Scrollbar(
+                  controller: _logScroll,
+                  child: SingleChildScrollView(
+                    controller: _logScroll,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: _log.map((line) {
+                        final isError = line.contains('✗');
+                        final isOk = line.contains('✓');
+                        final isWarn = line.contains('!');
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 3),
+                          child: Text(
+                            line,
+                            style: TextStyle(
+                              fontFamily: 'monospace',
+                              fontSize: 11,
+                              height: 1.3,
+                              color: isError
+                                  ? const Color(0xFFFF6B6B)
+                                  : isOk
+                                      ? const Color(0xFF51CF66)
+                                      : isWarn
+                                          ? const Color(0xFFFFD43B)
+                                          : const Color(0xFFB8C0CC),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+            ],
+
             if (_currentStep == 'failed') ...[
               FilledButton.icon(
                 onPressed: () {
@@ -897,7 +1058,8 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
                 label: const Text('Edit Details & Retry'),
               ),
             ],
-          ],
+            ],
+          ),
         ),
       ),
     );
