@@ -241,6 +241,18 @@ async def root_page():
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
 
 
+@app.get("/store", response_class=HTMLResponse)
+async def store_page():
+    """Public marketplace storefront."""
+    return HTMLResponse(content=(STATIC_DIR / "store.html").read_text(encoding="utf-8"))
+
+
+@app.get("/integrate", response_class=HTMLResponse)
+async def integrate_page():
+    """Open API integration guide + key management (uses the portal login)."""
+    return HTMLResponse(content=(STATIC_DIR / "integrate.html").read_text(encoding="utf-8"))
+
+
 @app.get("/admin", response_class=HTMLResponse)
 async def admin_page(credentials: HTTPBasicCredentials = Depends(security_basic)):
     admin_pw_hash = os.environ.get("ADMIN_PASSWORD_HASH")
@@ -1599,6 +1611,12 @@ STORE_CATALOG = [
 
 @app.get("/api/store/catalog")
 async def store_catalog(current_user: Account = Depends(get_current_user)):
+    return {"catalog": STORE_CATALOG}
+
+
+@app.get("/api/store/public-catalog")
+async def store_public_catalog():
+    """Catalog for the public storefront — no auth (login is only needed to buy)."""
     return {"catalog": STORE_CATALOG}
 
 

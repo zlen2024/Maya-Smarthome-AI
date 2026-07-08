@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Maya — API & Integration</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg-space: #070913; --bg-card: rgba(13,17,39,.55); --border: rgba(99,102,241,.22);
+      --text-main: #f1f5f9; --text-muted: #94a3b8; --primary: #6366f1;
+      --primary-grad: linear-gradient(135deg, #818cf8, #6366f1); --success: #10b981; --danger: #ef4444;
+    }
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background: radial-gradient(1200px 600px at 50% -10%, #131a3a 0%, var(--bg-space) 60%);
+      color: var(--text-main); min-height: 100vh; line-height: 1.55;
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 18px 24px; max-width: 900px; margin: 0 auto;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-family: 'Outfit'; font-weight: 800; font-size: 1.2rem; }
+    .logo { width: 36px; height: 36px; border-radius: 10px; background: var(--primary-grad); display: grid; place-items: center; }
+    .logo svg { width: 20px; height: 20px; }
+    header a { color: var(--primary); text-decoration: none; font-weight: 600; font-size: .9rem; }
+    main { max-width: 900px; margin: 0 auto; padding: 12px 24px 60px; }
+    h1 { font-family: 'Outfit'; font-weight: 800; font-size: 2rem; margin-top: 8px; }
+    h1 + p { color: var(--text-muted); margin-top: 6px; }
+    section { margin-top: 32px; }
+    h2 { font-family: 'Outfit'; font-weight: 700; font-size: 1.3rem; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: 18px; padding: 20px; backdrop-filter: blur(12px); }
+    .muted { color: var(--text-muted); }
+    .endpoint { margin-top: 14px; }
+    .method { font-family: monospace; font-weight: 700; font-size: .78rem; padding: 3px 8px; border-radius: 6px; }
+    .get { background: rgba(16,185,129,.15); color: var(--success); }
+    .post { background: rgba(99,102,241,.18); color: #a5b4fc; }
+    code, pre { font-family: 'SFMono-Regular', Consolas, monospace; }
+    .path { font-family: monospace; font-size: .9rem; margin-left: 8px; }
+    pre {
+      background: #0b1024; border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px;
+      overflow-x: auto; font-size: .82rem; margin-top: 10px; color: #cbd5e1; line-height: 1.5;
+    }
+    pre .tok { color: #818cf8; }
+    button {
+      border: none; border-radius: 12px; padding: 11px 18px; font-weight: 700; font-size: .9rem;
+      cursor: pointer; font-family: 'Plus Jakarta Sans'; background: var(--primary-grad); color: white;
+    }
+    button.ghost { background: transparent; border: 1px solid var(--border); color: var(--text-main); }
+    button.danger { background: transparent; border: 1px solid rgba(239,68,68,.4); color: var(--danger); padding: 6px 12px; font-size: .8rem; }
+    button:disabled { opacity: .5; cursor: default; }
+    .key-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid rgba(148,163,184,.12); }
+    .key-row:last-child { border-bottom: none; }
+    .key-prefix { font-family: monospace; font-size: .85rem; }
+    .new-key { background: rgba(16,185,129,.1); border: 1px solid rgba(16,185,129,.35); border-radius: 12px; padding: 14px 16px; margin-top: 14px; }
+    .new-key code { display: block; margin-top: 8px; word-break: break-all; color: var(--success); font-size: .82rem; }
+    .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    input {
+      background: rgba(255,255,255,.04); border: 1px solid var(--border); border-radius: 12px;
+      padding: 11px 14px; color: var(--text-main); font-family: inherit; font-size: .9rem; flex: 1; min-width: 180px;
+    }
+    .note { background: rgba(245,158,11,.1); border: 1px solid rgba(245,158,11,.35); color: #fbbf24; border-radius: 12px; padding: 12px 16px; font-size: .85rem; }
+    #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(120px); background: #111935; border: 1px solid var(--border); padding: 13px 20px; border-radius: 13px; font-weight: 600; font-size: .88rem; transition: transform .3s; z-index: 50; }
+    #toast.show { transform: translateX(-50%) translateY(0); }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="logo"><svg viewBox="0 0 24 24" fill="white"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg></span>
+      Maya · API & Docs
+    </div>
+    <a href="/">← Portal</a>
+  </header>
+
+  <main>
+    <h1>Open API integration</h1>
+    <p>Control your Maya devices from your own apps and automations with a house-scoped API key.</p>
+
+    <section id="keysSection">
+      <h2>Your API keys</h2>
+      <div class="card" id="keysCard"><p class="muted">Loading…</p></div>
+    </section>
+
+    <section>
+      <h2>Authentication</h2>
+      <div class="card">
+        <p class="muted">Every Open API request is authenticated with your key in the <code>X-API-Key</code> header. All data is scoped to the house the key belongs to.</p>
+        <pre id="authExample"></pre>
+      </div>
+    </section>
+
+    <section>
+      <h2>Endpoints</h2>
+      <div class="card">
+        <div class="endpoint">
+          <span class="method get">GET</span><span class="path">/api/open/v1/devices</span>
+          <p class="muted" style="margin-top:6px">List every device in your house with channel states.</p>
+          <pre id="ep1"></pre>
+        </div>
+        <div class="endpoint" style="margin-top:22px">
+          <span class="method get">GET</span><span class="path">/api/open/v1/devices/{device_id}</span>
+          <p class="muted" style="margin-top:6px">Get one device with its channel states.</p>
+          <pre id="ep2"></pre>
+        </div>
+        <div class="endpoint" style="margin-top:22px">
+          <span class="method post">POST</span><span class="path">/api/open/v1/devices/{device_id}/command</span>
+          <p class="muted" style="margin-top:6px">Switch a channel. Body: <code>{"cmd": "on|off|all_on|all_off", "channel": 1-3}</code>.</p>
+          <pre id="ep3"></pre>
+        </div>
+        <div class="row" style="margin-top:20px">
+          <a href="/docs" target="_blank"><button class="ghost">Open interactive Swagger ↗</button></a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast"></div>
+
+  <script>
+    const API = window.location.origin;
+    const token = localStorage.getItem('user_token');
+    const isChild = localStorage.getItem('is_child_session') === 'true';
+    let houseId = null;
+
+    function toast(m) { const t = document.getElementById('toast'); t.textContent = m; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2800); }
+    function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+    function renderExamples() {
+      document.getElementById('authExample').innerHTML =
+        `curl -H <span class="tok">"X-API-Key: maya_your_key_here"</span> \\\n  ${API}/api/open/v1/devices`;
+      document.getElementById('ep1').innerHTML =
+        `curl -H <span class="tok">"X-API-Key: maya_..."</span> \\\n  ${API}/api/open/v1/devices`;
+      document.getElementById('ep2').innerHTML =
+        `curl -H <span class="tok">"X-API-Key: maya_..."</span> \\\n  ${API}/api/open/v1/devices/<span class="tok">esp32-abc123</span>`;
+      document.getElementById('ep3').innerHTML =
+        `curl -X POST -H <span class="tok">"X-API-Key: maya_..."</span> \\\n  -H <span class="tok">"Content-Type: application/json"</span> \\\n  -d <span class="tok">'{"cmd":"on","channel":1}'</span> \\\n  ${API}/api/open/v1/devices/<span class="tok">esp32-abc123</span>/command`;
+    }
+
+    async function boot() {
+      renderExamples();
+      const card = document.getElementById('keysCard');
+      if (!token || isChild) {
+        card.innerHTML = '<p class="muted">Please <a href="/" style="color:var(--primary);font-weight:700">log in to the portal</a> as a house master to manage API keys.</p>';
+        return;
+      }
+      try {
+        const me = await fetch(API + '/api/auth/me', { headers: { Authorization: 'Bearer ' + token } }).then(r => r.json());
+        houseId = me.house_id;
+        if (!houseId) { card.innerHTML = '<p class="muted">Join or create a house first.</p>'; return; }
+        loadKeys();
+      } catch { card.innerHTML = '<p class="muted">Session expired. <a href="/" style="color:var(--primary)">Log in again</a>.</p>'; }
+    }
+
+    async function loadKeys() {
+      const card = document.getElementById('keysCard');
+      const res = await fetch(API + `/api/houses/${houseId}/api-keys`, { headers: { Authorization: 'Bearer ' + token } });
+      if (res.status === 403) {
+        card.innerHTML = '<div class="note">Only the house master can create and manage API keys.</div>';
+        return;
+      }
+      if (!res.ok) { card.innerHTML = '<p class="muted">Could not load keys.</p>'; return; }
+      const data = await res.json();
+      const keys = data.api_keys || [];
+      card.innerHTML = `
+        <div class="row" style="margin-bottom:16px">
+          <input id="keyName" placeholder="Key name (e.g. Home Assistant)" />
+          <button onclick="createKey()">+ New key</button>
+        </div>
+        <div id="keyList">${keys.length ? keys.map(k => `
+          <div class="key-row">
+            <div><strong>${esc(k.name)}</strong><div class="key-prefix muted">${esc(k.prefix)}…</div></div>
+            <button class="danger" onclick="revokeKey(${k.key_id})">Revoke</button>
+          </div>`).join('') : '<p class="muted">No keys yet. Create one to start integrating.</p>'}</div>
+        <div id="newKeyBox"></div>`;
+    }
+
+    async function createKey() {
+      const name = document.getElementById('keyName').value.trim() || 'API Key';
+      const res = await fetch(API + `/api/houses/${houseId}/api-keys`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ name }),
+      });
+      const data = await res.json();
+      if (!res.ok) { toast(data.detail || 'Failed to create key'); return; }
+      document.getElementById('newKeyBox').innerHTML = `
+        <div class="new-key">
+          <strong>${esc(data.name)}</strong> — copy this now, it won't be shown again:
+          <code>${esc(data.api_key)}</code>
+        </div>`;
+      loadKeysPreserveNew(data);
+    }
+
+    async function loadKeysPreserveNew(newKey) {
+      // Refresh the list but keep the one-time secret visible.
+      const box = document.getElementById('newKeyBox').innerHTML;
+      await loadKeys();
+      document.getElementById('newKeyBox').innerHTML = box;
+    }
+
+    async function revokeKey(id) {
+      if (!confirm('Revoke this key? Apps using it will stop working.')) return;
+      const res = await fetch(API + `/api/houses/${houseId}/api-keys/${id}`, {
+        method: 'DELETE', headers: { Authorization: 'Bearer ' + token },
+      });
+      if (res.ok) { toast('Key revoked'); loadKeys(); } else { toast('Failed to revoke'); }
+    }
+
+    boot();
+  </script>
+</body>
+</html>

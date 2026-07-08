@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Maya Store — Smart Home Devices</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg-space: #070913;
+      --bg-card: rgba(13, 17, 39, 0.55);
+      --border: rgba(99, 102, 241, 0.22);
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --primary: #6366f1;
+      --primary-grad: linear-gradient(135deg, #818cf8, #6366f1);
+      --success: #10b981;
+    }
+    body {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      background: radial-gradient(1200px 600px at 50% -10%, #131a3a 0%, var(--bg-space) 60%);
+      color: var(--text-main); min-height: 100vh; line-height: 1.5;
+    }
+    header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 18px 24px; max-width: 1080px; margin: 0 auto;
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-family: 'Outfit'; font-weight: 800; font-size: 1.25rem; }
+    .logo {
+      width: 38px; height: 38px; border-radius: 11px; background: var(--primary-grad);
+      display: grid; place-items: center; box-shadow: 0 6px 18px rgba(99,102,241,.4);
+    }
+    .logo svg { width: 22px; height: 22px; }
+    .session { font-size: .85rem; color: var(--text-muted); display: flex; align-items: center; gap: 12px; }
+    .session a { color: var(--primary); text-decoration: none; font-weight: 600; }
+    .hero { max-width: 1080px; margin: 10px auto 0; padding: 24px; text-align: center; }
+    .hero h1 { font-family: 'Outfit'; font-weight: 800; font-size: clamp(1.8rem, 4vw, 2.6rem); }
+    .hero p { color: var(--text-muted); margin-top: 8px; }
+    .grid {
+      max-width: 1080px; margin: 24px auto; padding: 0 24px;
+      display: grid; gap: 18px; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    }
+    .card {
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 20px;
+      padding: 22px; display: flex; flex-direction: column; backdrop-filter: blur(12px);
+    }
+    .card h3 { font-family: 'Outfit'; font-weight: 700; font-size: 1.15rem; }
+    .card .sku { color: var(--text-muted); font-size: .72rem; font-family: monospace; margin-top: 2px; }
+    .card p.desc { color: var(--text-muted); font-size: .9rem; margin: 12px 0 18px; flex: 1; }
+    .price { font-family: 'Outfit'; font-weight: 800; font-size: 1.5rem; }
+    .price small { font-size: .8rem; color: var(--text-muted); font-weight: 500; }
+    button.buy {
+      margin-top: 16px; width: 100%; padding: 12px; border: none; border-radius: 13px;
+      background: var(--primary-grad); color: white; font-weight: 700; font-size: .95rem;
+      cursor: pointer; font-family: 'Plus Jakarta Sans'; transition: transform .1s, box-shadow .2s;
+    }
+    button.buy:hover { box-shadow: 0 8px 22px rgba(99,102,241,.45); transform: translateY(-1px); }
+    button.buy:disabled { opacity: .5; cursor: default; transform: none; box-shadow: none; }
+    .orders { max-width: 1080px; margin: 8px auto 40px; padding: 0 24px; }
+    .orders h2 { font-family: 'Outfit'; font-size: 1.2rem; margin-bottom: 12px; }
+    .order-row {
+      display: flex; justify-content: space-between; align-items: center;
+      background: var(--bg-card); border: 1px solid var(--border); border-radius: 13px;
+      padding: 12px 16px; margin-bottom: 8px; font-size: .9rem;
+    }
+    .pill { font-size: .72rem; padding: 3px 10px; border-radius: 20px; background: rgba(16,185,129,.15); color: var(--success); font-weight: 700; }
+    .banner {
+      max-width: 1080px; margin: 0 auto; padding: 12px 24px;
+    }
+    .banner .inner {
+      background: rgba(99,102,241,.1); border: 1px solid var(--border); border-radius: 14px;
+      padding: 14px 18px; font-size: .9rem; color: var(--text-muted);
+    }
+    .banner .inner a { color: var(--primary); font-weight: 700; text-decoration: none; }
+    #toast {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(120px);
+      background: #111935; border: 1px solid var(--border); color: var(--text-main);
+      padding: 14px 22px; border-radius: 14px; font-weight: 600; font-size: .9rem;
+      box-shadow: 0 12px 40px rgba(0,0,0,.5); transition: transform .3s; z-index: 50; max-width: 90vw;
+    }
+    #toast.show { transform: translateX(-50%) translateY(0); }
+    .muted { color: var(--text-muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <span class="logo"><svg viewBox="0 0 24 24" fill="white"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg></span>
+      Maya Store
+    </div>
+    <div class="session" id="session">
+      <a href="/">← Portal</a>
+    </div>
+  </header>
+
+  <section class="hero">
+    <h1>Smart home, made simple.</h1>
+    <p>WiFi smart extensions with BLE setup, PIN security, and Maya AI control.</p>
+  </section>
+
+  <div class="banner" id="loginBanner" style="display:none">
+    <div class="inner">You're browsing as a guest. <a href="/">Log in or register</a> to place an order.</div>
+  </div>
+
+  <div class="grid" id="grid"><p class="muted" style="padding:24px">Loading catalog…</p></div>
+
+  <div class="orders" id="ordersSection" style="display:none">
+    <h2>Your orders</h2>
+    <div id="ordersList"></div>
+  </div>
+
+  <div id="toast"></div>
+
+  <script>
+    const API = window.location.origin;
+    const token = localStorage.getItem('user_token');
+    const isChild = localStorage.getItem('is_child_session') === 'true';
+    const loggedIn = !!token && !isChild;
+
+    function toast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg; t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2800);
+    }
+    function money(n) { return 'RM ' + Number(n).toFixed(2); }
+    function esc(s) { return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+    async function loadSession() {
+      const sess = document.getElementById('session');
+      if (!loggedIn) {
+        document.getElementById('loginBanner').style.display = 'block';
+        sess.innerHTML = '<a href="/">Log in</a> · <a href="/">Portal</a>';
+        return;
+      }
+      try {
+        const me = await fetch(API + '/api/auth/me', { headers: { Authorization: 'Bearer ' + token } }).then(r => r.json());
+        sess.innerHTML = `<span>Hi, ${esc(me.name || 'there')}</span> · <a href="/">Portal</a>`;
+      } catch { sess.innerHTML = '<a href="/">Portal</a>'; }
+    }
+
+    async function loadCatalog() {
+      const grid = document.getElementById('grid');
+      try {
+        const data = await fetch(API + '/api/store/public-catalog').then(r => r.json());
+        const items = data.catalog || [];
+        if (!items.length) { grid.innerHTML = '<p class="muted" style="padding:24px">No products available.</p>'; return; }
+        grid.innerHTML = items.map(it => `
+          <div class="card">
+            <h3>${esc(it.name)}</h3>
+            <div class="sku">${esc(it.sku)}</div>
+            <p class="desc">${esc(it.description || '')}</p>
+            <div class="price">${money(it.price)}</div>
+            <button class="buy" onclick="buy('${esc(it.sku)}', this)">Buy now</button>
+          </div>`).join('');
+      } catch (e) {
+        grid.innerHTML = '<p class="muted" style="padding:24px">Could not load the catalog.</p>';
+      }
+    }
+
+    async function buy(sku, btn) {
+      if (!loggedIn) {
+        toast('Please log in to buy');
+        setTimeout(() => { window.location.href = '/'; }, 900);
+        return;
+      }
+      btn.disabled = true; btn.textContent = 'Placing…';
+      try {
+        const res = await fetch(API + '/api/store/orders', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+          body: JSON.stringify({ sku }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Order failed');
+        toast('Order confirmed: ' + data.item_name);
+        loadOrders();
+      } catch (e) {
+        toast(e.message);
+      } finally {
+        btn.disabled = false; btn.textContent = 'Buy now';
+      }
+    }
+
+    async function loadOrders() {
+      if (!loggedIn) return;
+      try {
+        const data = await fetch(API + '/api/store/orders', { headers: { Authorization: 'Bearer ' + token } }).then(r => r.json());
+        const list = data.orders || [];
+        const sec = document.getElementById('ordersSection');
+        if (!list.length) { sec.style.display = 'none'; return; }
+        sec.style.display = 'block';
+        document.getElementById('ordersList').innerHTML = list.map(o => `
+          <div class="order-row">
+            <span>${esc(o.item_name)} <span class="muted">· ${money(o.price)}</span></span>
+            <span class="pill">${esc(o.status)}</span>
+          </div>`).join('');
+      } catch {}
+    }
+
+    loadSession(); loadCatalog(); loadOrders();
+  </script>
+</body>
+</html>

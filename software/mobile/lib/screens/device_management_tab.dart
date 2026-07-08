@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../services/api_service.dart';
 import 'provision_screen.dart';
-import 'store_screen.dart';
 
 /// Device management tab — view device details and register new devices.
 /// "Provision" opens the BLE provisioning screen.
@@ -38,6 +38,19 @@ class _DeviceManagementTabState extends State<DeviceManagementTab>
       }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  // ── Open the web marketplace in the browser ────────────────────
+  Future<void> _openWebStore() async {
+    final uri = Uri.parse('${ApiService.baseUrl}/store');
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Could not open browser'),
+        behavior: SnackBarBehavior.floating,
+      ));
     }
   }
 
@@ -85,10 +98,7 @@ class _DeviceManagementTabState extends State<DeviceManagementTab>
             ),
             const SizedBox(height: 8),
             OutlinedButton.icon(
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const StoreScreen()),
-              ),
+              onPressed: _openWebStore,
               icon: const Icon(Icons.storefront_outlined),
               label: const Text('Buy Devices'),
             ),

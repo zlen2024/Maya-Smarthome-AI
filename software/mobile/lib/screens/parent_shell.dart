@@ -161,11 +161,13 @@ class _ParentShellState extends State<ParentShell> {
     }
   }
 
-  void _reconnectForHouse() {
-    _channel?.sink.close();
-    ApiService.activeChannel = null;
-    _wsConnected = false;
-    _connectWebSocket();
+  /// Rebuild the whole shell after the active house changes, so every tab
+  /// refetches instead of showing the previous house's cached data.
+  void _reloadShell() {
+    if (!mounted) return;
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => const ParentShell()),
+    );
   }
 
   void _scheduleReconnect() {
@@ -203,7 +205,7 @@ class _ParentShellState extends State<ParentShell> {
 
     try {
       await ApiService.switchHouse(value);
-      _reconnectForHouse();
+      _reloadShell();
       if (mounted) setState(() {});
     } catch (e) {
       if (mounted) {
@@ -249,7 +251,7 @@ class _ParentShellState extends State<ParentShell> {
                       try {
                         await ApiService.createHouse(loc);
                         if (ctx.mounted) Navigator.pop(ctx);
-                        _reconnectForHouse();
+                        _reloadShell();
                         if (mounted) setState(() {});
                       } catch (e) {
                         setDialogState(() => loading = false);
@@ -366,7 +368,7 @@ class _ParentShellState extends State<ParentShell> {
                       try {
                         await ApiService.joinHouse(id, pin);
                         if (ctx.mounted) Navigator.pop(ctx);
-                        _reconnectForHouse();
+                        _reloadShell();
                         if (mounted) setState(() {});
                       } catch (e) {
                         setDialogState(() => loading = false);
@@ -414,7 +416,7 @@ class _ParentShellState extends State<ParentShell> {
                 processed = true;
                 Navigator.pop(context);
                 await ApiService.joinHouse(houseId, pin);
-                _reconnectForHouse();
+                _reloadShell();
                 if (mounted) setState(() {});
               } catch (e) {
                 if (mounted) {

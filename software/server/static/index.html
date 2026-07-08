@@ -808,6 +808,8 @@
         <div class="conn-dot" id="wsConnDot"></div>
         <span id="wsConnText">Disconnected</span>
       </div>
+      <a href="/store" class="btn btn-secondary" style="padding: 0.4rem 0.8rem; font-size: 0.8rem; width: auto; border-radius: 8px; text-decoration: none;">🛒 Store</a>
+      <a id="navDocsBtn" href="/integrate" class="btn btn-secondary" style="display:none; padding: 0.4rem 0.8rem; font-size: 0.8rem; width: auto; border-radius: 8px; text-decoration: none;">API &amp; Docs</a>
       <button id="logoutBtn" onclick="logout()" class="btn btn-secondary" style="display:none; padding: 0.4rem 0.8rem; font-size: 0.8rem; width: auto; border-radius: 8px;">Logout</button>
     </div>
   </header>
@@ -1210,7 +1212,7 @@
           
           // If no houses, show onboarding gate
           if (houses.length === 0) {
-            document.getElementById('logoutBtn').style.display = 'block';
+            document.getElementById('logoutBtn').style.display = 'block'; var _nd = document.getElementById('navDocsBtn'); if (_nd) _nd.style.display = 'inline-flex';
             showView('onboarding');
             return;
           }
@@ -1247,7 +1249,7 @@
         clearInterval(pollInterval);
       }
       
-      document.getElementById('logoutBtn').style.display = 'none';
+      document.getElementById('logoutBtn').style.display = 'none'; var _nd = document.getElementById('navDocsBtn'); if (_nd) _nd.style.display = 'none';
       updateWSStatusDot('disconnected');
       showView('welcome');
       showToast('Logged out successfully', 'info');
@@ -1410,7 +1412,7 @@
     
     // Dashboard Logic & Content Building
     function setupDashboardUI() {
-      document.getElementById('logoutBtn').style.display = 'block';
+      document.getElementById('logoutBtn').style.display = 'block'; var _nd = document.getElementById('navDocsBtn'); if (_nd) _nd.style.display = 'inline-flex';
       
       // User Profile details
       document.getElementById('avatarText').textContent = currentUser.name.charAt(0).toUpperCase();
