@@ -686,6 +686,103 @@ async def get_chat_history(house_id: int, before: int = None, db: Session = Depe
     }
 
 
+# ─── Mentions (@name in chat) ─────────────────────────────────
+
+def _caller_in_house(db: Session, user_info: dict, house_id: int) -> bool:
+    if user_info.get("house_id") == house_id:
+        return True
+    if user_info["type"] == "user":
+        return db.query(AccountHouse).filter(
+            AccountHouse.acc_id == user_info["user"].acc_id,
+            AccountHouse.house_id == house_id).first() is not None
+    return False
+
+
+def _house_mentionables(db: Session, house_id: int) -> list:
+    """Everyone (and Maya) who can be @-mentioned in a house."""
+    people = [{"type": "ai", "id": MAYA_SENDER_ID, "name": "Maya"}]
+    for a in db.query(AccountHouse).filter(AccountHouse.house_id == house_id).all():
+        acc = db.query(Account).filter(Account.acc_id == a.acc_id).first()
+        if acc:
+            people.append({"type": "parent", "id": acc.acc_id, "name": acc.name})
+    for c in db.query(Child).filter(Child.house_id == house_id).all():
+        people.append({"type": "child", "id": c.child_id, "name": c.name})
+    return people
+
+
+def _record_mentions(db: Session, house_id: int, msg_id: int, message: str,
+                     sender_type: str, sender_id: int):
+    """Create unseen Mention rows for each real person named '@Name' in message
+    (case-insensitive). Skips Maya and the sender themselves."""
+    low = message.lower()
+    for p in _house_mentionables(db, house_id):
+        if p["type"] == "ai":
+            continue
+        if p["type"] == sender_type and p["id"] == sender_id:
+            continue  # don't flag your own name back at you
+        if f"@{p['name'].lower()}" in low:
+            db.add(Mention(msg_id=msg_id, house_id=house_id,
+                           target_type=p["type"], target_id=p["id"], seen=False))
+
+
+@app.get("/api/houses/{house_id}/mentionables")
+async def list_mentionables(house_id: int, db: Session = Depends(get_db),
+                            user_info: dict = Depends(get_current_user_or_child)):
+    """Names the chat's '@' autocomplete offers: Maya + members + children."""
+    if not _caller_in_house(db, user_info, house_id):
+        raise HTTPException(status_code=403, detail="Not a member of this house")
+    return {"mentionables": _house_mentionables(db, house_id)}
+
+
+def _caller_target(user_info: dict) -> tuple:
+    if user_info["type"] == "child":
+        return "child", user_info["child"].child_id
+    return "parent", user_info["user"].acc_id
+
+
+@app.get("/api/houses/{house_id}/mentions/unseen")
+async def unseen_mentions(house_id: int, db: Session = Depends(get_db),
+                          user_info: dict = Depends(get_current_user_or_child)):
+    """Message ids that @-mention the caller and are not yet seen (for the badge
+    and bubble highlight)."""
+    if not _caller_in_house(db, user_info, house_id):
+        raise HTTPException(status_code=403, detail="Not a member of this house")
+    t_type, t_id = _caller_target(user_info)
+    rows = db.query(Mention).filter(
+        Mention.house_id == house_id, Mention.target_type == t_type,
+        Mention.target_id == t_id, Mention.seen == False).all()  # noqa: E712
+    return {"count": len(rows), "msg_ids": [m.msg_id for m in rows]}
+
+
+@app.post("/api/houses/{house_id}/mentions/seen")
+async def mark_mentions_seen(house_id: int, db: Session = Depends(get_db),
+                             user_info: dict = Depends(get_current_user_or_child)):
+    """Clear the caller's unseen mentions in this house (called when they open chat)."""
+    if not _caller_in_house(db, user_info, house_id):
+        raise HTTPException(status_code=403, detail="Not a member of this house")
+    t_type, t_id = _caller_target(user_info)
+    n = db.query(Mention).filter(
+        Mention.house_id == house_id, Mention.target_type == t_type,
+        Mention.target_id == t_id, Mention.seen == False).update({"seen": True})  # noqa: E712
+    db.commit()
+    return {"marked": n}
+
+
+@app.delete("/api/houses/{house_id}/chat")
+async def clear_chat(house_id: int, db: Session = Depends(get_db),
+                     current_user: Account = Depends(get_current_user)):
+    """Delete all chat history for a house. House master only. Broadcasts a
+    chat_cleared event so every connected client wipes its local view."""
+    _require_master(db, current_user, house_id)
+    db.query(Mention).filter(Mention.house_id == house_id).delete()
+    deleted = db.query(MsgHistory).filter(MsgHistory.house_id == house_id).delete()
+    log_activity(db, house_id, "parent", current_user.acc_id, current_user.name,
+                 "chat_cleared", f"{current_user.name} cleared the chat")
+    db.commit()
+    await manager.broadcast_to_house(house_id, {"type": "chat_cleared", "house_id": house_id})
+    return {"deleted": deleted}
+
+
 # ─── Child Management ─────────────────────────────────────────
 
 @app.post("/api/children")
@@ -2154,6 +2251,8 @@ async def mobile_websocket_endpoint(websocket: WebSocket):
                         message=message_text,
                     )
                     db.add(msg)
+                    db.commit()
+                    _record_mentions(db, house_id, msg.msg_id, message_text, sender_type, acc_id)
                     db.commit()
                     await manager.broadcast_to_house(house_id, {
                         "type": "chat_message",

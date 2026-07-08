@@ -20,6 +20,11 @@ class _ChatTabState extends State<ChatTab> {
   bool _hasMore = true;
   bool _initialLoaded = false;
 
+  // ── Mentions ────────────────────────────────────────────────────
+  List<Map<String, dynamic>> _mentionables = [];
+  Set<int> _unseenMentionIds = {};
+  List<Map<String, dynamic>> _suggestions = [];
+
   /// The current user identifier for styling own messages
   int? get _currentUserId => ApiService.accId;
 
@@ -27,8 +32,10 @@ class _ChatTabState extends State<ChatTab> {
   void initState() {
     super.initState();
     _loadHistory();
+    _initMentions();
     _chatSub = ApiService.chatBroadcasts.listen(_onChatMessage);
     _scrollCtrl.addListener(_onScroll);
+    _textCtrl.addListener(_onTextChanged);
   }
 
   @override
@@ -37,6 +44,73 @@ class _ChatTabState extends State<ChatTab> {
     _textCtrl.dispose();
     _scrollCtrl.dispose();
     super.dispose();
+  }
+
+  // ── Mention setup: load names, capture unseen for highlight, mark seen ──
+  Future<void> _initMentions() async {
+    final houseId = ApiService.houseId;
+    if (houseId == null) return;
+    try {
+      _mentionables = await ApiService.getMentionables(houseId);
+    } catch (_) {}
+    try {
+      final unseen = await ApiService.getUnseenMentions(houseId);
+      _unseenMentionIds = ((unseen['msg_ids'] ?? []) as List)
+          .map((e) => e as int)
+          .toSet();
+    } catch (_) {}
+    if (mounted) setState(() {});
+    // Opening the chat clears the marks; keep the ids above only to highlight
+    // this session so the reader can spot them before they fade next time.
+    try {
+      await ApiService.markMentionsSeen(houseId);
+      ApiService.emitMentionsChanged();
+    } catch (_) {}
+  }
+
+  // ── '@' autocomplete ────────────────────────────────────────────
+  void _onTextChanged() {
+    final sel = _textCtrl.selection.baseOffset;
+    final text = _textCtrl.text;
+    if (sel < 0) {
+      if (_suggestions.isNotEmpty) setState(() => _suggestions = []);
+      return;
+    }
+    // Find an '@token' immediately before the cursor (no whitespace inside).
+    final upToCursor = text.substring(0, sel);
+    final at = upToCursor.lastIndexOf('@');
+    if (at == -1 || (at > 0 && !_isBoundary(upToCursor[at - 1]))) {
+      if (_suggestions.isNotEmpty) setState(() => _suggestions = []);
+      return;
+    }
+    final partial = upToCursor.substring(at + 1);
+    if (partial.contains(RegExp(r'\s'))) {
+      if (_suggestions.isNotEmpty) setState(() => _suggestions = []);
+      return;
+    }
+    final p = partial.toLowerCase();
+    final matches = _mentionables
+        .where((m) => (m['name'] as String).toLowerCase().startsWith(p))
+        .take(6)
+        .toList();
+    setState(() => _suggestions = matches);
+  }
+
+  bool _isBoundary(String ch) => ch == ' ' || ch == '\n' || ch == '\t';
+
+  void _insertMention(String name) {
+    final sel = _textCtrl.selection.baseOffset;
+    final text = _textCtrl.text;
+    final upToCursor = text.substring(0, sel);
+    final at = upToCursor.lastIndexOf('@');
+    if (at == -1) return;
+    final newText = '${text.substring(0, at)}@$name ${text.substring(sel)}';
+    final newOffset = at + name.length + 2; // '@' + name + trailing space
+    _textCtrl.value = TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: newOffset),
+    );
+    setState(() => _suggestions = []);
   }
 
   // ── Load Chat History ──────────────────────────────────────────
@@ -86,6 +160,14 @@ class _ChatTabState extends State<ChatTab> {
   // ── Handle incoming chat broadcast ─────────────────────────────
   void _onChatMessage(Map<String, dynamic> data) {
     if (!mounted) return;
+    if (data['type'] == 'chat_cleared') {
+      setState(() {
+        _messages.clear();
+        _unseenMentionIds = {};
+        _hasMore = false;
+      });
+      return;
+    }
     setState(() => _messages.add(data));
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scrollToBottom();
@@ -184,14 +266,57 @@ class _ChatTabState extends State<ChatTab> {
                         }
                         final msgIndex =
                             _loadingHistory ? index - 1 : index;
+                        final m = _messages[msgIndex];
                         return _MessageBubble(
-                          message: _messages[msgIndex],
-                          isOwn: _isOwnMessage(_messages[msgIndex]),
-                          isAi: _messages[msgIndex]['sender_type'] == 'ai',
+                          message: m,
+                          isOwn: _isOwnMessage(m),
+                          isAi: m['sender_type'] == 'ai',
+                          isMention: _unseenMentionIds.contains(m['msg_id']),
                         );
                       },
                     ),
         ),
+
+        // '@' mention suggestions
+        if (_suggestions.isNotEmpty)
+          Container(
+            constraints: const BoxConstraints(maxHeight: 180),
+            decoration: BoxDecoration(
+              color: cs.surfaceContainerHigh,
+              border: Border(top: BorderSide(color: cs.outlineVariant, width: 0.5)),
+            ),
+            child: ListView(
+              shrinkWrap: true,
+              padding: EdgeInsets.zero,
+              children: _suggestions.map((m) {
+                final isAi = m['type'] == 'ai';
+                return ListTile(
+                  dense: true,
+                  leading: CircleAvatar(
+                    radius: 14,
+                    backgroundColor:
+                        isAi ? cs.tertiaryContainer : cs.primaryContainer,
+                    child: Icon(
+                      isAi
+                          ? Icons.auto_awesome
+                          : m['type'] == 'child'
+                              ? Icons.child_care_rounded
+                              : Icons.person_rounded,
+                      size: 15,
+                      color: isAi ? cs.onTertiaryContainer : cs.onPrimaryContainer,
+                    ),
+                  ),
+                  title: Text(m['name'] as String,
+                      style: tt.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
+                  subtitle: isAi
+                      ? Text('AI assistant',
+                          style: tt.labelSmall?.copyWith(color: cs.tertiary))
+                      : null,
+                  onTap: () => _insertMention(m['name'] as String),
+                );
+              }).toList(),
+            ),
+          ),
 
         // Input bar
         Container(
@@ -261,11 +386,13 @@ class _MessageBubble extends StatelessWidget {
   final Map<String, dynamic> message;
   final bool isOwn;
   final bool isAi;
+  final bool isMention;
 
   const _MessageBubble({
     required this.message,
     required this.isOwn,
     this.isAi = false,
+    this.isMention = false,
   });
 
   @override
@@ -327,6 +454,9 @@ class _MessageBubble extends StatelessWidget {
                     : isAi
                         ? cs.tertiaryContainer
                         : cs.surfaceContainerHigh,
+                border: isMention
+                    ? Border.all(color: cs.secondary, width: 2)
+                    : null,
                 borderRadius: BorderRadius.only(
                   topLeft: const Radius.circular(18),
                   topRight: const Radius.circular(18),

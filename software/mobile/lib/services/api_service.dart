@@ -47,6 +47,14 @@ class ApiService {
   static void emitChat(Map<String, dynamic> data) =>
       _chatController.add(data);
 
+  // ── Mentions-changed Relay (badge refresh) ─────────────────────
+  static final StreamController<void> _mentionController =
+      StreamController<void>.broadcast();
+
+  static Stream<void> get mentionEvents => _mentionController.stream;
+
+  static void emitMentionsChanged() => _mentionController.add(null);
+
   // ── Initialization ─────────────────────────────────────────────
   static Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
@@ -298,6 +306,33 @@ class ApiService {
     }
     final data = jsonDecode(res.body);
     return data['join_pin'] as String;
+  }
+
+  // ── Mentions ───────────────────────────────────────────────────
+  static Future<List<Map<String, dynamic>>> getMentionables(int houseId) async {
+    final res = await get('/api/houses/$houseId/mentionables');
+    if (res.statusCode != 200) throw Exception('Failed to fetch mentionables');
+    return ((jsonDecode(res.body)['mentionables'] ?? []) as List)
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+  }
+
+  static Future<Map<String, dynamic>> getUnseenMentions(int houseId) async {
+    final res = await get('/api/houses/$houseId/mentions/unseen');
+    if (res.statusCode != 200) throw Exception('Failed to fetch mentions');
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  static Future<void> markMentionsSeen(int houseId) async {
+    await post('/api/houses/$houseId/mentions/seen', {});
+  }
+
+  static Future<void> clearChat(int houseId) async {
+    final res = await delete('/api/houses/$houseId/chat');
+    if (res.statusCode != 200) {
+      final data = jsonDecode(res.body);
+      throw Exception(data['detail'] ?? 'Failed to clear chat');
+    }
   }
 
   static Future<Map<String, dynamic>> getChatHistory(int houseId,

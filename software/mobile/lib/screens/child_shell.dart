@@ -26,6 +26,9 @@ class _ChildShellState extends State<ChildShell> {
   bool _wsConnected = false;
   Timer? _reconnectTimer;
   Timer? _locationTimer;
+  int _unseenMentions = 0;
+  StreamSubscription<void>? _mentionSub;
+  static const int _chatTabIndex = 2;
 
   final List<Widget> _tabs = const [
     DevicesTab(), // Child filter is applied inside DevicesTab
@@ -39,15 +42,37 @@ class _ChildShellState extends State<ChildShell> {
     super.initState();
     _connectWebSocket();
     _startLocationReporting();
+    _refreshMentions();
+    _mentionSub = ApiService.mentionEvents.listen((_) => _refreshMentions());
   }
 
   @override
   void dispose() {
     _reconnectTimer?.cancel();
     _locationTimer?.cancel();
+    _mentionSub?.cancel();
     _channel?.sink.close();
     ApiService.activeChannel = null;
     super.dispose();
+  }
+
+  // ── Unseen @-mention badge ─────────────────────────────────────
+  Future<void> _refreshMentions() async {
+    final houseId = ApiService.houseId;
+    if (houseId == null) return;
+    try {
+      final data = await ApiService.getUnseenMentions(houseId);
+      if (mounted) setState(() => _unseenMentions = (data['count'] ?? 0) as int);
+    } catch (_) {}
+  }
+
+  Future<void> _markChatSeen() async {
+    final houseId = ApiService.houseId;
+    if (houseId == null) return;
+    if (mounted) setState(() => _unseenMentions = 0);
+    try {
+      await ApiService.markMentionsSeen(houseId);
+    } catch (_) {}
   }
 
   // ── Location Reporting (foreground only) ───────────────────────
@@ -103,6 +128,13 @@ class _ChildShellState extends State<ChildShell> {
           } else if (type == 'device_update' || type == 'device_offline') {
             ApiService.emitBroadcast(data);
           } else if (type == 'chat_message') {
+            ApiService.emitChat(data);
+            if (_tabIndex == _chatTabIndex) {
+              _markChatSeen();
+            } else {
+              _refreshMentions();
+            }
+          } else if (type == 'chat_cleared') {
             ApiService.emitChat(data);
           }
         },
@@ -186,25 +218,32 @@ class _ChildShellState extends State<ChildShell> {
       ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tabIndex,
-        onDestinationSelected: (i) => setState(() => _tabIndex = i),
+        onDestinationSelected: (i) {
+          setState(() => _tabIndex = i);
+          if (i == _chatTabIndex) _markChatSeen();
+        },
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-        destinations: const [
-          NavigationDestination(
+        destinations: [
+          const NavigationDestination(
             icon: Icon(Icons.power_settings_new_outlined),
             selectedIcon: Icon(Icons.power_settings_new_rounded),
             label: 'Devices',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             icon: Icon(Icons.task_alt_outlined),
             selectedIcon: Icon(Icons.task_alt_rounded),
             label: 'Tasks',
           ),
           NavigationDestination(
-            icon: Icon(Icons.chat_outlined),
-            selectedIcon: Icon(Icons.chat_rounded),
+            icon: Badge(
+              isLabelVisible: _unseenMentions > 0,
+              label: Text('$_unseenMentions'),
+              child: const Icon(Icons.chat_outlined),
+            ),
+            selectedIcon: const Icon(Icons.chat_rounded),
             label: 'Chat',
           ),
-          NavigationDestination(
+          const NavigationDestination(
             icon: Icon(Icons.settings_outlined),
             selectedIcon: Icon(Icons.settings_rounded),
             label: 'Settings',
