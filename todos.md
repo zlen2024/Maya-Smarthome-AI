@@ -16,6 +16,9 @@ report artifacts that still need manual updating. Generated alongside the report
 - [x] **@-mention** in chat: `@` autocomplete (Maya + members + children); `mentions` table marks messages per target, unseen until the target opens chat; unseen badge on the Chat tab.
 - [x] **Clear chat** (house master): `DELETE /api/houses/{id}/chat` wipes messages + mentions, broadcasts `chat_cleared`.
 - [x] FIX: firmware only accepts `output_on`/`output_off` — normalise `on`/`off` in `_dispatch_command` so Maya AND the Open API actually switch relays.
+- [x] **Web marketplace** (`/store`, `static/store.html`): public catalog (`GET /api/store/public-catalog`, no auth), buy uses the portal's saved login (mock checkout). Mobile "Buy Devices" opens `{baseUrl}/store` in the browser; in-app `StoreScreen` removed. Marketplace is web-only now.
+- [x] **Web API & Docs** (`/integrate`, `static/integrate.html`): create/list/revoke API keys + Open API v1 guide (curl examples) + Swagger link. "API & Docs" button in the portal header after login. Store link always in header.
+- [x] **Mobile fix**: switching house reloads the shell (pushReplacement) so tabs refetch — no more stale data from the previous house.
 - [ ] Agentic automation engine (auto power-off when a screen-time limit is exceeded) — **deferred to iteration 3.1**.
 - DEPLOY: `OLLAMA_API_KEY` is set as a Fly secret (live). Optional: `OLLAMA_MODEL` to override the model.
 
