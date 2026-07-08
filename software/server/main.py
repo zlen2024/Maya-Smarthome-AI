@@ -23,6 +23,8 @@ from auth import (
 )
 import secrets
 
+import ai
+
 import mimetypes
 mimetypes.add_type('application/vnd.android.package-archive', '.apk')
 
@@ -1148,37 +1150,45 @@ async def send_device_command(device_id: str, payload: dict,
         raise HTTPException(status_code=403, detail="Device does not belong to your house")
     if device.blocked:
         return {"status": "blocked", "device_id": device_id}
-        
+
     cmd = payload.get("cmd", "")
     channel = payload.get("channel", 1)
-    
+
     if current_auth["role"] == "child":
-        child_id = current_auth["child"].child_id
-        ext = db.query(SmartExtension).filter(SmartExtension.device_id == device_id).first()
-        if not ext:
-            raise HTTPException(status_code=400, detail="Smart extension not found for device")
-            
-        if cmd in ("all_on", "all_off"):
-            relays = db.query(Relay).filter(Relay.se_id == ext.se_id).all()
-            for r in relays:
-                perm = db.query(Permission).filter(
-                    Permission.child_id == child_id,
-                    Permission.relay_id == r.relay_id
-                ).first()
-                if not perm or not perm.is_allowed:
-                    raise HTTPException(status_code=403, detail=f"Permission denied for channel {r.channel_number}")
-        else:
-            relay = db.query(Relay).filter(Relay.se_id == ext.se_id, Relay.channel_number == channel).first()
-            if not relay:
-                raise HTTPException(status_code=400, detail="Relay channel not found")
+        denial = _child_command_denial(db, current_auth["child"].child_id, device_id, cmd, channel)
+        if denial:
+            raise HTTPException(status_code=403, detail=denial)
+
+    return await _dispatch_command(device_id, cmd, channel)
+
+
+def _child_command_denial(db: Session, child_id: int, device_id: str, cmd: str, channel: int) -> str | None:
+    """Return a human-readable reason a child may NOT run this command, or None
+    if allowed. Shared by the JWT command endpoint and the Maya AI path so the
+    permission rule lives in exactly one place."""
+    ext = db.query(SmartExtension).filter(SmartExtension.device_id == device_id).first()
+    if not ext:
+        return "Smart extension not found for device"
+    if cmd in ("all_on", "all_off"):
+        relays = db.query(Relay).filter(Relay.se_id == ext.se_id).all()
+        for r in relays:
             perm = db.query(Permission).filter(
                 Permission.child_id == child_id,
-                Permission.relay_id == relay.relay_id
+                Permission.relay_id == r.relay_id
             ).first()
             if not perm or not perm.is_allowed:
-                raise HTTPException(status_code=403, detail="You do not have permission to control this channel")
-                
-    return await _dispatch_command(device_id, cmd, channel)
+                return f"Permission denied for channel {r.channel_number}"
+        return None
+    relay = db.query(Relay).filter(Relay.se_id == ext.se_id, Relay.channel_number == channel).first()
+    if not relay:
+        return "Relay channel not found"
+    perm = db.query(Permission).filter(
+        Permission.child_id == child_id,
+        Permission.relay_id == relay.relay_id
+    ).first()
+    if not perm or not perm.is_allowed:
+        return "You do not have permission to control this channel"
+    return None
 
 
 async def _dispatch_command(device_id: str, cmd: str, channel: int) -> dict:
@@ -1192,6 +1202,106 @@ async def _dispatch_command(device_id: str, cmd: str, channel: int) -> dict:
     if ack:
         return {"status": "ok", "device_id": device_id, **{k: ack.get(k) for k in ("ch1", "ch2", "ch3") if k in ack}}
     return {"status": "timeout", "device_id": device_id}
+
+
+# ─── AI Agent (Maya) ──────────────────────────────────────────
+# Triggered when a house chat message mentions @maya. Maya reads the house's
+# recent chat + device state, replies in the chat, and may switch devices —
+# always as the invoking sender, through the same permission checks as a tap.
+
+MAYA_TRIGGER = "@maya"
+MAYA_SENDER_ID = 0  # sentinel sender_id for AI-authored chat rows
+
+
+def _maya_history(db: Session, house_id: int, limit: int = 20) -> list:
+    """Recent house chat as [{role, name, content}], oldest first."""
+    rows = (db.query(MsgHistory).filter(MsgHistory.house_id == house_id)
+            .order_by(MsgHistory.msg_id.desc()).limit(limit).all())
+    rows.reverse()
+    return [{
+        "role": "assistant" if m.sender_type == "ai" else "user",
+        "name": m.sender_name or "",
+        "content": m.message,
+    } for m in rows]
+
+
+async def _execute_maya_action(db: Session, house_id: int, sender_role: str,
+                               child_id: int | None, action: dict) -> str | None:
+    """Run one AI-proposed action as the invoking sender. Returns a short note
+    if it could NOT be fully carried out (denied/unknown/offline), else None."""
+    device = db.query(Device).filter(
+        Device.device_id == action["device_id"], Device.house_id == house_id).first()
+    if not device:
+        return f"couldn't find device {action['device_id']} in this house"
+    if device.blocked:
+        return f"{device.name} is blocked"
+    if sender_role == "child":
+        denial = _child_command_denial(db, child_id, device.device_id, action["cmd"], action["channel"])
+        if denial:
+            return denial
+    result = await _dispatch_command(device.device_id, action["cmd"], action["channel"])
+    if result.get("status") == "not_connected":
+        return f"{device.name} is offline"
+    if result.get("status") == "timeout":
+        return f"{device.name} didn't respond"
+    return None
+
+
+async def _run_maya(house_id: int, sender_role: str, child_id: int | None, message: str):
+    """Background task: ask the model, execute actions, post Maya's reply to the
+    house chat. Owns its own DB session; never raises into the WS loop."""
+    db = SessionLocal()
+    try:
+        devices = [_open_device_dict(db, d) for d in
+                   db.query(Device).filter(Device.house_id == house_id).all()]
+        history = _maya_history(db, house_id)
+        # ollama Client is synchronous network IO — keep it off the event loop.
+        result = await asyncio.to_thread(ai.ask_maya, message, devices, history)
+        reply = result["reply"]
+
+        notes = []
+        for action in result["actions"]:
+            note = await _execute_maya_action(db, house_id, sender_role, child_id, action)
+            if note:
+                notes.append(note)
+        if notes:
+            reply = f"{reply}\n\n(Note: {'; '.join(notes)}.)"
+
+        msg = MsgHistory(house_id=house_id, sender_id=MAYA_SENDER_ID,
+                         sender_type="ai", sender_name="Maya", message=reply)
+        db.add(msg)
+        db.commit()
+        await manager.broadcast_to_house(house_id, {
+            "type": "chat_message", "msg_id": msg.msg_id,
+            "sender_id": MAYA_SENDER_ID, "sender_type": "ai", "sender_name": "Maya",
+            "message": reply,
+            "timestamp": msg.timestamp.isoformat() if msg.timestamp else None,
+        })
+    except HTTPException as e:
+        await _maya_say(db, house_id, f"Sorry, I can't respond right now ({e.detail}).")
+    except Exception as e:
+        print(f"Maya error: {e}")
+        await _maya_say(db, house_id, "Sorry, something went wrong on my end.")
+    finally:
+        db.close()
+
+
+async def _maya_say(db: Session, house_id: int, text: str):
+    """Post a plain Maya message (used for error surfaces)."""
+    try:
+        db.rollback()  # clear any half-done transaction from the failure
+        msg = MsgHistory(house_id=house_id, sender_id=MAYA_SENDER_ID,
+                         sender_type="ai", sender_name="Maya", message=text)
+        db.add(msg)
+        db.commit()
+        await manager.broadcast_to_house(house_id, {
+            "type": "chat_message", "msg_id": msg.msg_id,
+            "sender_id": MAYA_SENDER_ID, "sender_type": "ai", "sender_name": "Maya",
+            "message": text,
+            "timestamp": msg.timestamp.isoformat() if msg.timestamp else None,
+        })
+    except Exception as e:
+        print(f"Maya failed to post error message: {e}")
 
 
 # ─── Store (mock marketplace) ─────────────────────────────────
@@ -1831,6 +1941,13 @@ async def mobile_websocket_endpoint(websocket: WebSocket):
                     print(f"Error saving chat message: {e}")
                 finally:
                     db.close()
+
+                # Maya responds only when explicitly mentioned, and acts as the
+                # sender so a child's per-relay permissions still apply.
+                if MAYA_TRIGGER in message_text.lower():
+                    child_id = acc_id if sender_type == "child" else None
+                    asyncio.create_task(
+                        _run_maya(house_id, sender_type, child_id, message_text))
 
     except asyncio.TimeoutError:
         try:

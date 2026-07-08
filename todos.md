@@ -6,10 +6,12 @@ report artifacts that still need manual updating. Generated alongside the report
 
 ## Not yet implemented (deferred features)
 
-### Iteration 3 — AI / LLM agent (planned)
-- [ ] LLM natural-language command processing (OpenRouter API). No LLM code exists in server or app yet.
-- [ ] "AI Mode" chat that turns intents into device commands. (Current "chat" tab is a family group chat, not AI.)
-- [ ] Agentic automation engine (e.g. auto power-off when a screen-time limit is exceeded).
+### Iteration 3.0 — AI / LLM agent (DONE — 2026-07-08)
+- [x] LLM natural-language command processing. Provider is **Ollama Cloud** (`gpt-oss:20b-cloud` via `https://ollama.com`, `OLLAMA_API_KEY` secret) — not OpenRouter as originally planned. Logic in `server/ai.py`.
+- [x] AI in the family chat: a user types **`@maya …`** in the house chat; Maya reads recent `msg_history` + device state, replies as a chat participant (`sender_type="ai"`), and switches devices. Wired into the `/ws/mobile` chat handler (`_run_maya`).
+- [x] Runs as the invoking sender: a child's `@maya` commands hit the same per-relay permission checks as a manual tap (shared `_child_command_denial`).
+- [ ] Agentic automation engine (auto power-off when a screen-time limit is exceeded) — **deferred to iteration 3.1**.
+- DEPLOY: set the key before this works in prod → `fly secrets set OLLAMA_API_KEY=<key>`. Optional: `OLLAMA_MODEL` to override the model.
 
 ### Child data collection (DONE — 2026-07-07)
 - [x] GPS location on the child device (foreground-only while app is open; `geolocator`, 3-min timer in `child_shell.dart`). Parent sees last-known location + "Open in Maps".

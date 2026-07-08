@@ -187,6 +187,7 @@ class _ChatTabState extends State<ChatTab> {
                         return _MessageBubble(
                           message: _messages[msgIndex],
                           isOwn: _isOwnMessage(_messages[msgIndex]),
+                          isAi: _messages[msgIndex]['sender_type'] == 'ai',
                         );
                       },
                     ),
@@ -259,10 +260,12 @@ class _ChatTabState extends State<ChatTab> {
 class _MessageBubble extends StatelessWidget {
   final Map<String, dynamic> message;
   final bool isOwn;
+  final bool isAi;
 
   const _MessageBubble({
     required this.message,
     required this.isOwn,
+    this.isAi = false,
   });
 
   @override
@@ -297,19 +300,33 @@ class _MessageBubble extends StatelessWidget {
             if (!isOwn)
               Padding(
                 padding: const EdgeInsets.only(left: 12, bottom: 2),
-                child: Text(
-                  senderName,
-                  style: tt.labelSmall?.copyWith(
-                    color: cs.primary,
-                    fontWeight: FontWeight.w600,
-                  ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (isAi) ...[
+                      Icon(Icons.auto_awesome,
+                          size: 12, color: cs.tertiary),
+                      const SizedBox(width: 4),
+                    ],
+                    Text(
+                      senderName,
+                      style: tt.labelSmall?.copyWith(
+                        color: isAi ? cs.tertiary : cs.primary,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             Container(
               padding:
                   const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
-                color: isOwn ? cs.primary : cs.surfaceContainerHigh,
+                color: isOwn
+                    ? cs.primary
+                    : isAi
+                        ? cs.tertiaryContainer
+                        : cs.surfaceContainerHigh,
                 borderRadius: BorderRadius.only(
                   topLeft: const Radius.circular(18),
                   topRight: const Radius.circular(18),
@@ -325,8 +342,11 @@ class _MessageBubble extends StatelessWidget {
                   Text(
                     text,
                     style: tt.bodyMedium?.copyWith(
-                      color:
-                          isOwn ? cs.onPrimary : cs.onSurface,
+                      color: isOwn
+                          ? cs.onPrimary
+                          : isAi
+                              ? cs.onTertiaryContainer
+                              : cs.onSurface,
                     ),
                   ),
                   if (timeStr.isNotEmpty) ...[
@@ -337,7 +357,9 @@ class _MessageBubble extends StatelessWidget {
                         fontSize: 10,
                         color: isOwn
                             ? cs.onPrimary.withOpacity(0.7)
-                            : cs.onSurfaceVariant,
+                            : isAi
+                                ? cs.onTertiaryContainer.withOpacity(0.7)
+                                : cs.onSurfaceVariant,
                       ),
                     ),
                   ],
