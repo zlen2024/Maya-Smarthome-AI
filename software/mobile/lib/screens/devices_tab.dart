@@ -105,6 +105,65 @@ class _DevicesTabState extends State<DevicesTab>
     });
   }
 
+  // ── Channel name / relay lookup ────────────────────────────────
+  Map<String, dynamic>? _relayFor(String deviceId, int channelNum) {
+    for (final r in _relays) {
+      if (r['device_id'] == deviceId && r['channel_number'] == channelNum) {
+        return Map<String, dynamic>.from(r as Map);
+      }
+    }
+    return null;
+  }
+
+  String _channelName(String deviceId, int channelNum) {
+    final r = _relayFor(deviceId, channelNum);
+    final name = r?['name'] as String?;
+    return (name == null || name.isEmpty) ? 'Channel $channelNum' : name;
+  }
+
+  Future<void> _renameChannel(String deviceId, int channelNum) async {
+    final relay = _relayFor(deviceId, channelNum);
+    if (relay == null) return;
+    final ctrl = TextEditingController(text: _channelName(deviceId, channelNum));
+    final newName = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('Rename channel $channelNum'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          maxLength: 40,
+          textCapitalization: TextCapitalization.words,
+          decoration: const InputDecoration(
+            labelText: 'Channel name',
+            hintText: 'e.g. Television',
+            counterText: '',
+          ),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (newName == null || newName.isEmpty) return;
+    try {
+      await ApiService.renameRelay(relay['relay_id'] as int, newName);
+      await _fetchAll();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    }
+  }
+
   // ── Channel Permission Check ───────────────────────────────────
   bool _isChannelAllowed(String deviceId, int channelNum) {
     if (!ApiService.isChild) return true;
@@ -411,9 +470,26 @@ class _DevicesTabState extends State<DevicesTab>
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: Text('Channel $ch',
-                style: tt.bodyMedium
-                    ?.copyWith(fontWeight: FontWeight.w600)),
+            child: GestureDetector(
+              onTap: ApiService.canManageDevices
+                  ? () => _renameChannel(deviceId, ch)
+                  : null,
+              child: Row(
+                children: [
+                  Flexible(
+                    child: Text(_channelName(deviceId, ch),
+                        style: tt.bodyMedium
+                            ?.copyWith(fontWeight: FontWeight.w600),
+                        overflow: TextOverflow.ellipsis),
+                  ),
+                  if (ApiService.canManageDevices) ...[
+                    const SizedBox(width: 6),
+                    Icon(Icons.edit_outlined,
+                        size: 13, color: cs.onSurfaceVariant.withOpacity(0.5)),
+                  ],
+                ],
+              ),
+            ),
           ),
           if (!allowed && ApiService.isChild)
             Padding(

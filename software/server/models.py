@@ -211,6 +211,36 @@ class ApiKey(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class ActivityLog(Base):
+    """One row per meaningful house-member activity (device switches, homework,
+    joins, logins, Maya-driven actions). High-frequency noise (location pings,
+    heartbeats) is deliberately NOT logged here."""
+    __tablename__ = "activity_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    house_id = Column(Integer, ForeignKey("houses.house_id"), nullable=False, index=True)
+    actor_type = Column(String, nullable=False)   # parent | child | ai | system
+    actor_id = Column(Integer, nullable=True)     # acc_id or child_id (null for system)
+    actor_name = Column(String, default="")
+    action = Column(String, nullable=False)       # device_switch | homework_assigned | ...
+    summary = Column(String, nullable=False)      # human-readable, e.g. 'Ali turned ON "Television"'
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+
+
+class Mention(Base):
+    """A message that @-mentions a specific house member. Marked unseen until the
+    target opens the chat. One row per (message, target)."""
+    __tablename__ = "mentions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    msg_id = Column(Integer, ForeignKey("msg_history.msg_id"), nullable=False, index=True)
+    house_id = Column(Integer, ForeignKey("houses.house_id"), nullable=False, index=True)
+    target_type = Column(String, nullable=False)  # parent | child
+    target_id = Column(Integer, nullable=False)    # acc_id or child_id
+    seen = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 class Heartbeat(Base):
     __tablename__ = "heartbeats"
 

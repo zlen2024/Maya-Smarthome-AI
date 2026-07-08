@@ -489,6 +489,21 @@ class ApiService {
     return data['relays'] ?? [];
   }
 
+  static Future<void> renameRelay(int relayId, String name) async {
+    final res = await put('/api/relays/$relayId', {'name': name});
+    if (res.statusCode != 200) {
+      final data = jsonDecode(res.body);
+      throw Exception(data['detail'] ?? 'Failed to rename channel');
+    }
+  }
+
+  // ── Activity Log ────────────────────────────────────────────────
+  static Future<List<dynamic>> getActivity({int limit = 30}) async {
+    final res = await get('/api/activity?limit=$limit');
+    if (res.statusCode != 200) throw Exception('Failed to fetch activity');
+    return jsonDecode(res.body)['activity'] ?? [];
+  }
+
   static Future<List<dynamic>> getPermissions({int? childId}) async {
     String path = '/api/permissions';
     if (childId != null) path += '?child_id=$childId';

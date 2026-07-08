@@ -15,7 +15,7 @@ from models import (
     Account, AccountRole, House, Child, Device, SmartExtension,
     Relay, Permission, MsgHistory, Heartbeat, AccountHouse, Homework, ScreenTime, Order
 )
-from models import ApiKey
+from models import ApiKey, ActivityLog, Mention
 from auth import (
     hash_password, verify_password, create_access_token, get_current_user,
     get_current_user_or_child, get_api_key_house, hash_api_key,
@@ -428,6 +428,8 @@ async def join_house(payload: dict, db: Session = Depends(get_db),
     db.add(assoc)
     if not current_user.house_id:
         current_user.house_id = house.house_id
+    log_activity(db, house.house_id, "parent", current_user.acc_id, current_user.name,
+                 "member_joined", f"{current_user.name} joined the house")
     db.commit()
     return {"house_id": house.house_id, "location": house.location, "is_master": False}
 
@@ -747,6 +749,9 @@ async def child_login(child_id: int, payload: dict, db: Session = Depends(get_db
     if not verify_password(pin, child.pin):
         raise HTTPException(status_code=401, detail="Invalid PIN")
     token = create_access_token({"sub": f"child_{child.child_id}", "role": "child", "house_id": child.house_id})
+    log_activity(db, child.house_id, "child", child.child_id, child.name,
+                 "child_login", f"{child.name} logged in")
+    db.commit()
     return {"child_id": child.child_id, "name": child.name, "token": token}
 
 
@@ -850,6 +855,8 @@ async def create_homework(payload: dict, db: Session = Depends(get_db),
         description=payload.get("description", ""), due_date=payload.get("due_date"),
     )
     db.add(hw)
+    log_activity(db, child.house_id, "parent", current_user.acc_id, current_user.name,
+                 "homework_assigned", f'{current_user.name} assigned "{title}" to {child.name}')
     db.commit()
     return {"hw_id": hw.hw_id}
 
@@ -881,6 +888,7 @@ async def update_homework(hw_id: int, payload: dict, db: Session = Depends(get_d
     hw = db.query(Homework).filter(Homework.hw_id == hw_id).first()
     if not hw:
         raise HTTPException(status_code=404, detail="Homework not found")
+    was_done = hw.is_done
     if current_auth["type"] == "child":
         if hw.child_id != current_auth["child"].child_id:
             raise HTTPException(status_code=403, detail="Not your homework")
@@ -893,6 +901,12 @@ async def update_homework(hw_id: int, payload: dict, db: Session = Depends(get_d
                 setattr(hw, field, payload[field])
         if "is_done" in payload:
             hw.is_done = bool(payload["is_done"])
+    if hw.is_done and not was_done:
+        child = db.query(Child).filter(Child.child_id == hw.child_id).first()
+        actor = current_auth["child"] if current_auth["type"] == "child" else current_auth["user"]
+        actor_id = actor.child_id if current_auth["type"] == "child" else actor.acc_id
+        log_activity(db, hw.house_id, current_auth["role"], actor_id, actor.name,
+                     "homework_completed", f'{child.name if child else "A child"} completed "{hw.title}"')
     db.commit()
     return {"hw_id": hw.hw_id, "is_done": hw.is_done}
 
@@ -1159,7 +1173,18 @@ async def send_device_command(device_id: str, payload: dict,
         if denial:
             raise HTTPException(status_code=403, detail=denial)
 
-    return await _dispatch_command(device_id, cmd, channel)
+    result = await _dispatch_command(device_id, cmd, channel)
+    if result.get("status") == "ok":
+        if current_auth["type"] == "child":
+            actor_type, actor_id, actor_name = "child", current_auth["child"].child_id, current_auth["child"].name
+        else:
+            actor_type, actor_id, actor_name = "parent", current_auth["user"].acc_id, current_auth["user"].name
+        label = _channel_label(db, device, channel) if cmd in ("on", "off", "output_on", "output_off") else device.name
+        verb = "ON" if cmd in ("on", "output_on") else "OFF" if cmd in ("off", "output_off") else cmd
+        log_activity(db, device.house_id, actor_type, actor_id, actor_name,
+                     "device_switch", f'{actor_name} turned {verb} "{label}"')
+        db.commit()
+    return result
 
 
 def _child_command_denial(db: Session, child_id: int, device_id: str, cmd: str, channel: int) -> str | None:
@@ -1191,9 +1216,16 @@ def _child_command_denial(db: Session, child_id: int, device_id: str, cmd: str, 
     return None
 
 
+# The firmware only understands output_on/output_off (see smartextension.ino);
+# on/off are the API-facing verbs. Normalise here so every caller — the app, the
+# Open API and Maya — speaks the firmware's dialect. all_on/all_off pass through.
+_FIRMWARE_CMD = {"on": "output_on", "off": "output_off"}
+
+
 async def _dispatch_command(device_id: str, cmd: str, channel: int) -> dict:
     """Send a relay command to a connected device and wait for its ack.
-    Shared by the JWT command endpoint and the Open API."""
+    Shared by the JWT command endpoint, the Open API, and Maya."""
+    cmd = _FIRMWARE_CMD.get(cmd, cmd)
     cmd_payload = json.dumps({"id": device_id, "cmd": cmd, "channel": channel})
     success = await manager.send_personal_message(cmd_payload, device_id)
     if not success:
@@ -1204,79 +1236,231 @@ async def _dispatch_command(device_id: str, cmd: str, channel: int) -> dict:
     return {"status": "timeout", "device_id": device_id}
 
 
+# ─── Activity Log ─────────────────────────────────────────────
+
+def log_activity(db: Session, house_id: int, actor_type: str, actor_id: int | None,
+                 actor_name: str, action: str, summary: str):
+    """Record one meaningful house activity. Best-effort: never let logging break
+    the caller's own transaction — caller commits."""
+    try:
+        db.add(ActivityLog(house_id=house_id, actor_type=actor_type, actor_id=actor_id,
+                           actor_name=actor_name or "", action=action, summary=summary))
+    except Exception as e:
+        print(f"log_activity failed: {e}")
+
+
+def _channel_label(db: Session, device: Device, channel: int) -> str:
+    """Human name of a device channel, e.g. 'Living Room / Television'."""
+    ext = db.query(SmartExtension).filter(SmartExtension.device_id == device.device_id).first()
+    relay = db.query(Relay).filter(Relay.se_id == ext.se_id, Relay.channel_number == channel).first() if ext else None
+    ch_name = relay.name if relay else f"Channel {channel}"
+    return f"{device.name} / {ch_name}"
+
+
 # ─── AI Agent (Maya) ──────────────────────────────────────────
-# Triggered when a house chat message mentions @maya. Maya reads the house's
-# recent chat + device state, replies in the chat, and may switch devices —
-# always as the invoking sender, through the same permission checks as a tap.
+# Triggered when a house chat message mentions @maya. Maya is a tool-using agent:
+# she reads the house's recent chat + device state, may call tools (control a
+# device, look up a child's location/homework/screen-time, assign homework, read
+# the activity log), then replies in the chat. Every tool runs as the invoking
+# sender — a child may only touch their own data and permitted channels.
 
 MAYA_TRIGGER = "@maya"
-MAYA_SENDER_ID = 0  # sentinel sender_id for AI-authored chat rows
+MAYA_SENDER_ID = 0      # sentinel sender_id for AI-authored chat rows
+MAYA_MAX_STEPS = 5      # cap tool-call rounds so a loop can't run forever
 
 
-def _maya_history(db: Session, house_id: int, limit: int = 20) -> list:
-    """Recent house chat as [{role, name, content}], oldest first."""
-    rows = (db.query(MsgHistory).filter(MsgHistory.house_id == house_id)
-            .order_by(MsgHistory.msg_id.desc()).limit(limit).all())
-    rows.reverse()
-    return [{
-        "role": "assistant" if m.sender_type == "ai" else "user",
-        "name": m.sender_name or "",
-        "content": m.message,
-    } for m in rows]
+def _maya_context(db: Session, house_id: int, sender_role: str, child_id: int | None) -> str:
+    """House state injected into the system prompt: devices (with channel names)
+    and the child roster the caller is allowed to see."""
+    lines = ["House state — devices:"]
+    devices = db.query(Device).filter(Device.house_id == house_id).all()
+    if not devices:
+        lines.append("  (none registered)")
+    for d in devices:
+        online = "online" if d.device_id in manager.active_connections else "offline"
+        ext = db.query(SmartExtension).filter(SmartExtension.device_id == d.device_id).first()
+        relays = db.query(Relay).filter(Relay.se_id == ext.se_id).all() if ext else []
+        chans = ", ".join(f"ch{r.channel_number}=\"{r.name}\" ({'on' if r.is_on else 'off'})"
+                          for r in sorted(relays, key=lambda r: r.channel_number))
+        lines.append(f"- device_id={d.device_id} name=\"{d.name}\" ({online}) [{chans}]")
 
-
-async def _execute_maya_action(db: Session, house_id: int, sender_role: str,
-                               child_id: int | None, action: dict) -> str | None:
-    """Run one AI-proposed action as the invoking sender. Returns a short note
-    if it could NOT be fully carried out (denied/unknown/offline), else None."""
-    device = db.query(Device).filter(
-        Device.device_id == action["device_id"], Device.house_id == house_id).first()
-    if not device:
-        return f"couldn't find device {action['device_id']} in this house"
-    if device.blocked:
-        return f"{device.name} is blocked"
+    lines.append("Children in this house:")
     if sender_role == "child":
-        denial = _child_command_denial(db, child_id, device.device_id, action["cmd"], action["channel"])
-        if denial:
-            return denial
-    result = await _dispatch_command(device.device_id, action["cmd"], action["channel"])
-    if result.get("status") == "not_connected":
-        return f"{device.name} is offline"
-    if result.get("status") == "timeout":
-        return f"{device.name} didn't respond"
-    return None
+        me = db.query(Child).filter(Child.child_id == child_id).first()
+        lines.append(f"  - {me.name} (you). You may only ask about yourself." if me else "  (you)")
+    else:
+        kids = db.query(Child).filter(Child.house_id == house_id).all()
+        lines.append("  " + ", ".join(k.name for k in kids) if kids else "  (none)")
+    return "\n".join(lines)
 
 
-async def _run_maya(house_id: int, sender_role: str, child_id: int | None, message: str):
-    """Background task: ask the model, execute actions, post Maya's reply to the
-    house chat. Owns its own DB session; never raises into the WS loop."""
-    db = SessionLocal()
+def _maya_messages(db: Session, house_id: int, context: str) -> list:
+    """[system, ...recent chat] for the model. The last chat row is the @maya
+    message that triggered this run (already persisted before we were spawned)."""
+    msgs = [{"role": "system", "content": ai.SYSTEM_PROMPT + "\n\n" + context}]
+    rows = (db.query(MsgHistory).filter(MsgHistory.house_id == house_id)
+            .order_by(MsgHistory.msg_id.desc()).limit(20).all())
+    rows.reverse()
+    for m in rows:
+        if m.sender_type == "ai":
+            msgs.append({"role": "assistant", "content": m.message})
+        else:
+            msgs.append({"role": "user", "content": f"{m.sender_name or 'Someone'}: {m.message}"})
+    return msgs
+
+
+def _resolve_child_for(db: Session, house_id: int, sender_role: str, child_id: int | None,
+                       requested_name: str):
+    """Resolve a tool's child_name to a Child, enforcing the privacy boundary.
+    Returns (Child, None) or (None, refusal_string)."""
+    if sender_role == "child":
+        me = db.query(Child).filter(Child.child_id == child_id).first()
+        if not me:
+            return None, "child not found"
+        name = (requested_name or "").strip().lower()
+        if name and name != me.name.lower():
+            return None, "You can only ask about yourself."
+        return me, None
+    name = (requested_name or "").strip().lower()
+    kids = db.query(Child).filter(Child.house_id == house_id).all()
+    if not name:
+        return (kids[0], None) if len(kids) == 1 else (None, "Which child? Please name them.")
+    exact = [k for k in kids if k.name.lower() == name]
+    part = exact or [k for k in kids if name in k.name.lower()]
+    if not part:
+        return None, f"No child named '{requested_name}' in this house."
+    return part[0], None
+
+
+async def _execute_maya_tool(db: Session, house_id: int, sender_role: str, sender_id: int,
+                             sender_name: str, child_id: int | None, name: str, args: dict) -> str:
+    """Run one tool call as the invoking sender and return a text result for the
+    model. All permission/privacy enforcement lives here."""
     try:
-        devices = [_open_device_dict(db, d) for d in
-                   db.query(Device).filter(Device.house_id == house_id).all()]
-        history = _maya_history(db, house_id)
-        # ollama Client is synchronous network IO — keep it off the event loop.
-        result = await asyncio.to_thread(ai.ask_maya, message, devices, history)
-        reply = result["reply"]
+        if name == "control_device":
+            device = db.query(Device).filter(
+                Device.device_id == str(args.get("device_id", "")), Device.house_id == house_id).first()
+            if not device:
+                return "Error: no such device in this house."
+            if device.blocked:
+                return f"Error: {device.name} is blocked."
+            cmd = str(args.get("cmd", ""))
+            channel = args.get("channel", 1)
+            if not isinstance(channel, int) or not 1 <= channel <= 3:
+                channel = 1
+            if cmd not in ("on", "off", "all_on", "all_off"):
+                return "Error: cmd must be on/off/all_on/all_off."
+            if sender_role == "child":
+                denial = _child_command_denial(db, child_id, device.device_id, cmd, channel)
+                if denial:
+                    return f"Denied: {denial}"
+            result = await _dispatch_command(device.device_id, cmd, channel)
+            status = result.get("status")
+            if status == "not_connected":
+                return f"Error: {device.name} is offline."
+            if status == "timeout":
+                return f"Error: {device.name} did not respond."
+            label = _channel_label(db, device, channel) if cmd in ("on", "off") else device.name
+            verb = {"on": "ON", "off": "OFF", "all_on": "all ON", "all_off": "all OFF"}[cmd]
+            log_activity(db, house_id, "ai", sender_id, sender_name,
+                         "device_switch", f'{sender_name} turned {verb} "{label}" (via Maya)')
+            db.commit()
+            return f"Done: {label} is now {verb}."
 
-        notes = []
-        for action in result["actions"]:
-            note = await _execute_maya_action(db, house_id, sender_role, child_id, action)
-            if note:
-                notes.append(note)
-        if notes:
-            reply = f"{reply}\n\n(Note: {'; '.join(notes)}.)"
+        if name in ("get_child_location", "list_homework", "get_screen_time"):
+            child, err = _resolve_child_for(db, house_id, sender_role, child_id, args.get("child_name", ""))
+            if err:
+                return err
+            if name == "get_child_location":
+                if child.last_lat is None:
+                    return f"No location on record for {child.name}."
+                when = child.last_seen_at.isoformat() if child.last_seen_at else "unknown time"
+                return f"{child.name} was near {child.last_lat:.5f},{child.last_lng:.5f} at {when} (UTC)."
+            if name == "list_homework":
+                hw = db.query(Homework).filter(Homework.child_id == child.child_id) \
+                    .order_by(Homework.is_done, Homework.created_at.desc()).all()
+                if not hw:
+                    return f"{child.name} has no homework."
+                return f"{child.name}'s homework: " + "; ".join(
+                    f"{h.title}{' (due ' + h.due_date + ')' if h.due_date else ''} — {'done' if h.is_done else 'not done'}"
+                    for h in hw)
+            # get_screen_time
+            from datetime import date as _date
+            today = _date.today().isoformat()
+            row = db.query(ScreenTime).filter(
+                ScreenTime.child_id == child.child_id, ScreenTime.date == today).first()
+            used = row.total_min if row else 0
+            limit = child.daily_screen_limit_min
+            if limit is None:
+                return f"{child.name} used {used} min today; no limit set."
+            return f"{child.name} used {used} of {limit} min today; {max(0, limit - used)} min left."
 
-        msg = MsgHistory(house_id=house_id, sender_id=MAYA_SENDER_ID,
-                         sender_type="ai", sender_name="Maya", message=reply)
-        db.add(msg)
-        db.commit()
-        await manager.broadcast_to_house(house_id, {
-            "type": "chat_message", "msg_id": msg.msg_id,
-            "sender_id": MAYA_SENDER_ID, "sender_type": "ai", "sender_name": "Maya",
-            "message": reply,
-            "timestamp": msg.timestamp.isoformat() if msg.timestamp else None,
-        })
+        if name == "add_homework":
+            if sender_role == "child":
+                return "Only a parent can assign homework."
+            child, err = _resolve_child_for(db, house_id, sender_role, child_id, args.get("child_name", ""))
+            if err:
+                return err
+            title = str(args.get("title", "")).strip()
+            if not title:
+                return "Error: homework needs a title."
+            hw = Homework(house_id=house_id, child_id=child.child_id, title=title,
+                          due_date=(args.get("due_date") or None))
+            db.add(hw)
+            log_activity(db, house_id, "ai", sender_id, sender_name,
+                         "homework_assigned", f'{sender_name} assigned "{title}" to {child.name} (via Maya)')
+            db.commit()
+            return f'Assigned "{title}" to {child.name}.'
+
+        if name == "read_activity_log":
+            limit = args.get("limit", 15)
+            if not isinstance(limit, int) or limit < 1:
+                limit = 15
+            limit = min(limit, 50)
+            q = db.query(ActivityLog).filter(ActivityLog.house_id == house_id)
+            if sender_role == "child":
+                # A child sees only their own actions.
+                q = q.filter(ActivityLog.actor_type == "child", ActivityLog.actor_id == child_id)
+            rows = q.order_by(ActivityLog.created_at.desc()).limit(limit).all()
+            if not rows:
+                return "No recent activity."
+            return "Recent activity: " + "; ".join(
+                f"{r.summary} ({r.created_at.strftime('%H:%M') if r.created_at else ''})" for r in rows)
+
+        return f"Error: unknown tool {name}."
+    except Exception as e:
+        db.rollback()
+        print(f"Maya tool {name} error: {e}")
+        return f"Error running {name}."
+
+
+async def _run_maya(house_id: int, sender_role: str, sender_id: int, sender_name: str, message: str):
+    """Background task: run the tool-calling agent loop, then post Maya's reply to
+    the house chat. Owns its own DB session; never raises into the WS loop."""
+    db = SessionLocal()
+    child_id = sender_id if sender_role == "child" else None
+    try:
+        context = _maya_context(db, house_id, sender_role, child_id)
+        messages = _maya_messages(db, house_id, context)
+
+        reply = None
+        for _ in range(MAYA_MAX_STEPS):
+            # ollama Client is synchronous network IO — keep it off the event loop.
+            msg = await asyncio.to_thread(ai.call_model, messages)
+            if getattr(msg, "tool_calls", None):
+                messages.append(msg)
+                for tc in msg.tool_calls:
+                    call = ai.tool_call_dict(tc)
+                    result = await _execute_maya_tool(
+                        db, house_id, sender_role, sender_id, sender_name, child_id,
+                        call["name"], call["arguments"])
+                    messages.append({"role": "tool", "content": result, "tool_name": call["name"]})
+                continue
+            reply = (msg.content or "").strip()
+            break
+        if not reply:
+            reply = "Sorry, I couldn't finish that."
+        await _maya_say(db, house_id, reply)
     except HTTPException as e:
         await _maya_say(db, house_id, f"Sorry, I can't respond right now ({e.detail}).")
     except Exception as e:
@@ -1287,9 +1471,9 @@ async def _run_maya(house_id: int, sender_role: str, child_id: int | None, messa
 
 
 async def _maya_say(db: Session, house_id: int, text: str):
-    """Post a plain Maya message (used for error surfaces)."""
+    """Persist and broadcast a Maya chat message."""
     try:
-        db.rollback()  # clear any half-done transaction from the failure
+        db.rollback()  # clear any half-done tool transaction before writing the reply
         msg = MsgHistory(house_id=house_id, sender_id=MAYA_SENDER_ID,
                          sender_type="ai", sender_name="Maya", message=text)
         db.add(msg)
@@ -1301,7 +1485,7 @@ async def _maya_say(db: Session, house_id: int, text: str):
             "timestamp": msg.timestamp.isoformat() if msg.timestamp else None,
         })
     except Exception as e:
-        print(f"Maya failed to post error message: {e}")
+        print(f"Maya failed to post message: {e}")
 
 
 # ─── Store (mock marketplace) ─────────────────────────────────
@@ -1451,6 +1635,50 @@ async def delete_permission(permission_id: int, db: Session = Depends(get_db),
     db.delete(perm)
     db.commit()
     return {"status": "deleted"}
+
+
+@app.put("/api/relays/{relay_id}")
+async def rename_relay(relay_id: int, payload: dict, db: Session = Depends(get_db),
+                       current_user: Account = Depends(get_current_user)):
+    """Rename a relay channel (e.g. 'Television'). Device-managers only. The name
+    is a server-side label — the firmware still addresses channels by number, and
+    Maya maps the name to a channel from the house context."""
+    if not _user_can_manage_devices(db, current_user):
+        raise HTTPException(status_code=403, detail="Only the house owner (or authorized members) can rename channels")
+    relay = db.query(Relay).filter(Relay.relay_id == relay_id).first()
+    if not relay:
+        raise HTTPException(status_code=404, detail="Relay not found")
+    ext = db.query(SmartExtension).filter(SmartExtension.se_id == relay.se_id).first()
+    device = db.query(Device).filter(Device.device_id == ext.device_id).first() if ext else None
+    if not device or (current_user.role != AccountRole.admin and device.house_id != current_user.house_id):
+        raise HTTPException(status_code=403, detail="Relay belongs to another house")
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name required")
+    relay.name = name[:40]
+    db.commit()
+    return {"relay_id": relay.relay_id, "name": relay.name, "channel_number": relay.channel_number}
+
+
+@app.get("/api/activity")
+async def get_activity(limit: int = 30, db: Session = Depends(get_db),
+                       current_auth: dict = Depends(get_current_user_or_child)):
+    """Recent house activity. Parents see the whole house; a child sees only their
+    own actions."""
+    house_id = current_auth["house_id"]
+    if not house_id:
+        return {"activity": []}
+    limit = max(1, min(limit, 100))
+    q = db.query(ActivityLog).filter(ActivityLog.house_id == house_id)
+    if current_auth["type"] == "child":
+        q = q.filter(ActivityLog.actor_type == "child",
+                     ActivityLog.actor_id == current_auth["child"].child_id)
+    rows = q.order_by(ActivityLog.created_at.desc()).limit(limit).all()
+    return {"activity": [{
+        "id": r.id, "actor_type": r.actor_type, "actor_name": r.actor_name,
+        "action": r.action, "summary": r.summary,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    } for r in rows]}
 
 
 @app.get("/api/relays")
@@ -1945,9 +2173,8 @@ async def mobile_websocket_endpoint(websocket: WebSocket):
                 # Maya responds only when explicitly mentioned, and acts as the
                 # sender so a child's per-relay permissions still apply.
                 if MAYA_TRIGGER in message_text.lower():
-                    child_id = acc_id if sender_type == "child" else None
                     asyncio.create_task(
-                        _run_maya(house_id, sender_type, child_id, message_text))
+                        _run_maya(house_id, sender_type, acc_id, sender_name, message_text))
 
     except asyncio.TimeoutError:
         try:
