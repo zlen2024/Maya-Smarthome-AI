@@ -23,8 +23,9 @@ report artifacts that still need manual updating. Generated alongside the report
 - [x] Product/marketplace "buy device" flow: mock checkout (hardcoded catalog, `orders` table, server-side pricing). Store screen via Device tab → "Buy Devices".
 - [ ] iOS support. Apps are Android-only by design (background limits) — keep as a stated constraint.
 
-## Hardware
-- [ ] Firmware currently drives GPIO/LED outputs (`OUTPUT_PINS = {2,4,5}`); wire to real AC relay channels for the production prototype. (3 channels — report now says 3-channel throughout.)
+## Hardware (DONE — 2026-07-07)
+- [x] Wire GPIO outputs (`OUTPUT_PINS = {2,4,5}`) to real AC relay channels — done physically, all 3 channels working.
+- [x] Firmware zombie-WebSocket fix (ping/pong + 3-min watchdog) — committed; flash the ESP32 to apply.
 
 ## Report artifacts needing manual update (cannot be auto-generated)
 These are images/diagrams in the report; redraw to match the current Maya architecture:
@@ -33,7 +34,8 @@ These are images/diagrams in the report; redraw to match the current Maya archit
 - [ ] §5.5 ERD — same entities as above.
 - [ ] §5.6 Flow Chart — BLE provisioning + WebSocket command flow (drop HTTP/MQTT).
 - [ ] §5.7 Network Architecture — Flutter app ⇄ FastAPI on Fly.io (WebSocket) ⇄ ESP32; drop Firebase/Supabase/MQTT.
-- [ ] §5.8 Sequence Diagrams — update protocols to WebSocket; §5.8.2 should reflect device registration, not "buy product".
+- [ ] §5.8 Sequence Diagrams — update protocols to WebSocket. (§5.8.2 "buy product" can now stay — the mock marketplace flow exists as of 2026-07-07.)
+- [ ] Report text still frames GPS / screen-time / homework / marketplace / Open API as future work — now implemented (see sections above); update the relevant chapters before submission.
 - [ ] Front matter still has template placeholders: ABSTRACT / ABSTRAK / ACKNOWLEDGEMENT ("Text text text…"), DEDICATION, and "TITLE OF FINAL YEAR PROJECT" / "NAME OF CANDIDATE" on the inner title page. The real Abstract/Abstrak text exists in the old `Muhamad Daniel Hakimi(...)_Report latest.docx`/`.pdf` and can be pasted in.
 - [ ] List of Tables / List of Figures / Symbols still use template captions ("Table caption", Diameter/Force, etc.).
 
