@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../widgets/glass.dart';
 
 /// WhatsApp-style chat tab for house members.
 class ChatTab extends StatefulWidget {
@@ -319,52 +320,46 @@ class _ChatTabState extends State<ChatTab> {
           ),
 
         // Input bar
-        Container(
-          decoration: BoxDecoration(
-            color: cs.surfaceContainerHigh,
-            border: Border(
-              top: BorderSide(color: cs.outlineVariant, width: 0.5),
-            ),
-          ),
+        Padding(
           padding: EdgeInsets.only(
             left: 12,
-            right: 4,
+            right: 12,
             top: 8,
-            bottom: MediaQuery.of(context).padding.bottom + 8,
+            bottom: MediaQuery.of(context).padding.bottom + 12,
           ),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _textCtrl,
-                  textCapitalization: TextCapitalization.sentences,
-                  maxLines: 4,
-                  minLines: 1,
-                  onSubmitted: (_) => _sendMessage(),
-                  decoration: InputDecoration(
-                    hintText: 'Type a message...',
-                    filled: true,
-                    fillColor: cs.surfaceContainerLow,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(24),
-                      borderSide: BorderSide.none,
+          child: GlassSurface(
+            radius: 28,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _textCtrl,
+                    textCapitalization: TextCapitalization.sentences,
+                    maxLines: 4,
+                    minLines: 1,
+                    onSubmitted: (_) => _sendMessage(),
+                    decoration: const InputDecoration(
+                      hintText: 'Type a message...',
+                      filled: false,
+                      border: InputBorder.none,
+                      contentPadding: EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 8),
+                      isDense: true,
                     ),
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 10),
-                    isDense: true,
                   ),
                 ),
-              ),
-              const SizedBox(width: 4),
-              IconButton.filled(
-                onPressed: _sendMessage,
-                icon: const Icon(Icons.send_rounded, size: 20),
-                style: IconButton.styleFrom(
-                  backgroundColor: cs.primary,
-                  foregroundColor: cs.onPrimary,
+                const SizedBox(width: 4),
+                IconButton.filled(
+                  onPressed: _sendMessage,
+                  icon: const Icon(Icons.send_rounded, size: 20),
+                  style: IconButton.styleFrom(
+                    backgroundColor: cs.primary,
+                    foregroundColor: cs.onPrimary,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ],
@@ -445,38 +440,17 @@ class _MessageBubble extends StatelessWidget {
                   ],
                 ),
               ),
-            Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: isOwn
-                    ? cs.primary
-                    : isAi
-                        ? cs.tertiaryContainer
-                        : cs.surfaceContainerHigh,
-                border: isMention
-                    ? Border.all(color: cs.secondary, width: 2)
-                    : null,
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(18),
-                  topRight: const Radius.circular(18),
-                  bottomLeft:
-                      isOwn ? const Radius.circular(18) : Radius.zero,
-                  bottomRight:
-                      isOwn ? Radius.zero : const Radius.circular(18),
-                ),
-              ),
+            GlassSurface(
+              radius: 16,
+              glow: isOwn ? cs.primary : isMention ? cs.secondary : null,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text(
                     text,
                     style: tt.bodyMedium?.copyWith(
-                      color: isOwn
-                          ? cs.onPrimary
-                          : isAi
-                              ? cs.onTertiaryContainer
-                              : cs.onSurface,
+                      color: Colors.white,
                     ),
                   ),
                   if (timeStr.isNotEmpty) ...[
@@ -485,11 +459,7 @@ class _MessageBubble extends StatelessWidget {
                       timeStr,
                       style: tt.labelSmall?.copyWith(
                         fontSize: 10,
-                        color: isOwn
-                            ? cs.onPrimary.withOpacity(0.7)
-                            : isAi
-                                ? cs.onTertiaryContainer.withOpacity(0.7)
-                                : cs.onSurfaceVariant,
+                        color: Colors.white.withOpacity(0.55),
                       ),
                     ),
                   ],

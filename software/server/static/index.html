@@ -792,6 +792,136 @@
       .dash-header { flex-direction: column; gap: 1rem; text-align: center; padding: 1rem; }
     }
   </style>
+  <style>
+    /* ============================================================
+       SCROLL LANDING  (light hero -> dark aurora story)
+       Scoped under .landing / .ls-* so nothing leaks to the app.
+       ============================================================ */
+    :root{ --cyan:#22d3ee; --cyan-deep:#0891b2; --violet:#6d28d9; }
+    html{ scroll-behavior:smooth; }
+
+    .landing{ width:100vw; margin-left:calc(50% - 50vw); margin-top:-2rem; margin-bottom:-2rem; }
+    .landing .ls-sec{ position:relative; padding:6.5rem 1.5rem; overflow:hidden; }
+    .landing .ls-inner{ max-width:1180px; margin:0 auto; position:relative; z-index:2; }
+
+    /* ---- Light hero ---- */
+    .ls-hero{
+      background:
+        radial-gradient(1200px 620px at 82% -12%, rgba(34,211,238,.20), transparent 60%),
+        radial-gradient(950px 520px at -5% 105%, rgba(139,92,246,.16), transparent 55%),
+        linear-gradient(180deg,#eef1fb 0%, #e7ebff 50%, #dfe6ff 100%);
+      background-color:#e9edfb; color:#0b1020; padding-top:5rem; padding-bottom:6.5rem;
+    }
+    .ls-hero-grid{ display:grid; grid-template-columns:1.1fr .9fr; gap:3rem; align-items:center; }
+    .ls-eyebrow{ font-family:'Outfit',sans-serif; letter-spacing:.28em; text-transform:uppercase;
+      font-size:.72rem; font-weight:700; color:#5b6480; margin-bottom:1.3rem; }
+    .ls-hero h1{ font-family:'Outfit',sans-serif; font-weight:800; letter-spacing:-.03em; line-height:.96;
+      font-size:clamp(3rem,7vw,5.6rem); color:#0b1020; margin:0 0 1.4rem; }
+    .ls-hero h1 em{ font-style:italic; font-weight:500;
+      background:linear-gradient(120deg,#0891b2,#6d28d9); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+    .ls-sub{ font-size:1.12rem; line-height:1.6; color:#3a4260; max-width:33rem; margin-bottom:2.2rem; }
+    .ls-cta-row{ display:flex; gap:1rem; flex-wrap:wrap; align-items:center; }
+    .ls-btn{ display:inline-flex; align-items:center; gap:.55rem; font-weight:700; font-size:.95rem;
+      padding:.95rem 1.6rem; border-radius:999px; cursor:pointer; text-decoration:none; border:none;
+      transition:transform .25s, box-shadow .25s; font-family:inherit; }
+    .ls-btn-dark{ background:#0b1020; color:#fff; box-shadow:0 10px 30px rgba(11,16,32,.25); }
+    .ls-btn-dark:hover{ transform:translateY(-2px); box-shadow:0 16px 42px rgba(11,16,32,.38); }
+    .ls-btn-ghost{ background:rgba(11,16,32,.05); color:#0b1020; border:1px solid rgba(11,16,32,.14); }
+    .ls-btn-ghost:hover{ background:rgba(11,16,32,.1); }
+    .ls-btn-cyan{ background:linear-gradient(135deg,#22d3ee,#0891b2); color:#04222b; box-shadow:0 10px 30px rgba(34,211,238,.35); }
+    .ls-btn-cyan:hover{ transform:translateY(-2px); box-shadow:0 16px 42px rgba(34,211,238,.5); }
+
+    /* ---- Phone mockup ---- */
+    .ls-phone{ position:relative; justify-self:center; width:min(300px,78vw); aspect-ratio:9/19.5;
+      border-radius:44px; padding:11px; background:linear-gradient(160deg,#20242e,#0a0c12);
+      box-shadow:0 40px 90px rgba(20,20,60,.35), inset 0 0 0 2px rgba(255,255,255,.06);
+      animation:ls-float 6s ease-in-out infinite; }
+    .ls-phone img,.ls-phone video{ width:100%; height:100%; object-fit:cover; border-radius:34px; display:block; background:#05070d; }
+    @keyframes ls-float{ 0%,100%{ transform:translateY(0) } 50%{ transform:translateY(-16px) } }
+    .ls-phone-wrap{ position:relative; }
+    .ls-phone-glow{ position:absolute; inset:-16%; z-index:0; filter:blur(55px);
+      background:radial-gradient(circle at 50% 42%, rgba(34,211,238,.55), transparent 62%); }
+    /* pre-rendered angled phone (transparent PNG) used in the hero */
+    .ls-hero-render{ position:relative; z-index:1; display:block; width:min(330px,78vw); margin:0 auto;
+      filter:drop-shadow(0 38px 55px rgba(15,15,50,.5)); animation:ls-float 6s ease-in-out infinite; }
+    /* pre-composed promo video scene (has its own aurora background).
+       Feather the edges to transparent so the starfield margins melt into
+       the black section instead of reading as a hard rectangle. */
+    .ls-scene{ width:100%; max-width:380px; margin:0 auto; display:block;
+      -webkit-mask-image:radial-gradient(ellipse 74% 92% at 50% 50%, #000 40%, transparent 96%);
+      mask-image:radial-gradient(ellipse 74% 92% at 50% 50%, #000 40%, transparent 96%); }
+
+    .ls-scrollhint{ text-align:center; margin-top:3.5rem; color:#5b6480; font-size:.72rem; letter-spacing:.24em; text-transform:uppercase; }
+    .ls-scrollhint span{ display:block; font-size:1.3rem; margin-top:.25rem; animation:ls-bob 1.8s ease-in-out infinite; }
+    @keyframes ls-bob{ 0%,100%{ transform:translateY(0) } 50%{ transform:translateY(6px) } }
+
+    /* ---- Light -> dark transition band ---- */
+    .ls-fade{ background:linear-gradient(180deg,#dfe6ff 0%, #7a80b8 26%, #23294a 60%, #070913 100%); padding:4.5rem 1.5rem; }
+    .ls-stats{ display:flex; justify-content:center; gap:clamp(1.5rem,6vw,5rem); flex-wrap:wrap; text-align:center; }
+    .ls-stat b{ font-family:'Outfit',sans-serif; font-size:2.5rem; font-weight:800; display:block;
+      background:linear-gradient(120deg,#fff,#67e8f9); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+    .ls-stat span{ color:#c2ccdf; font-size:.85rem; }
+
+    /* ---- Dark story sections ---- */
+    .ls-dark{ background:#070913; color:#e8eefc; }
+    .ls-dark.ls-alt{ background:linear-gradient(180deg,#070913,#0a1020); }
+    .ls-orb{ position:absolute; border-radius:50%; filter:blur(90px); opacity:.45; z-index:0; pointer-events:none; }
+    .ls-kicker{ font-family:'Outfit',sans-serif; letter-spacing:.22em; text-transform:uppercase; font-size:.72rem; font-weight:700; color:var(--cyan); margin-bottom:1rem; }
+    .ls-h2{ font-family:'Outfit',sans-serif; font-weight:800; letter-spacing:-.02em; font-size:clamp(2rem,4.5vw,3.3rem); line-height:1.05; margin-bottom:1.1rem; color:#fff; }
+    .ls-lead{ color:#9fb0c9; font-size:1.08rem; line-height:1.65; max-width:34rem; }
+    .ls-split{ display:grid; grid-template-columns:1fr 1fr; gap:3.5rem; align-items:center; }
+    .ls-split.rev .ls-visual{ order:2; }
+
+    model-viewer{ width:100%; height:440px; --poster-color:transparent; background:transparent; }
+
+    .ls-feats{ list-style:none; margin:1.7rem 0 0; padding:0; display:grid; gap:.9rem; }
+    .ls-feats li{ display:flex; gap:.8rem; align-items:flex-start; color:#c7d2e4; font-size:.98rem; line-height:1.45; }
+    .ls-feats li b{ color:#fff; }
+    .ls-ic{ flex:0 0 auto; width:28px; height:28px; border-radius:9px; display:grid; place-items:center;
+      background:rgba(34,211,238,.12); border:1px solid rgba(34,211,238,.3); font-size:.9rem; }
+
+    /* ---- Maya chat mockup ---- */
+    .ls-chat{ background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.07); border-radius:26px; padding:1.5rem; max-width:430px; backdrop-filter:blur(20px); }
+    .ls-bub{ padding:.72rem 1rem; border-radius:16px; margin-bottom:.7rem; max-width:82%; font-size:.92rem; line-height:1.4; }
+    .ls-bub.me{ margin-left:auto; background:linear-gradient(135deg,rgba(34,211,238,.22),rgba(8,145,178,.20)); border:1px solid rgba(34,211,238,.3); color:#e7fbff; border-bottom-right-radius:5px; }
+    .ls-bub.maya{ background:rgba(139,92,246,.16); border:1px solid rgba(139,92,246,.3); color:#efeaff; border-bottom-left-radius:5px; }
+    .ls-bub small{ display:block; font-size:.62rem; opacity:.6; margin-top:.3rem; }
+    .ls-maya-tag{ font-size:.68rem; color:#a78bfa; font-weight:700; margin:.2rem 0 .35rem; display:flex; align-items:center; gap:.35rem; }
+
+    /* ---- Theme swatches ---- */
+    .ls-themes{ display:grid; grid-template-columns:repeat(3,1fr); gap:1.2rem; margin-top:2.5rem; }
+    .ls-theme{ border-radius:20px; padding:1.6rem 1.2rem; border:1px solid rgba(255,255,255,.08); background:rgba(255,255,255,.03); text-align:center; transition:transform .25s, border-color .25s; }
+    .ls-theme:hover{ transform:translateY(-5px); border-color:rgba(255,255,255,.2); }
+    .ls-theme .dot{ width:52px; height:52px; border-radius:50%; margin:0 auto .9rem; box-shadow:0 0 28px currentColor; }
+    .ls-theme b{ display:block; font-family:'Outfit',sans-serif; color:#fff; margin-bottom:.15rem; }
+    .ls-theme span{ font-size:.8rem; color:#8ea0bd; }
+
+    /* ---- Get started (auth) ---- */
+    .ls-getstarted{ display:grid; grid-template-columns:1fr 480px; gap:3rem; align-items:center; }
+    .ls-footer{ text-align:center; padding:3rem 1.5rem; color:#6b7a94; font-size:.85rem; border-top:1px solid rgba(255,255,255,.05); background:#05070d; }
+    .ls-footer a{ color:#67e8f9; text-decoration:none; }
+
+    /* ---- Reveal on scroll ---- */
+    .landing .reveal{ opacity:0; transform:translateY(32px); transition:opacity .8s cubic-bezier(.2,.7,.2,1), transform .8s cubic-bezier(.2,.7,.2,1); }
+    .landing .reveal.in{ opacity:1; transform:none; }
+
+    /* hide the app's WS connection pill on the marketing landing */
+    body:has(#view-welcome.active) #wsConnStatus{ display:none; }
+
+    @media (max-width:860px){
+      .ls-hero-grid,.ls-split,.ls-getstarted{ grid-template-columns:1fr; }
+      .ls-split.rev .ls-visual{ order:0; }
+      .ls-getstarted .auth-card{ margin:0 auto; }
+      .landing .ls-sec{ padding:4.2rem 1.2rem; }
+      model-viewer{ height:330px; }
+      .ls-themes{ grid-template-columns:1fr; }
+    }
+    @media (prefers-reduced-motion:reduce){
+      .ls-phone,.ls-scrollhint span{ animation:none; }
+      .reveal{ transition:none; opacity:1; transform:none; }
+      html{ scroll-behavior:auto; }
+    }
+  </style>
 </head>
 <body>
   
@@ -820,36 +950,161 @@
          VIEW: Welcome / Auth (Logged Out)
          ========================================== -->
     <div id="view-welcome" class="view active">
-      <div class="hero-container">
-        
-        <div class="hero-text">
-          <h2>Take control of your smart home.</h2>
-          <p>Maya Smart Home is an advanced IoT management ecosystem. Manage accounts, register smart sockets, control power channels, and coordinate household permissions in real time.</p>
-          
-          <div class="hero-features">
-            <div class="feature-item">
-              <h3><span>🔌</span> 3-Channel Control</h3>
-              <p>Toggle individual relay outputs or command all channels simultaneously.</p>
+      <div class="landing">
+
+        <!-- ===== HERO (light) ===== -->
+        <section class="ls-sec ls-hero">
+          <div class="ls-inner">
+            <div class="ls-hero-grid">
+              <div>
+                <div class="ls-eyebrow">Maya &middot; Smart Home</div>
+                <h1>Your whole home,<br><em>in one tap.</em></h1>
+                <p class="ls-sub">Lights, sockets and every room &mdash; controlled in real time from one glass dashboard. Bring the family in, set permissions, and just ask Maya, your built-in AI.</p>
+                <div class="ls-cta-row">
+                  <a href="/static/app-release.apk" download="maya-smart-home.apk" class="ls-btn ls-btn-dark"><span>&#128229;</span> Download the App</a>
+                  <a href="#demo" class="ls-btn ls-btn-ghost"><span>&#9654;</span> See it in action</a>
+                  <a href="#get-started" class="ls-btn ls-btn-ghost">Sign in</a>
+                </div>
+              </div>
+              <div class="ls-phone-wrap">
+                <div class="ls-phone-glow"></div>
+                <img class="ls-hero-render" src="/static/media/hero-phone.png" alt="Maya Smart Home app on iPhone">
+              </div>
             </div>
-            <div class="feature-item">
-              <h3><span>📡</span> Real-time Broadcast</h3>
-              <p>Powered by WebSockets to synchronize states between users instantly.</p>
-            </div>
-            <div class="feature-item">
-              <h3><span>👥</span> Child Safeguards</h3>
-              <p>Configure channel-level permissions with a dedicated child dashboard.</p>
-            </div>
-            <div class="feature-item">
-              <h3><span>📱</span> Mobile App Control</h3>
-              <p>Provision devices via BLE and control channels from the companion mobile app.</p>
-              <div style="margin-top: 0.8rem;">
-                <a href="/static/app-release.apk" download="maya-smart-home.apk" class="btn btn-primary" style="display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; width: auto; padding: 0.5rem 1rem; font-size: 0.85rem; border-radius: 8px; text-decoration: none;">
-                  <span>📥</span> Download Android App (APK)
-                </a>
+            <div class="ls-scrollhint">Scroll to explore<span>&#8595;</span></div>
+          </div>
+        </section>
+
+        <!-- ===== light -> dark transition band ===== -->
+        <section class="ls-sec ls-fade">
+          <div class="ls-inner ls-stats reveal">
+            <div class="ls-stat"><b>3&#8209;ch</b><span>relay control per socket</span></div>
+            <div class="ls-stat"><b>Real&#8209;time</b><span>WebSocket sync across devices</span></div>
+            <div class="ls-stat"><b>Maya&nbsp;AI</b><span>chat to run your home</span></div>
+            <div class="ls-stat"><b>Family</b><span>parent &amp; child dashboards</span></div>
+          </div>
+        </section>
+
+        <!-- ===== HOUSE 3D ===== -->
+        <section class="ls-sec ls-dark">
+          <div class="ls-orb" style="width:520px;height:520px;background:#0e7490;top:-120px;right:-120px;"></div>
+          <div class="ls-inner">
+            <div class="ls-split reveal">
+              <div>
+                <div class="ls-kicker">One home, every room</div>
+                <h2 class="ls-h2">Your house, brought to life.</h2>
+                <p class="ls-lead">Group your smart sockets by room and see the whole home at a glance. Flip a single channel, or hit &ldquo;All off&rdquo; on your way out the door.</p>
+                <ul class="ls-feats">
+                  <li><span class="ls-ic">&#127968;</span><div><b>Multi-house.</b> Switch between homes &mdash; apartment, parents&rsquo; place, the office &mdash; in a tap.</div></li>
+                  <li><span class="ls-ic">&#9889;</span><div><b>Instant.</b> Every toggle broadcasts over WebSockets, so every phone stays in sync.</div></li>
+                </ul>
+              </div>
+              <div class="ls-visual">
+                <model-viewer src="/static/models/house.glb" alt="3D modern smart home" camera-controls auto-rotate rotation-per-second="16deg" interaction-prompt="none" camera-orbit="35deg 68deg 110%" min-camera-orbit="auto 45deg auto" max-camera-orbit="auto 82deg auto" field-of-view="30deg" shadow-intensity="0.7" exposure="1.05" environment-image="neutral" loading="lazy"></model-viewer>
               </div>
             </div>
           </div>
-        </div>
+        </section>
+
+        <!-- ===== DEMO video ===== -->
+        <section id="demo" class="ls-sec ls-dark ls-alt">
+          <div class="ls-inner">
+            <div class="ls-split rev reveal">
+              <div class="ls-visual">
+                <video class="ls-scene" src="/static/media/app-demo.mp4" poster="/static/media/app-poster.jpg" autoplay muted loop playsinline></video>
+              </div>
+              <div>
+                <div class="ls-kicker">See it in action</div>
+                <h2 class="ls-h2">Control that feels instant.</h2>
+                <p class="ls-lead">Sign in, tap a channel, watch it flip &mdash; the socket responds and every other device updates live. No refresh, no lag.</p>
+                <ul class="ls-feats">
+                  <li><span class="ls-ic">&#128268;</span><div><b>3-channel sockets.</b> Name each outlet &mdash; &ldquo;PS5&rdquo;, &ldquo;TV&rdquo;, &ldquo;Lamp&rdquo; &mdash; and control them one by one.</div></li>
+                  <li><span class="ls-ic">&#127769;</span><div><b>All off.</b> One button cuts every active channel across the house.</div></li>
+                  <li><span class="ls-ic">&#128225;</span><div><b>Live status.</b> Online / offline and channel state, always current.</div></li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== MAYA AI ===== -->
+        <section class="ls-sec ls-dark">
+          <div class="ls-orb" style="width:480px;height:480px;background:#6d28d9;bottom:-140px;left:-120px;"></div>
+          <div class="ls-inner">
+            <div class="ls-split reveal">
+              <div>
+                <div class="ls-kicker">Meet Maya</div>
+                <h2 class="ls-h2">Just ask.</h2>
+                <p class="ls-lead">Maya is your household&rsquo;s AI assistant, right inside the chat. Ask in plain language &mdash; English or Malay &mdash; and she runs it. The whole family shares one house conversation.</p>
+                <ul class="ls-feats">
+                  <li><span class="ls-ic">&#128172;</span><div><b>Natural language.</b> &ldquo;bukak tv&rdquo;, &ldquo;turn everything off&rdquo; &mdash; Maya understands.</div></li>
+                  <li><span class="ls-ic">@</span><div><b>Mentions.</b> Tag <b>@Maya</b> or a family member in the shared house chat.</div></li>
+                </ul>
+              </div>
+              <div class="ls-visual">
+                <div class="ls-chat">
+                  <div class="ls-bub me">@Maya bukak tv <small>13:31</small></div>
+                  <div class="ls-maya-tag">&#10022; Maya</div>
+                  <div class="ls-bub maya">Done &mdash; the TV is on. Anything else? <small>13:31</small></div>
+                  <div class="ls-bub me">turn everything off when we leave <small>13:32</small></div>
+                  <div class="ls-maya-tag">&#10022; Maya</div>
+                  <div class="ls-bub maya">All channels are off. Safe travels! <small>13:32</small></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== HARDWARE ESP32 3D ===== -->
+        <section class="ls-sec ls-dark ls-alt">
+          <div class="ls-inner">
+            <div class="ls-split rev reveal">
+              <div class="ls-visual">
+                <model-viewer id="espModel" src="/static/models/esp32.glb" alt="ESP32 controller board" camera-controls interaction-prompt="none" camera-orbit="0deg 75deg 105%" field-of-view="28deg" exposure="1.35" shadow-intensity="0.9" tone-mapping="aces" environment-image="neutral" loading="lazy"></model-viewer>
+              </div>
+              <div>
+                <div class="ls-kicker">Real hardware</div>
+                <h2 class="ls-h2">Powered by ESP32.</h2>
+                <p class="ls-lead">Every Maya socket runs on an ESP32 &mdash; provisioned over Bluetooth in seconds, then online over Wi-Fi. Open firmware, open API, yours to build on.</p>
+                <ul class="ls-feats">
+                  <li><span class="ls-ic">&#128225;</span><div><b>BLE provisioning.</b> Scan, set Wi-Fi, done &mdash; no cloud-account juggling.</div></li>
+                  <li><span class="ls-ic">&#128275;</span><div><b>Open API.</b> Wire Maya into your own automations.</div></li>
+                </ul>
+                <div class="ls-cta-row" style="margin-top:1.6rem;">
+                  <a href="/store" class="ls-btn ls-btn-cyan">Get the hardware &rarr;</a>
+                  <a href="/integrate" class="ls-btn ls-btn-ghost" style="background:rgba(255,255,255,.05);color:#d7e9ff;border-color:rgba(255,255,255,.14);">API &amp; Docs</a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== THEMES ===== -->
+        <section class="ls-sec ls-dark">
+          <div class="ls-inner reveal" style="text-align:center;">
+            <div class="ls-kicker" style="display:inline-block;">Make it yours</div>
+            <h2 class="ls-h2">One glass. Your colour.</h2>
+            <p class="ls-lead" style="margin:0 auto;">Glassmorphism is the brand &mdash; the accent is yours. Pick a mood and the whole app re-tints instantly.</p>
+            <div class="ls-themes">
+              <div class="ls-theme"><div class="dot" style="background:#22d3ee;color:#22d3ee;"></div><b>Aurora</b><span>Cyan &middot; default</span></div>
+              <div class="ls-theme"><div class="dot" style="background:#bef264;color:#bef264;"></div><b>Obsidian</b><span>Lime</span></div>
+              <div class="ls-theme"><div class="dot" style="background:#f0569e;color:#f0569e;"></div><b>Spectrum</b><span>Magenta</span></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ===== GET STARTED (auth) ===== -->
+        <section id="get-started" class="ls-sec ls-dark ls-alt">
+          <div class="ls-orb" style="width:520px;height:520px;background:#0891b2;top:-140px;left:-100px;"></div>
+          <div class="ls-inner ls-getstarted reveal">
+            <div class="ls-gs-copy">
+              <div class="ls-kicker">Start now</div>
+              <h2 class="ls-h2">Bring your home online.</h2>
+              <p class="ls-lead">Create an account, add your first socket, and invite the family. Free to start.</p>
+              <div class="ls-cta-row" style="margin-top:1.6rem;">
+                <a href="/static/app-release.apk" download="maya-smart-home.apk" class="ls-btn ls-btn-cyan"><span>&#128229;</span> Download Android App</a>
+              </div>
+            </div>
         
         <div class="card auth-card">
           <div class="auth-tabs">
@@ -911,7 +1166,13 @@
             
           </div>
         </div>
-        
+        </div>
+      </section>
+
+      <footer class="ls-footer">
+        <div>&#9889; Maya Smart Home &mdash; your home, your family, and Maya AI in one glass dashboard.</div>
+        <div style="margin-top:.6rem; opacity:.75;">&copy; 2026 Maya Smart Home &middot; <a href="/store">Store</a> &middot; <a href="/integrate">API &amp; Docs</a></div>
+      </footer>
       </div>
     </div>
 
@@ -2053,6 +2314,66 @@
     
     // Initialize Session Check
     checkSession();
+  </script>
+
+  <!-- 3D model viewer (Google) for the scroll landing -->
+  <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/4.0.0/model-viewer.min.js"></script>
+  <script>
+    // Reveal-on-scroll for the marketing landing.
+    // Rect-based check (not IntersectionObserver): reveals anything whose top
+    // crosses 88% of the viewport, on load / scroll / resize. Cannot leave a
+    // section permanently hidden regardless of scroll speed.
+    (function () {
+      var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      var reveals = [].slice.call(document.querySelectorAll('.landing .reveal'));
+      if (reduce) {
+        reveals.forEach(function (el) { el.classList.add('in'); });
+      } else {
+        var rTick = false;
+        var check = function () {
+          rTick = false;
+          var vh = window.innerHeight || 0;
+          for (var i = reveals.length - 1; i >= 0; i--) {
+            if (reveals[i].getBoundingClientRect().top < vh * 0.88) {
+              reveals[i].classList.add('in');
+              reveals.splice(i, 1);
+            }
+          }
+        };
+        var onScroll = function () {
+          if (!rTick) { rTick = true; requestAnimationFrame(check); }
+        };
+        check();
+        window.addEventListener('scroll', onScroll, { passive: true });
+        window.addEventListener('resize', onScroll, { passive: true });
+        window.addEventListener('load', check);
+      }
+
+      // Scroll-driven spin for the ESP32 board: map its section's scroll
+      // progress to camera azimuth so it turns as you read.
+      var esp = document.getElementById('espModel');
+      if (esp && !reduce) {
+        var ticking = false;
+        function spin() {
+          ticking = false;
+          var sec = esp.closest('.ls-sec');
+          if (!sec) return;
+          var r = sec.getBoundingClientRect();
+          var vh = window.innerHeight || 1;
+          // progress 0..1 as the section travels through the viewport
+          var p = 1 - (r.top + r.height / 2) / (vh + r.height / 2);
+          p = Math.max(0, Math.min(1, p));
+          var theta = -60 + p * 300; // sweep ~300deg across the scroll
+          esp.setAttribute('camera-orbit', theta.toFixed(1) + 'deg 75deg 105%');
+        }
+        window.addEventListener('scroll', function () {
+          if (!ticking) { ticking = true; requestAnimationFrame(spin); }
+        }, { passive: true });
+        // model-viewer needs the src loaded before orbit sticks
+        esp.addEventListener('load', spin);
+        spin();
+      }
+    })();
   </script>
 </body>
 </html>

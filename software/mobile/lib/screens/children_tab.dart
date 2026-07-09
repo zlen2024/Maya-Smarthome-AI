@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/api_service.dart';
+import '../widgets/glass.dart';
 
 /// Children management tab (Parent-only).
 /// Lists child accounts with permissions, homework, screen limits
@@ -309,67 +310,69 @@ class _ChildrenTabState extends State<ChildrenTab>
                   final child = _children[i];
                   final hasLocation = child['last_lat'] != null;
                   final limit = child['daily_screen_limit_min'];
-                  return Card(
-                    margin: const EdgeInsets.only(bottom: 12),
-                    color: cs.surfaceContainerLow,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        ListTile(
-                          contentPadding: const EdgeInsets.only(
-                              left: 18, right: 8, top: 4),
-                          leading: CircleAvatar(
-                            backgroundColor: cs.primaryContainer,
-                            child: Icon(Icons.child_care_rounded,
-                                color: cs.onPrimaryContainer),
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: GlassSurface(
+                      padding: EdgeInsets.zero,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          ListTile(
+                            contentPadding: const EdgeInsets.only(
+                                left: 18, right: 8, top: 4),
+                            leading: CircleAvatar(
+                              backgroundColor: cs.primaryContainer,
+                              child: Icon(Icons.child_care_rounded,
+                                  color: cs.onPrimaryContainer),
+                            ),
+                            title: Text(child['name'] ?? 'Child',
+                                style:
+                                    const TextStyle(fontWeight: FontWeight.w700)),
+                            subtitle: Text(
+                                'ID: ${child['child_id']}'
+                                '${limit != null ? '  ·  $limit min/day' : ''}',
+                                style: tt.labelSmall?.copyWith(
+                                    color: cs.onSurfaceVariant,
+                                    fontFamily: 'monospace')),
+                            trailing: hasLocation
+                                ? TextButton.icon(
+                                    onPressed: () => _openInMaps(child),
+                                    icon: const Icon(Icons.place_outlined,
+                                        size: 18),
+                                    label: const Text('Map'),
+                                  )
+                                : null,
                           ),
-                          title: Text(child['name'] ?? 'Child',
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.w700)),
-                          subtitle: Text(
-                              'ID: ${child['child_id']}'
-                              '${limit != null ? '  ·  $limit min/day' : ''}',
-                              style: tt.labelSmall?.copyWith(
-                                  color: cs.onSurfaceVariant,
-                                  fontFamily: 'monospace')),
-                          trailing: hasLocation
-                              ? TextButton.icon(
-                                  onPressed: () => _openInMaps(child),
-                                  icon: const Icon(Icons.place_outlined,
-                                      size: 18),
-                                  label: const Text('Map'),
-                                )
-                              : null,
-                        ),
-                        Padding(
-                          padding: const EdgeInsets.only(left: 18, bottom: 4),
-                          child: Text(
-                              '${_lastSeenText(child)}${_screenTimeText(child)}',
-                              style: tt.labelSmall
-                                  ?.copyWith(color: cs.onSurfaceVariant)),
-                        ),
-                        Padding(
-                          padding:
-                              const EdgeInsets.only(left: 10, bottom: 6),
-                          child: Wrap(
-                            spacing: 4,
-                            children: [
-                              TextButton(
-                                onPressed: () => _showPermissionsSheet(child),
-                                child: const Text('Permissions'),
-                              ),
-                              TextButton(
-                                onPressed: () => _showHomeworkSheet(child),
-                                child: const Text('Homework'),
-                              ),
-                              TextButton(
-                                onPressed: () => _showScreenLimitDialog(child),
-                                child: const Text('Screen limit'),
-                              ),
-                            ],
+                          Padding(
+                            padding: const EdgeInsets.only(left: 18, bottom: 4),
+                            child: Text(
+                                '${_lastSeenText(child)}${_screenTimeText(child)}',
+                                style: tt.labelSmall
+                                    ?.copyWith(color: cs.onSurfaceVariant)),
                           ),
-                        ),
-                      ],
+                          Padding(
+                            padding:
+                                const EdgeInsets.only(left: 10, bottom: 6),
+                            child: Wrap(
+                              spacing: 4,
+                              children: [
+                                TextButton(
+                                  onPressed: () => _showPermissionsSheet(child),
+                                  child: const Text('Permissions'),
+                                ),
+                                TextButton(
+                                  onPressed: () => _showHomeworkSheet(child),
+                                  child: const Text('Homework'),
+                                ),
+                                TextButton(
+                                  onPressed: () => _showScreenLimitDialog(child),
+                                  child: const Text('Screen limit'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   );
                 },

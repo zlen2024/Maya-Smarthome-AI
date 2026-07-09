@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/api_service.dart';
+import '../widgets/glass.dart';
 import 'provision_screen.dart';
 
 /// Device management tab — view device details and register new devices.
@@ -103,24 +104,21 @@ class _DeviceManagementTabState extends State<DeviceManagementTab>
               label: const Text('Buy Devices'),
             ),
           ] else
-            Card(
-              color: cs.surfaceContainerLow,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Row(
-                  children: [
-                    Icon(Icons.lock_outline_rounded,
-                        size: 20, color: cs.onSurfaceVariant),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Only the house owner (or members they authorize) can add or remove devices.',
-                        style: tt.bodySmall
-                            ?.copyWith(color: cs.onSurfaceVariant),
-                      ),
+            GlassSurface(
+              padding: const EdgeInsets.all(14),
+              child: Row(
+                children: [
+                  Icon(Icons.lock_outline_rounded,
+                      size: 20, color: cs.onSurfaceVariant),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Only the house owner (or members they authorize) can add or remove devices.',
+                      style: tt.bodySmall
+                          ?.copyWith(color: cs.onSurfaceVariant),
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
           const SizedBox(height: 20),
@@ -131,28 +129,25 @@ class _DeviceManagementTabState extends State<DeviceManagementTab>
           const SizedBox(height: 8),
 
           if (_devices.isEmpty)
-            Card(
-              color: cs.surfaceContainerLow,
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Column(
-                  children: [
-                    Icon(Icons.devices_other_rounded,
-                        size: 48,
-                        color: cs.onSurfaceVariant.withOpacity(0.3)),
-                    const SizedBox(height: 12),
-                    Text('No devices registered yet',
-                        style: tt.bodyMedium
-                            ?.copyWith(color: cs.onSurfaceVariant)),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Register a new Maya Smart Home device via BLE.',
-                      style: tt.bodySmall
-                          ?.copyWith(color: cs.onSurfaceVariant),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
+            GlassSurface(
+              padding: const EdgeInsets.all(32),
+              child: Column(
+                children: [
+                  Icon(Icons.devices_other_rounded,
+                      size: 48,
+                      color: cs.onSurfaceVariant.withOpacity(0.3)),
+                  const SizedBox(height: 12),
+                  Text('No devices registered yet',
+                      style: tt.bodyMedium
+                          ?.copyWith(color: cs.onSurfaceVariant)),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Register a new Maya Smart Home device via BLE.',
+                    style: tt.bodySmall
+                        ?.copyWith(color: cs.onSurfaceVariant),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ),
             )
           else
@@ -169,10 +164,9 @@ class _DeviceManagementTabState extends State<DeviceManagementTab>
     final ch2 = device['ch2'] ?? 'off';
     final ch3 = device['ch3'] ?? 'off';
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      color: cs.surfaceContainerLow,
-      child: Padding(
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: GlassSurface(
         padding: const EdgeInsets.all(18),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

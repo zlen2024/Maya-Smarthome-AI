@@ -4,7 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../services/api_service.dart';
-import 'devices_tab.dart';
+import '../theme/accents.dart';
+import 'home_tab.dart';
 import 'children_tab.dart';
 import 'chat_tab.dart';
 import 'device_management_tab.dart';
@@ -27,13 +28,22 @@ class _ParentShellState extends State<ParentShell> {
   StreamSubscription<void>? _mentionSub;
   static const int _chatTabIndex = 2;
 
-  // Keep tab pages alive across switches
-  final List<Widget> _tabs = const [
-    DevicesTab(),
-    ChildrenTab(),
-    ChatTab(),
-    DeviceManagementTab(),
-    SettingsTab(),
+  // Keep tab pages alive across switches. Home replaces the old Devices tab as
+  // the primary control surface; Chat stays at index 2.
+  late final List<Widget> _tabs = [
+    HomeTab(
+      onAskMaya: () {
+        setState(() => _tabIndex = _chatTabIndex);
+        _markChatSeen();
+      },
+      onHouseSelected: _onHouseSelected,
+      onCreateHouse: _showCreateHouseDialog,
+      onJoinHouse: _showJoinHouseDialog,
+    ),
+    const ChildrenTab(),
+    const ChatTab(),
+    const DeviceManagementTab(),
+    const SettingsTab(),
   ];
 
   @override
@@ -435,6 +445,27 @@ class _ParentShellState extends State<ParentShell> {
     );
   }
 
+  String _getTabSubtitle() {
+    switch (_tabIndex) {
+      case 0:
+        final hour = DateTime.now().hour;
+        if (hour < 12) return 'Good morning';
+        if (hour < 17) return 'Good afternoon';
+        if (hour < 22) return 'Good evening';
+        return 'Good night';
+      case 1:
+        return 'Family Management';
+      case 2:
+        return 'House Messages';
+      case 3:
+        return 'Device Center';
+      case 4:
+        return 'Preferences';
+      default:
+        return 'Maya Smart Home';
+    }
+  }
+
   // ── Build ──────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
@@ -442,7 +473,31 @@ class _ParentShellState extends State<ParentShell> {
 
     return Scaffold(
       appBar: AppBar(
-        title: _buildHouseDropdown(cs),
+        titleSpacing: 20,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              _getTabSubtitle(),
+              style: TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w500,
+                color: Colors.white.withOpacity(0.55),
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              ApiService.activeHouse?['location'] ?? 'My Home',
+              style: const TextStyle(
+                fontSize: 21,
+                fontWeight: FontWeight.w800,
+                color: Colors.white,
+                letterSpacing: -0.3,
+              ),
+            ),
+          ],
+        ),
         centerTitle: false,
         actions: [
           // Clear chat — house master only, while viewing the Chat tab
@@ -454,36 +509,195 @@ class _ParentShellState extends State<ParentShell> {
               onPressed: _confirmClearChat,
             ),
           // WebSocket status dot
-          Padding(
-            padding: const EdgeInsets.only(right: 16),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 9,
-                  height: 9,
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: _wsConnected ? Colors.green : cs.error,
+                  boxShadow: [
+                    BoxShadow(
+                      color: (_wsConnected ? Colors.green : cs.error)
+                          .withOpacity(0.5),
+                      blurRadius: 4,
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 5),
+              Text(
+                _wsConnected ? 'Live' : 'Offline',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: cs.onSurfaceVariant,
+                      fontSize: 10.5,
+                    ),
+              ),
+            ],
+          ),
+          const SizedBox(width: 12),
+          // Avatar dropdown with house switching & theme picker
+          ListenableBuilder(
+            listenable: ThemeController.instance,
+            builder: (context, _) {
+              final accent = ThemeController.instance.accent;
+              final name = ApiService.userName.isEmpty ? 'there' : ApiService.userName;
+              final initials = name.trim().isEmpty
+                  ? 'ME'
+                  : name.trim().split(' ').map((w) => w[0]).take(2).join().toUpperCase();
+
+              return PopupMenuButton<dynamic>(
+                offset: const Offset(0, 50),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                color: const Color(0xFF1A1F35),
+                child: Container(
+                  width: 36,
+                  height: 36,
+                  alignment: Alignment.center,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: _wsConnected ? Colors.green : cs.error,
+                    gradient: LinearGradient(
+                      colors: [accent.accent, accent.orbs.first],
+                    ),
                     boxShadow: [
                       BoxShadow(
-                        color: (_wsConnected ? Colors.green : cs.error)
-                            .withOpacity(0.5),
-                        blurRadius: 6,
+                        color: accent.accent.withOpacity(0.3),
+                        blurRadius: 8,
+                        spreadRadius: -1,
                       ),
                     ],
                   ),
+                  child: Text(
+                    initials,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      color: accent.onAccent,
+                      fontSize: 11,
+                    ),
+                  ),
                 ),
-                const SizedBox(width: 6),
-                Text(
-                  _wsConnected ? 'Live' : 'Offline',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: cs.onSurfaceVariant,
+                itemBuilder: (ctx) => [
+                  // Houses section
+                  const PopupMenuItem(
+                    enabled: false,
+                    height: 32,
+                    child: Text('HOUSES',
+                        style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.5,
+                            color: Colors.white38)),
+                  ),
+                  ...ApiService.houses.map((h) {
+                    final isActive = h['house_id'] == ApiService.houseId;
+                    return PopupMenuItem<int>(
+                      value: h['house_id'] as int,
+                      child: Row(
+                        children: [
+                          Icon(
+                            isActive ? Icons.home_rounded : Icons.home_outlined,
+                            size: 18,
+                            color: isActive ? accent.accent : Colors.white54,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              h['location'] ?? 'House ${h['house_id']}',
+                              style: TextStyle(
+                                color: isActive ? accent.accent : Colors.white,
+                                fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                          if (isActive)
+                            Icon(Icons.check_rounded, size: 16, color: accent.accent),
+                        ],
                       ),
-                ),
-              ],
-            ),
+                    );
+                  }),
+                  PopupMenuItem<String>(
+                    value: 'create',
+                    child: Row(
+                      children: [
+                        Icon(Icons.add_rounded, size: 18, color: Colors.white.withOpacity(0.6)),
+                        const SizedBox(width: 10),
+                        Text('Create House', style: TextStyle(color: Colors.white.withOpacity(0.7))),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem<String>(
+                    value: 'join',
+                    child: Row(
+                      children: [
+                        Icon(Icons.group_add_outlined, size: 18, color: Colors.white.withOpacity(0.6)),
+                        const SizedBox(width: 10),
+                        Text('Join House', style: TextStyle(color: Colors.white.withOpacity(0.7))),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuDivider(),
+                  // Theme section
+                  const PopupMenuItem(
+                    enabled: false,
+                    height: 32,
+                    child: Text('THEME',
+                        style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.5,
+                            color: Colors.white38)),
+                  ),
+                  ...kAccentPresets.map((p) {
+                    final active = p.id == accent.id;
+                    return PopupMenuItem<AccentPreset>(
+                      value: p,
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 18,
+                            height: 18,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: p.accent,
+                              border: Border.all(
+                                color: active ? Colors.white : Colors.transparent,
+                                width: 2,
+                              ),
+                              boxShadow: active
+                                  ? [BoxShadow(color: p.accent.withOpacity(0.5), blurRadius: 8)]
+                                  : null,
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Text(
+                            p.label,
+                            style: TextStyle(
+                              color: active ? accent.accent : Colors.white,
+                              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                ],
+                onSelected: (value) {
+                  if (value is int) {
+                    _onHouseSelected(value);
+                  } else if (value == 'create') {
+                    _showCreateHouseDialog();
+                  } else if (value == 'join') {
+                    _showJoinHouseDialog();
+                  } else if (value is AccentPreset) {
+                    ThemeController.instance.setAccent(value);
+                  }
+                },
+              );
+            },
           ),
+          const SizedBox(width: 16),
         ],
       ),
       body: IndexedStack(
@@ -499,9 +713,9 @@ class _ParentShellState extends State<ParentShell> {
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
         destinations: [
           const NavigationDestination(
-            icon: Icon(Icons.power_settings_new_outlined),
-            selectedIcon: Icon(Icons.power_settings_new_rounded),
-            label: 'Devices',
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home_rounded),
+            label: 'Home',
           ),
           const NavigationDestination(
             icon: Icon(Icons.people_outline_rounded),
@@ -528,68 +742,6 @@ class _ParentShellState extends State<ParentShell> {
             label: 'Settings',
           ),
         ],
-      ),
-    );
-  }
-  Widget _buildHouseDropdown(ColorScheme cs) {
-    return DropdownButtonHideUnderline(
-      child: DropdownButton<int>(
-        value: ApiService.houseId,
-        isDense: true,
-        style: Theme.of(context).textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w800,
-            ),
-        icon: Icon(Icons.arrow_drop_down_rounded,
-            color: cs.onSurface),
-        items: [
-          // All houses
-          ...ApiService.houses.map((h) => DropdownMenuItem<int>(
-                value: h['house_id'] as int,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.home_rounded,
-                        size: 18,
-                        color: h['is_active'] == true
-                            ? cs.primary
-                            : cs.onSurfaceVariant),
-                    const SizedBox(width: 8),
-                    Text(h['location'] ?? 'House ${h['house_id']}'),
-                  ],
-                ),
-              )),
-          // Divider item
-          const DropdownMenuItem<int>(
-            enabled: false,
-            value: -999,
-            child: Divider(),
-          ),
-          // Create house
-          const DropdownMenuItem<int>(
-            value: -1,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('🏠', style: TextStyle(fontSize: 16)),
-                SizedBox(width: 8),
-                Text('Create House'),
-              ],
-            ),
-          ),
-          // Join house
-          const DropdownMenuItem<int>(
-            value: -2,
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text('➕', style: TextStyle(fontSize: 16)),
-                SizedBox(width: 8),
-                Text('Join House'),
-              ],
-            ),
-          ),
-        ],
-        onChanged: _onHouseSelected,
       ),
     );
   }

@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'services/api_service.dart';
+import 'theme/accents.dart';
+import 'widgets/glass.dart';
 import 'screens/login_screen.dart';
 import 'screens/parent_shell.dart';
 import 'screens/child_shell.dart';
 import 'screens/onboarding_screen.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await ThemeController.instance.load();
   runApp(const MayaSmartHomeApp());
 }
 
@@ -14,76 +18,29 @@ class MayaSmartHomeApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Maya Smart Home',
-      debugShowCheckedModeBanner: false,
-      // System-adaptive theme (follows device dark/light mode)
-      theme: ThemeData(
-        colorSchemeSeed: const Color(0xFF6366F1),
-        useMaterial3: true,
-        brightness: Brightness.light,
-        fontFamily: 'Roboto',
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide.none,
+    // Rebuild the whole app when the user switches accent. Dark-only:
+    // glassmorphism is the fixed brand, the accent is the variable.
+    return ListenableBuilder(
+      listenable: ThemeController.instance,
+      builder: (context, _) {
+        final accent = ThemeController.instance.accent;
+        return MaterialApp(
+          title: 'Maya Smart Home',
+          debugShowCheckedModeBanner: false,
+          theme: buildGlassTheme(accent),
+          darkTheme: buildGlassTheme(accent),
+          themeMode: ThemeMode.dark,
+          // Paint the aurora canvas behind every screen so the frosted glass
+          // surfaces have something to blur over.
+          builder: (context, child) => AuroraBackground(
+            accent: accent,
+            child: child ?? const SizedBox.shrink(),
           ),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        ),
-        cardTheme: CardTheme(
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-        ),
-        filledButtonTheme: FilledButtonThemeData(
-          style: FilledButton.styleFrom(
-            minimumSize: const Size(double.infinity, 52),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
-            textStyle:
-                const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-          ),
-        ),
-      ),
-      darkTheme: ThemeData(
-        colorSchemeSeed: const Color(0xFF6366F1),
-        useMaterial3: true,
-        brightness: Brightness.dark,
-        fontFamily: 'Roboto',
-        inputDecorationTheme: InputDecorationTheme(
-          filled: true,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide.none,
-          ),
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        ),
-        cardTheme: CardTheme(
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-        ),
-        filledButtonTheme: FilledButtonThemeData(
-          style: FilledButton.styleFrom(
-            minimumSize: const Size(double.infinity, 52),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
-            textStyle:
-                const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-          ),
-        ),
-      ),
-      themeMode: ThemeMode.system,
-      // Named route for OnboardingScreen to navigate back to
-      routes: {
-        '/': (_) => const _AuthGate(),
+          // Named route for OnboardingScreen to navigate back to
+          routes: {
+            '/': (_) => const _AuthGate(),
+          },
+        );
       },
     );
   }

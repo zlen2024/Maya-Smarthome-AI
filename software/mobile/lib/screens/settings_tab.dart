@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../services/api_service.dart';
+import '../widgets/glass.dart';
 import 'login_screen.dart';
 
 /// Settings tab — user info, house info, house management, logout, app version.
@@ -26,9 +27,9 @@ class _SettingsTabState extends State<SettingsTab> {
       padding: const EdgeInsets.all(16),
       children: [
         // ── User Profile Card ────────────────────────────────────
-        Card(
-          color: cs.surfaceContainerLow,
-          child: Padding(
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: GlassSurface(
             padding: const EdgeInsets.all(20),
             child: Row(
               children: [
@@ -87,9 +88,9 @@ class _SettingsTabState extends State<SettingsTab> {
         const SizedBox(height: 12),
 
         // ── House Info Card ──────────────────────────────────────
-        Card(
-          color: cs.surfaceContainerLow,
-          child: Padding(
+        Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: GlassSurface(
             padding: const EdgeInsets.all(20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -125,63 +126,68 @@ class _SettingsTabState extends State<SettingsTab> {
         // ── House Management (Parent only) ───────────────────────
         if (isParent) ...[
           // Invite Family Member
-          Card(
-            color: cs.surfaceContainerLow,
-            clipBehavior: Clip.antiAlias,
-            child: ListTile(
-              leading: Icon(Icons.person_add_rounded, color: cs.primary),
-              title: const Text('Invite Family Member'),
-              subtitle: const Text('Share QR code or PIN'),
-              trailing: const Icon(Icons.chevron_right_rounded),
-              onTap: () => _showInviteSheet(context),
+          // Invite Family Member
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: GlassSurface(
+              padding: EdgeInsets.zero,
+              child: ListTile(
+                leading: Icon(Icons.person_add_rounded, color: cs.primary),
+                title: const Text('Invite Family Member'),
+                subtitle: const Text('Share QR code or PIN'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => _showInviteSheet(context),
+              ),
             ),
           ),
-          const SizedBox(height: 8),
 
           // House Members
-          Card(
-            color: cs.surfaceContainerLow,
-            clipBehavior: Clip.antiAlias,
-            child: ListTile(
-              leading: Icon(Icons.group_rounded, color: cs.primary),
-              title: const Text('House Members'),
-              subtitle: const Text('View and manage members'),
-              trailing: const Icon(Icons.chevron_right_rounded),
-              onTap: () => _showMembersSheet(context),
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: GlassSurface(
+              padding: EdgeInsets.zero,
+              child: ListTile(
+                leading: Icon(Icons.group_rounded, color: cs.primary),
+                title: const Text('House Members'),
+                subtitle: const Text('View and manage members'),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => _showMembersSheet(context),
+              ),
             ),
           ),
-          const SizedBox(height: 8),
 
           // API Keys (master only) — third-party Open API access
           if (isMaster) ...[
-            Card(
-              color: cs.surfaceContainerLow,
-              clipBehavior: Clip.antiAlias,
-              child: ListTile(
-                leading: Icon(Icons.vpn_key_rounded, color: cs.primary),
-                title: const Text('API Keys'),
-                subtitle: const Text('Third-party Open API access'),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => _showApiKeysSheet(context),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: GlassSurface(
+                padding: EdgeInsets.zero,
+                child: ListTile(
+                  leading: Icon(Icons.vpn_key_rounded, color: cs.primary),
+                  title: const Text('API Keys'),
+                  subtitle: const Text('Third-party Open API access'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => _showApiKeysSheet(context),
+                ),
               ),
             ),
-            const SizedBox(height: 8),
           ],
 
           // Leave House (non-master only)
           if (!isMaster)
-            Card(
-              color: cs.surfaceContainerLow,
-              clipBehavior: Clip.antiAlias,
-              child: ListTile(
-                leading: Icon(Icons.exit_to_app_rounded, color: cs.error),
-                title: Text('Leave House',
-                    style: TextStyle(color: cs.error)),
-                subtitle: const Text('Remove yourself from this house'),
-                onTap: () => _confirmLeaveHouse(context),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: GlassSurface(
+                padding: EdgeInsets.zero,
+                child: ListTile(
+                  leading: Icon(Icons.exit_to_app_rounded, color: cs.error),
+                  title: Text('Leave House',
+                      style: TextStyle(color: cs.error)),
+                  subtitle: const Text('Remove yourself from this house'),
+                  onTap: () => _confirmLeaveHouse(context),
+                ),
               ),
             ),
-          if (!isMaster) const SizedBox(height: 8),
         ],
 
         const SizedBox(height: 12),
