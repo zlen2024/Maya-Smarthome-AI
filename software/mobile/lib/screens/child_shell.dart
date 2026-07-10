@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../services/api_service.dart';
+import '../services/voice_trigger.dart';
 import 'devices_tab.dart';
 import 'child_tasks_tab.dart';
 import 'chat_tab.dart';
@@ -44,6 +45,7 @@ class _ChildShellState extends State<ChildShell> {
     _startLocationReporting();
     _refreshMentions();
     _mentionSub = ApiService.mentionEvents.listen((_) => _refreshMentions());
+    VoiceTrigger.instance.checkPending(); // opens voice overlay if launched via QS tile
   }
 
   @override
@@ -180,6 +182,11 @@ class _ChildShellState extends State<ChildShell> {
               fontWeight: FontWeight.w800,
             ),
         actions: [
+          IconButton(
+            tooltip: 'Talk to Maya',
+            icon: const Icon(Icons.mic_none_rounded),
+            onPressed: () => VoiceTrigger.instance.open(),
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 16),
             child: Row(

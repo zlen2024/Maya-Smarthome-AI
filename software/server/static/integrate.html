@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Maya — API & Integration</title>
+  <link rel="icon" type="image/png" href="/static/media/favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
@@ -69,7 +70,7 @@
 <body>
   <header>
     <div class="brand">
-      <span class="logo"><svg viewBox="0 0 24 24" fill="white"><path d="M13 2 3 14h7l-1 8 10-12h-7z"/></svg></span>
+      <img class="logo" src="/static/media/maya-logo.png" alt="Maya" style="object-fit:cover;background:#fff;">
       Maya · API & Docs
     </div>
     <a href="/">← Portal</a>
@@ -115,6 +116,21 @@
         </div>
       </div>
     </section>
+
+    <section>
+      <h2>Agent skill (SKILL.md)</h2>
+      <div class="card">
+        <p class="muted" style="margin-top:0">
+          Give this to your AI agent (Claude, etc.) so it can control your Maya home in plain language —
+          it teaches the agent to authenticate, list devices, and switch channels. Copy it, then paste your API key when asked.
+        </p>
+        <div class="row" style="margin-bottom:12px">
+          <button onclick="copySkill()">📋 Copy SKILL.md</button>
+          <a href="/static/maya-open-api-skill.md" download="SKILL.md"><button class="ghost">Download .md ↓</button></a>
+        </div>
+        <pre id="skillPreview" style="max-height:360px;overflow:auto">Loading…</pre>
+      </div>
+    </section>
   </main>
 
   <div id="toast"></div>
@@ -139,8 +155,24 @@
         `curl -X POST -H <span class="tok">"X-API-Key: maya_..."</span> \\\n  -H <span class="tok">"Content-Type: application/json"</span> \\\n  -d <span class="tok">'{"cmd":"on","channel":1}'</span> \\\n  ${API}/api/open/v1/devices/<span class="tok">esp32-abc123</span>/command`;
     }
 
+    let skillText = '';
+    async function loadSkill() {
+      try {
+        skillText = await fetch(API + '/static/maya-open-api-skill.md').then(r => r.text());
+        document.getElementById('skillPreview').textContent = skillText;
+      } catch { document.getElementById('skillPreview').textContent = 'Could not load the skill file.'; }
+    }
+    async function copySkill() {
+      try {
+        if (!skillText) skillText = await fetch(API + '/static/maya-open-api-skill.md').then(r => r.text());
+        await navigator.clipboard.writeText(skillText);
+        toast('SKILL.md copied to clipboard');
+      } catch { toast('Copy failed — use Download instead'); }
+    }
+
     async function boot() {
       renderExamples();
+      loadSkill();
       const card = document.getElementById('keysCard');
       if (!token || isChild) {
         card.innerHTML = '<p class="muted">Please <a href="/" style="color:var(--primary);font-weight:700">log in to the portal</a> as a house master to manage API keys.</p>';

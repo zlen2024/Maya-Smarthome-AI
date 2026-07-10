@@ -153,15 +153,11 @@ class _LoginScreenState extends State<LoginScreen>
               children: [
                 // ── Logo ─────────────────────────────────────────
                 Container(
-                  width: 72,
-                  height: 72,
+                  width: 96,
+                  height: 96,
                   decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [cs.primary, cs.tertiary],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: BorderRadius.circular(20),
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(24),
                     boxShadow: [
                       BoxShadow(
                         color: cs.primary.withOpacity(0.35),
@@ -170,8 +166,9 @@ class _LoginScreenState extends State<LoginScreen>
                       ),
                     ],
                   ),
-                  child: const Icon(Icons.bolt_rounded,
-                      size: 40, color: Colors.white),
+                  clipBehavior: Clip.antiAlias,
+                  child: Image.asset('assets/brand/maya_logo.png',
+                      fit: BoxFit.cover),
                 ),
                 const SizedBox(height: 20),
                 Text('Maya Smart Home',

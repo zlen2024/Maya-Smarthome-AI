@@ -3,7 +3,7 @@ import json
 import random
 import string
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status as http_status
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -92,6 +92,12 @@ def run_migrations():
             if col not in child_cols:
                 db.execute(text(ddl))
                 db.commit()
+
+        # Add limit_notified to screen_time if missing
+        st_cols = [c['name'] for c in inspector.get_columns('screen_time')]
+        if 'limit_notified' not in st_cols:
+            db.execute(text("ALTER TABLE screen_time ADD COLUMN limit_notified BOOLEAN DEFAULT 0"))
+            db.commit()
 
         # Generate PINs for houses missing one
         houses = db.query(House).filter(House.join_pin.is_(None)).all()
@@ -919,8 +925,18 @@ async def report_screen_time(payload: dict, db: Session = Depends(get_db),
         row.total_min = total_min
         row.updated_at = datetime.now(timezone.utc)
     else:
-        db.add(ScreenTime(child_id=child.child_id, date=date, total_min=total_min))
+        row = ScreenTime(child_id=child.child_id, date=date, total_min=total_min)
+        db.add(row)
     db.commit()
+
+    # Automation: fire the daily screen-limit alert once, the first time the
+    # child crosses their limit for the day. limit_notified dedups across the
+    # many reports a device sends per day; a new day = new row = flag resets.
+    limit = child.daily_screen_limit_min
+    if limit is not None and total_min >= limit and not row.limit_notified:
+        row.limit_notified = True
+        db.commit()
+        await _notify_screen_limit(db, child, total_min, limit)
     return {"status": "ok"}
 
 
@@ -1377,6 +1393,14 @@ MAYA_TRIGGER = "@maya"
 MAYA_SENDER_ID = 0      # sentinel sender_id for AI-authored chat rows
 MAYA_MAX_STEPS = 5      # cap tool-call rounds so a loop can't run forever
 
+# In-RAM voice session memory: (house_id, auth_type, sender_id) -> {"turns":[...], "ts":datetime}.
+# Gives voice commands short multi-turn context WITHOUT writing to the house chat.
+# Single Fly instance, so a plain dict is enough; cleared on idle (no Redis).
+# ponytail: process-local dict, swap for Redis only if we ever run >1 instance.
+_voice_sessions: dict = {}
+_VOICE_SESSION_TTL = timedelta(minutes=5)   # idle timeout = "session end"
+_VOICE_MEM_TURNS = 8                          # user+assistant turns kept per session
+
 
 def _maya_context(db: Session, house_id: int, sender_role: str, child_id: int | None) -> str:
     """House state injected into the system prompt: devices (with channel names)
@@ -1543,32 +1567,38 @@ async def _execute_maya_tool(db: Session, house_id: int, sender_role: str, sende
         return f"Error running {name}."
 
 
+async def run_maya_agent(db: Session, house_id: int, sender_role: str, sender_id: int,
+                         sender_name: str, child_id: int | None, messages: list) -> str:
+    """Run the tool-calling loop over a prepared `messages` list and return Maya's
+    reply text. Shared by the chat path (which posts the reply to chat) and the
+    voice path (which returns it privately). Tool side effects still happen."""
+    reply = None
+    for _ in range(MAYA_MAX_STEPS):
+        # ollama Client is synchronous network IO — keep it off the event loop.
+        msg = await asyncio.to_thread(ai.call_model, messages)
+        if getattr(msg, "tool_calls", None):
+            messages.append(msg)
+            for tc in msg.tool_calls:
+                call = ai.tool_call_dict(tc)
+                result = await _execute_maya_tool(
+                    db, house_id, sender_role, sender_id, sender_name, child_id,
+                    call["name"], call["arguments"])
+                messages.append({"role": "tool", "content": result, "tool_name": call["name"]})
+            continue
+        reply = (msg.content or "").strip()
+        break
+    return reply or "Sorry, I couldn't finish that."
+
+
 async def _run_maya(house_id: int, sender_role: str, sender_id: int, sender_name: str, message: str):
-    """Background task: run the tool-calling agent loop, then post Maya's reply to
-    the house chat. Owns its own DB session; never raises into the WS loop."""
+    """Background task: run the agent, then post Maya's reply to the house chat.
+    Owns its own DB session; never raises into the WS loop."""
     db = SessionLocal()
     child_id = sender_id if sender_role == "child" else None
     try:
         context = _maya_context(db, house_id, sender_role, child_id)
         messages = _maya_messages(db, house_id, context)
-
-        reply = None
-        for _ in range(MAYA_MAX_STEPS):
-            # ollama Client is synchronous network IO — keep it off the event loop.
-            msg = await asyncio.to_thread(ai.call_model, messages)
-            if getattr(msg, "tool_calls", None):
-                messages.append(msg)
-                for tc in msg.tool_calls:
-                    call = ai.tool_call_dict(tc)
-                    result = await _execute_maya_tool(
-                        db, house_id, sender_role, sender_id, sender_name, child_id,
-                        call["name"], call["arguments"])
-                    messages.append({"role": "tool", "content": result, "tool_name": call["name"]})
-                continue
-            reply = (msg.content or "").strip()
-            break
-        if not reply:
-            reply = "Sorry, I couldn't finish that."
+        reply = await run_maya_agent(db, house_id, sender_role, sender_id, sender_name, child_id, messages)
         await _maya_say(db, house_id, reply)
     except HTTPException as e:
         await _maya_say(db, house_id, f"Sorry, I can't respond right now ({e.detail}).")
@@ -1595,6 +1625,89 @@ async def _maya_say(db: Session, house_id: int, text: str):
         })
     except Exception as e:
         print(f"Maya failed to post message: {e}")
+
+
+async def _notify_screen_limit(db: Session, child, used: int, limit: int):
+    """Automation alert: a child hit their daily screen-time limit. Posts a Maya
+    chat message, @-mentions every parent AND the child, logs it, and broadcasts.
+    Best-effort — never let a failed alert break the report request."""
+    house_id = child.house_id
+    text = f"⏰ {child.name} has reached the daily screen-time limit ({used}/{limit} min today)."
+    try:
+        db.rollback()  # start clean; the screen_time write is already committed
+        msg = MsgHistory(house_id=house_id, sender_id=MAYA_SENDER_ID,
+                         sender_type="ai", sender_name="Maya", message=text)
+        db.add(msg)
+        db.flush()  # need msg.msg_id for the mentions
+        for p in _house_mentionables(db, house_id):
+            if p["type"] == "parent" or (p["type"] == "child" and p["id"] == child.child_id):
+                db.add(Mention(msg_id=msg.msg_id, house_id=house_id,
+                               target_type=p["type"], target_id=p["id"], seen=False))
+        log_activity(db, house_id, "system", None, "Maya",
+                     "screen_limit_reached",
+                     f"{child.name} reached the daily screen-time limit ({used}/{limit} min)")
+        db.commit()
+        await manager.broadcast_to_house(house_id, {
+            "type": "chat_message", "msg_id": msg.msg_id,
+            "sender_id": MAYA_SENDER_ID, "sender_type": "ai", "sender_name": "Maya",
+            "message": text,
+            "timestamp": msg.timestamp.isoformat() if msg.timestamp else None,
+        })
+    except Exception as e:
+        db.rollback()
+        print(f"screen-limit alert failed: {e}")
+
+
+def _voice_session(key: tuple) -> dict:
+    """Fetch (and refresh) a caller's voice session, pruning idle ones."""
+    now = datetime.now(timezone.utc)
+    for k in [k for k, s in _voice_sessions.items() if now - s["ts"] > _VOICE_SESSION_TTL]:
+        del _voice_sessions[k]
+    sess = _voice_sessions.get(key)
+    if sess is None:
+        sess = {"turns": [], "ts": now}
+        _voice_sessions[key] = sess
+    sess["ts"] = now
+    return sess
+
+
+@app.post("/api/maya/voice")
+async def maya_voice(payload: dict, db: Session = Depends(get_db),
+                     current_auth: dict = Depends(get_current_user_or_child)):
+    """Private voice command: transcript in, Maya's reply text out. Runs the full
+    tool-calling agent as the caller (same permissions as chat), keeps short
+    in-RAM multi-turn memory, and does NOT write to the house chat."""
+    transcript = str(payload.get("transcript", "")).strip()
+    if not transcript:
+        raise HTTPException(status_code=400, detail="transcript required")
+
+    if current_auth["type"] == "child":
+        child = current_auth["child"]
+        house_id, sender_role, sender_id, sender_name, child_id = (
+            child.house_id, "child", child.child_id, child.name, child.child_id)
+    else:
+        user = current_auth["user"]
+        if user.house_id is None:
+            raise HTTPException(status_code=400, detail="No active house")
+        house_id, sender_role, sender_id, sender_name, child_id = (
+            user.house_id, "parent", user.acc_id, user.name, None)
+
+    key = (house_id, current_auth["type"], sender_id)
+    sess = _voice_session(key)
+
+    context = _maya_context(db, house_id, sender_role, child_id)
+    messages = [{"role": "system", "content": ai.SYSTEM_PROMPT + "\n\n" + context}]
+    messages += sess["turns"][-_VOICE_MEM_TURNS:]
+    user_turn = {"role": "user", "content": f"{sender_name}: {transcript}"}
+    messages.append(user_turn)
+
+    reply = await run_maya_agent(db, house_id, sender_role, sender_id, sender_name, child_id, messages)
+
+    # Remember only the plain user/assistant turns (not tool rows) for context.
+    sess["turns"].append(user_turn)
+    sess["turns"].append({"role": "assistant", "content": reply})
+    sess["turns"] = sess["turns"][-2 * _VOICE_MEM_TURNS:]
+    return {"reply": reply}
 
 
 # ─── Store (mock marketplace) ─────────────────────────────────

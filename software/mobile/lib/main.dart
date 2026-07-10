@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'services/api_service.dart';
+import 'services/voice_service.dart';
+import 'services/voice_trigger.dart';
 import 'theme/accents.dart';
 import 'widgets/glass.dart';
 import 'screens/login_screen.dart';
@@ -9,6 +11,8 @@ import 'screens/onboarding_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  VoiceTrigger.instance.init(); // listen for Quick Settings tile launches
+  await VoiceService.loadSettings(); // restore voice language + Groq settings
   await ThemeController.instance.load();
   runApp(const MayaSmartHomeApp());
 }
@@ -26,6 +30,7 @@ class MayaSmartHomeApp extends StatelessWidget {
         final accent = ThemeController.instance.accent;
         return MaterialApp(
           title: 'Maya Smart Home',
+          navigatorKey: VoiceTrigger.navigatorKey,
           debugShowCheckedModeBanner: false,
           theme: buildGlassTheme(accent),
           darkTheme: buildGlassTheme(accent),
@@ -135,10 +140,10 @@ class _AuthGateState extends State<_AuthGate> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.bolt_rounded,
-                size: 64,
-                color: Theme.of(context).colorScheme.primary,
+              ClipRRect(
+                borderRadius: BorderRadius.circular(20),
+                child: Image.asset('assets/brand/maya_logo.png',
+                    width: 84, height: 84, fit: BoxFit.cover),
               ),
               const SizedBox(height: 16),
               const CircularProgressIndicator(),

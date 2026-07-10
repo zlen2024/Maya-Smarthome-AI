@@ -179,6 +179,7 @@ class ScreenTime(Base):
     child_id = Column(Integer, ForeignKey("children.child_id"), nullable=False, index=True)
     date = Column(String(10), nullable=False)  # "YYYY-MM-DD" in the child device's timezone
     total_min = Column(Integer, default=0)
+    limit_notified = Column(Boolean, default=False)  # fired the daily-limit alert for this row already
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 

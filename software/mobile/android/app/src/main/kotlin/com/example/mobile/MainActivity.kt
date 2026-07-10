@@ -13,6 +13,10 @@ import java.util.Calendar
 
 class MainActivity : FlutterActivity() {
     private val channelName = "maya/usage"
+    private val voiceChannel = "maya/voice"
+    // Set when the app is launched/resumed via the Quick Settings tile; Flutter
+    // pulls (and clears) it on resume and opens the voice overlay.
+    private var pendingVoiceLaunch = false
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -28,6 +32,24 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, voiceChannel)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "consumeVoiceLaunch" -> {
+                        val v = pendingVoiceLaunch
+                        pendingVoiceLaunch = false
+                        result.success(v)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        if (intent?.getBooleanExtra("maya_voice", false) == true) pendingVoiceLaunch = true
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra("maya_voice", false)) pendingVoiceLaunch = true
     }
 
     private fun hasUsagePermission(): Boolean {

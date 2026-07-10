@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../services/api_service.dart';
+import '../services/voice_service.dart';
 import '../widgets/glass.dart';
 import 'login_screen.dart';
 
@@ -16,6 +17,15 @@ class SettingsTab extends StatefulWidget {
 }
 
 class _SettingsTabState extends State<SettingsTab> {
+  late final TextEditingController _groqKeyCtrl =
+      TextEditingController(text: VoiceService.groqKey);
+
+  @override
+  void dispose() {
+    _groqKeyCtrl.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -192,6 +202,10 @@ class _SettingsTabState extends State<SettingsTab> {
 
         const SizedBox(height: 12),
 
+        // ── Voice Assistant (STT engine) ─────────────────────────
+        _voiceSection(cs, tt),
+        const SizedBox(height: 12),
+
         // ── Logout Button ────────────────────────────────────────
         FilledButton.icon(
           onPressed: () => _confirmLogout(context),
@@ -212,6 +226,78 @@ class _SettingsTabState extends State<SettingsTab> {
           ),
         ),
       ],
+    );
+  }
+
+  // ── Voice Assistant section ────────────────────────────────────
+  Widget _voiceSection(ColorScheme cs, TextTheme tt) {
+    return GlassSurface(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.graphic_eq_rounded, color: cs.primary, size: 22),
+              const SizedBox(width: 10),
+              Text('Voice Assistant',
+                  style: tt.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+            ],
+          ),
+          const SizedBox(height: 4),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: VoiceService.groqEnabled,
+            title: const Text('Cloud speech (Groq)'),
+            subtitle: Text(
+              VoiceService.groqEnabled
+                  ? 'Uses Groq whisper-large-v3 — more accurate, needs internet'
+                  : 'Off — uses the phone\'s built-in recognizer (offline)',
+              style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+            ),
+            onChanged: (v) async {
+              await VoiceService.setGroq(enabled: v);
+              if (mounted) setState(() {});
+            },
+          ),
+          if (VoiceService.groqEnabled) ...[
+            const SizedBox(height: 8),
+            TextField(
+              controller: _groqKeyCtrl,
+              obscureText: true,
+              autocorrect: false,
+              enableSuggestions: false,
+              decoration: InputDecoration(
+                labelText: 'Groq API key',
+                hintText: 'gsk_…',
+                prefixIcon: const Icon(Icons.vpn_key_rounded),
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.save_rounded),
+                  tooltip: 'Save key',
+                  onPressed: () async {
+                    await VoiceService.setGroq(key: _groqKeyCtrl.text);
+                    if (mounted) {
+                      FocusScope.of(context).unfocus();
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                        content: Text('Groq key saved'),
+                        behavior: SnackBarBehavior.floating,
+                      ));
+                    }
+                  },
+                ),
+              ),
+              onSubmitted: (v) => VoiceService.setGroq(key: v),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Bring your own key from console.groq.com/keys. Stored only on this '
+              'device; audio is sent to Groq for transcription.',
+              style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+            ),
+          ],
+        ],
+      ),
     );
   }
 

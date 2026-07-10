@@ -438,6 +438,18 @@ class ApiService {
     return jsonDecode(res.body);
   }
 
+  // ── Voice command (private path to Maya) ────────────────────────
+  /// Send a transcribed voice command to Maya. Returns her reply text.
+  /// Does NOT post to the house chat (unlike an @maya chat message).
+  static Future<String> sendVoiceCommand(String transcript) async {
+    final res = await post('/api/maya/voice', {'transcript': transcript});
+    final data = jsonDecode(res.body);
+    if (res.statusCode != 200) {
+      throw Exception(data['detail'] ?? 'Voice command failed');
+    }
+    return (data['reply'] ?? '') as String;
+  }
+
   // ── Store (mock marketplace) ────────────────────────────────────
   static Future<List<dynamic>> getStoreCatalog() async {
     final res = await get('/api/store/catalog');

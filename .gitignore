@@ -1,4 +1,3 @@
-software/mobile/
 __pycache__/
 *.pyc
 iot_data.db

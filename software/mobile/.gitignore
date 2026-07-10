@@ -44,3 +44,5 @@ app.*.map.json
 # so it's not strictly necessary to include it here, but it's
 # a good idea to keep it in case it's not automatically added.
 *.apk
+
+# On-device whisper model (bundled at build; too big for git)

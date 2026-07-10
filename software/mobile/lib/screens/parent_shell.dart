@@ -5,6 +5,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../services/api_service.dart';
 import '../theme/accents.dart';
+import '../services/voice_trigger.dart';
 import 'home_tab.dart';
 import 'children_tab.dart';
 import 'chat_tab.dart';
@@ -52,6 +53,7 @@ class _ParentShellState extends State<ParentShell> {
     _connectWebSocket();
     _refreshMentions();
     _mentionSub = ApiService.mentionEvents.listen((_) => _refreshMentions());
+    VoiceTrigger.instance.checkPending(); // opens voice overlay if launched via QS tile
   }
 
   @override
@@ -500,6 +502,11 @@ class _ParentShellState extends State<ParentShell> {
         ),
         centerTitle: false,
         actions: [
+          IconButton(
+            tooltip: 'Talk to Maya',
+            icon: const Icon(Icons.mic_none_rounded),
+            onPressed: () => VoiceTrigger.instance.open(),
+          ),
           // Clear chat — house master only, while viewing the Chat tab
           if (_tabIndex == _chatTabIndex &&
               ApiService.activeHouse?['is_master'] == true)

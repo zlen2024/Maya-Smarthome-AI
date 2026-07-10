@@ -18,11 +18,32 @@ dependencies:
   geolocator: ^13.0.1
   qr_flutter: ^4.1.0
   mobile_scanner: ^5.0.0
+  # Voice command (talk to Maya)
+  speech_to_text: ^6.6.2         # device STT (default, offline, live partials)
+  record: ^5.2.1                 # capture a WAV clip for the optional Groq engine
+  path_provider: ^2.1.4          # temp dir for the recorded clip
+  flutter_tts: ^3.8.5            # on-device TTS
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^3.0.0
+  flutter_launcher_icons: ^0.13.1
+
+# Maya app icon (run: dart run flutter_launcher_icons)
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/brand/maya_logo.png"
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/brand/ic_fg.png"
+
+# record 5.2.1 pulls an old record_linux that doesn't implement the interface's
+# startStream (unused on Android). Pin the interface pre-startStream so it compiles.
+dependency_overrides:
+  record_platform_interface: 1.2.0
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/brand/
