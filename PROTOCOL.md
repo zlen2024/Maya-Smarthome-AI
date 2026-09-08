@@ -463,33 +463,144 @@ The app SHOULD render a device whose capabilities are all `access:"r"` as a
 readout card rather than a control card, and MUST NOT show it as broken merely
 for having nothing to press.
 
-### 5.8 Open: battery-powered devices that sleep
+### 5.8 Battery-powered devices that sleep
 
-**This is not yet decided and firmware should not rely on it.**
+Both examples above are only realistic battery-powered — a salt jar is not near a
+socket, and a field probe certainly is not. Such a device deep-sleeps and wakes
+briefly to report, which breaks an assumption v2 inherits from v1: **that a
+device holds a WebSocket open, and that an open socket is what "online" means.**
+A probe reporting every 30 minutes would sit permanently `offline` under today's
+`Device.status`.
 
-Both examples above are realistic only if battery-powered — a salt jar is not
-near a socket, and a field probe certainly is not. Such a device deep-sleeps and
-wakes briefly to report, which breaks an assumption the current protocol inherits
-from v1: **that a device holds a WebSocket open, and that an open socket is what
-"online" means.** A probe reporting every 30 minutes would sit permanently
-`offline` under today's `Device.status`, and today's identify handshake (connect,
-identify, verify PIN) is expensive to repeat on a battery budget.
+#### Why sleeping is not optional
 
-Three candidate answers, none chosen:
+Measured against a plausible salt jar — ESP32 plus a load cell and HX711 on
+3xAA (about 1760 mAh usable through a buck converter):
 
-1. **Connect, report, disconnect** — keep the WebSocket, treat a brief session as
-   normal, and derive liveness from `report_every` instead of socket state.
-   Smallest change; still pays the full handshake on every wake.
-2. **An HTTP report endpoint** — `POST /api/devices/{id}/report` with the same
-   state shape. One request, no handshake, far cheaper on battery. Costs a second
-   ingest path that must enforce the same PIN and house checks as the WS one.
-3. **Report through a mains-powered peer** over the local link (§7), so the
-   sleeper never touches the internet at all. Cheapest for the device, but the
-   peering grant becomes a hard dependency for basic reporting.
+| Mode | Average draw | Life |
+|---|---|---|
+| WiFi held open, no sleep | ~110-135 mA | **~15 hours** |
+| Deep sleep, report every 15 min | ~0.7 mA equiv. | ~3.5 months |
+| Deep sleep, report every 30 min | ~0.4 mA equiv. | ~6 months |
+| Deep sleep, report hourly | ~0.2 mA equiv. | **~1 year** |
 
-Whichever is chosen, `status` must stop meaning "socket is open" and start
-meaning "reported within its expected interval". That change affects
-`ConnectionManager`, the device list, and Maya's house context.
+A wake cycle — boot, join WiFi, report, sleep — is roughly 3-5 s at ~120 mA, so
+about **0.17 mAh per wake**. The ESP32's radio dominates everything else; the
+load cell is noise by comparison.
+
+So a sensor-only device on batteries **cannot** hold a socket open. This is not a
+preference, it is a factor of roughly 200.
+
+Two hardware traps will silently destroy these numbers, and firmware authors MUST
+be warned about both:
+
+- **A DevKit board draws 5-20 mA even in deep sleep** — the onboard USB-serial
+  chip and LDO never sleep. That alone is ~480 mAh/day: flat in four days. Use a
+  bare module or a board designed for low power.
+- **A load cell bridge draws continuously while powered** (~9 mA for a 350 ohm
+  bridge, ~240 mAh/day). Power it down between reads via the HX711's power-down
+  pin or a MOSFET, or the ESP32's sleeping makes no difference.
+
+#### Three device classes
+
+Whether a device may sleep follows from what it declares, so no new field is
+needed to decide it:
+
+| Class | Test | Connection | Command latency |
+|---|---|---|---|
+| **Always-on** | has a writable capability that must respond promptly | holds the WebSocket | ~100 ms |
+| **Sleepy** | writable, but latency-tolerant, on batteries | wakes on `report_every` | up to one interval |
+| **Sensor-only** | every capability is `access:"r"` | wakes, reports, sleeps | n/a — the server never needs to reach it |
+
+**A sensor-only device is the easy case and should be preferred**: because the
+server never has to reach it, it has no reachability problem at all. The salt jar
+and the field probe are both this class.
+
+#### Check-in: the device pulls, the server never pushes
+
+A sleeping device cannot be reached at all — see "Why the server can never simply
+reach out" at the end of this section — so **anything the server wants to tell it
+rides on the response to the device's own check-in.** A single HTTP request per
+wake gets both directions:
+
+```
+POST /api/devices/{id}/report
+  {"pin":"2201", "state":{"weight":180,"_batt":74}, "boot_id":"b-3f1", "seq":412}
+
+200 OK
+  {"ack":true, "report_every":1800, "pending":[{"type":"set","values":{"led":"on"}}]}
+```
+
+- `pending` is a queue the server has been holding since the last check-in.
+  It MAY be empty, and usually is.
+- `report_every` in the response is the **desired** interval. The device adopts it
+  and uses it from the next sleep onward.
+- HTTP is RECOMMENDED over a WebSocket session for this class: one request, no
+  handshake, and the response is the downstream channel. A brief WS session is
+  permitted and behaves identically, but pays the identify handshake on every
+  wake for no benefit.
+- The endpoint MUST enforce the same PIN and house checks as the WebSocket
+  identify path. It is a second ingest route, not a second trust model.
+
+**Config changes therefore take effect at the next check-in, not immediately.**
+Moving a jar from hourly to 15-minutely applies within the hour. This is the same
+bounded-latency property as commands, and the app should say so rather than
+implying the change is instant.
+
+#### Letting the user choose the interval
+
+The reporting interval is a genuine user preference — battery life traded against
+freshness — so it is exposed as a normal capability rather than a special case:
+
+```json
+{"key":"_report_every", "kind":"duration", "label":"Check in every",
+ "min":900, "max":86400, "access":"rw"}
+```
+
+Declaring `_report_every` (a reserved key, §5.3) means "this interval is
+adjustable". It renders with the existing duration picker, travels the existing
+`set` path, and is delivered on the next check-in like any other queued command —
+no new machinery anywhere.
+
+- **The device sets `min` and `max`, and the server MUST clamp to them.** The
+  firmware knows its own power budget; a user who could choose 10 seconds would
+  flatten the battery in a day without understanding why.
+- A device with a fixed interval simply does not declare the capability. The
+  top-level `report_every` field still tells the server what to expect.
+- The top-level `report_every` remains authoritative for liveness. A device that
+  accepts a new interval MUST report the new value in its next descriptor, so the
+  server is never judging silence against a stale expectation.
+- The app SHOULD show the consequence next to the choice — "hourly, about a year"
+  against "every 15 minutes, about 3 months". A device MAY declare `wake_mah` and
+  `batt_mah` so the app can compute this instead of guessing.
+
+#### What `status` now means
+
+`status` MUST stop meaning "a socket is open" and start meaning **"reported
+within its expected interval"**, with a tolerance of at least two missed
+intervals before a device is called offline. A jar on an hourly schedule is
+perfectly healthy having said nothing for 50 minutes.
+
+This reaches `ConnectionManager`, the device list endpoint, and Maya's house
+context — all three currently equate liveness with an open connection.
+
+#### Why the server can never simply reach out
+
+Worth stating once, because it is the constraint every option above is shaped by:
+an ESP32 sits on a private address behind the home router's NAT. The server has
+no route to it. Every server-to-device message in this protocol travels down a
+connection **the device opened** — which is exactly what `ConnectionManager`
+does, keyed by the socket the device dialled in on.
+
+NAT traversal does not rescue this. STUN or hole punching still needs the device
+to send outbound first and to keep the mapping alive; UPnP may open a port but
+nothing answers it while the CPU is asleep; IPv6 removes NAT but not sleep, and
+home routers firewall inbound IPv6 by default anyway. Cellular NB-IoT does solve
+it properly — the network pages the device and it has scheduled wake windows —
+but that is a modem and a SIM, not WiFi.
+
+There is no protocol that avoids the rule: **something must hold an outbound
+connection, or the device is unreachable until it wakes.**
 
 ---
 
