@@ -509,7 +509,7 @@ needed to decide it:
 | Class | Test | Connection | Command latency |
 |---|---|---|---|
 | **Always-on** | has a writable capability that must respond promptly | holds the WebSocket | ~100 ms |
-| **Sleepy** | has a writable capability, but latency-tolerant, on batteries | wakes on `report_every` | up to one interval |
+| **Sleepy** | has a writable capability, but latency-tolerant, on batteries | wakes and polls a hub (§5.9) | up to one poll interval |
 | **Sensor-only** | no writable capability **other than reserved `_` config keys** | wakes, reports, sleeps | n/a — the server never needs to reach it |
 
 The dividing line is **not** whether a device sleeps — both of the last two do.
@@ -624,6 +624,148 @@ connection, or the device is unreachable until it wakes.**
 
 ---
 
+### 5.9 Hubs, and how a battery device actually reaches the server
+
+A **hub** is any mains-powered device that holds the WebSocket to the server and
+relays for battery devices over ESP-NOW. A house with a hub gets roughly three
+times the battery life on its sensors and makes the sleepy class viable at all;
+a house without one still works, more slowly. **A hub is an optimisation, never a
+requirement** — every device MUST function without one.
+
+#### The asymmetry everything here follows from
+
+**Transmitting is cheap. Receiving is expensive.** The cost of a wake cycle is
+almost entirely connection setup, not the payload:
+
+| Step | WiFi + HTTPS | ESP-NOW |
+|---|---|---|
+| Boot | ~250 ms | ~250 ms |
+| Associate + DHCP | 1-3 s | — |
+| TLS handshake | 1-2 s | — |
+| Send (+ reply) | ~200 ms | ~5-20 ms |
+| **Per wake** | **~3-5 s, ~0.17 mAh** | **~0.3-0.4 s, ~0.012 mAh** |
+
+ESP-NOW is connectionless: no association, no DHCP, no TLS. That is the whole of
+its advantage, and it applies **only to devices that wake, transmit, and sleep.**
+
+A device that stays awake to *receive* must keep its radio on, which costs
+~90 mA — no better than holding a WiFi connection. On 3xAA (~1760 mAh usable)
+that is **about 19 hours**. ESP32 connectionless power save (a periodic wake
+window) softens this to days, not months. Firmware MUST NOT idle-listen for
+ESP-NOW on batteries:
+
+| Receive strategy | Average draw | 3xAA life |
+|---|---|---|
+| Idle RX, always listening | ~90 mA | **~19 hours** |
+| Wake window, ~10% duty | ~10 mA | ~7 days |
+| Wake window, ~2% duty | ~3 mA | ~24 days |
+| Scheduled wake, poll, sleep | ~0.06 mA | **~1-3 years** |
+
+This is why hubs are mains-powered and battery devices always *ask* rather than
+*wait*.
+
+#### Sensor-only: ESP-NOW primary, WiFi fallback
+
+A sensor-only device SHOULD prefer a hub and fall back to the §5.8 HTTP check-in:
+
+| Path | Per wake | Hourly | 3xAA life |
+|---|---|---|---|
+| ESP-NOW to hub | ~0.012 mAh | ~1.5 mAh/day | **~3 years** |
+| WiFi + HTTPS report | ~0.17 mAh | ~5.3 mAh/day | ~1 year |
+
+On the hub path most of the daily budget is deep-sleep leakage rather than
+reporting, so the saving is better spent on **freshness** than on lifetime:
+ESP-NOW every 5 minutes costs about the same as WiFi once an hour — twelve times
+the resolution for the same battery.
+
+Rules:
+
+1. **Detect hub failure from the ESP-NOW send callback.** The MAC layer reports
+   whether the frame was acknowledged, so a dead hub is known immediately with no
+   timeout to pay for.
+2. **Fall back after 3 consecutive failures**, not one. A single miss is
+   interference, not an outage.
+3. **Say why.** The first fallback report MUST include
+   `{"hub_failed":"<hub device id>"}` so the server can tell the user to check
+   the hub. A hub that dies quietly would otherwise look like sensors gradually
+   going flat.
+4. **Buffer if both paths fail.** Keep readings in the bounded ring buffer of
+   §7.3 with their `ts`, and flush when either path returns. Never discard a
+   reading because the network was down.
+5. Retry the hub periodically while on the fallback path, and return to it when
+   it answers.
+
+Degrading from hub to WiFi costs roughly a year of battery instead of three. That
+is an acceptable loss for a fault that announces itself.
+
+#### Sleepy: poll the hub
+
+A sleepy device has something to receive, so it wakes, **asks** the hub for
+anything queued, acts, and sleeps. It never waits:
+
+```
+wake -> ESP-NOW to hub: "anything for me?"
+     -> hub answers immediately from its queue
+     -> act -> sleep
+```
+
+This is the §5.8 `pending` queue with ESP-NOW as the transport instead of HTTP —
+not a third mechanism. A poll costs slightly more than a bare send (~0.015 mAh)
+because the radio stays on briefly for the reply.
+
+| Poll interval | Per day | 3xAA life | Command latency |
+|---|---|---|---|
+| 30 s | ~44 mAh | ~6 weeks | 30 s |
+| 1 min | ~23 mAh | ~2.5 months | 1 min |
+| **5 min** | **~5.5 mAh** | **~1 year** | **5 min** |
+| 15 min | ~2.6 mAh | ~1.8 years | 15 min |
+
+**Sleepy is a hub-only class.** Polling the same way over WiFi costs ~0.17 mAh a
+poll — about 36 days at a 5-minute interval, which is not a product. So unlike
+sensor-only, a sleepy device has no useful WiFi fallback: when its hub is gone it
+SHOULD fall back to running its own stored schedule locally and reporting once a
+day, not to polling over WiFi.
+
+**A sleepy device can never respond immediately.** Nothing safety-critical — a
+door lock, an alarm, a heater cut-off — may be a sleepy capability. If it must
+happen now, it is always-on and it is mains-powered.
+
+#### What a hub must do
+
+- Be mains-powered, and hold the WebSocket as an always-on device (§5.8).
+- Keep a per-peer queue of `pending` commands and hand them over on contact.
+- Relay peer state reports upward, attributed to the **origin** device id, not
+  its own.
+- Authenticate every local frame with the peering grant key of §7.2 — at the
+  application layer, not by relying on ESP-NOW's own encryption, whose encrypted
+  peer count is capped well below the 20-peer ceiling and would otherwise limit
+  how many probes a farm could run.
+- Report its current WiFi channel to the server (below).
+
+A hub is a single point of failure for the devices that depend on it, which is
+why rule 3 above exists and why every device keeps a working path without one.
+
+#### Channel discovery
+
+ESP-NOW requires both ends on the same WiFi channel, and a home router that
+picks its channel automatically will move without warning — silently breaking
+every pairing in the house.
+
+- A battery device SHOULD associate to WiFi at provisioning and on a slow
+  schedule (daily is enough) to learn the current channel and refresh its status,
+  then switch the radio off and keep only its stored credentials.
+- A hub MUST report its channel to the server whenever it changes, so the server
+  can hand it to peers on their next contact.
+- A device that fails to reach its hub MUST consider a channel change among the
+  causes and rescan before concluding the hub is dead.
+
+#### Range
+
+Range is measured to the **hub**, not to the router. This can be better than WiFi
+association — ESP-NOW reaches hundreds of metres line-of-sight at low rates,
+which suits a field probe — or worse, if the hub sits in a cupboard. Hub
+placement is a real deployment decision, not an afterthought.
+
 ## 6. Control-plane messages
 
 ### 6.1 Device to server
@@ -667,6 +809,11 @@ the ack. Also defined: `{"type":"get_status"}`, `{"type":"reboot"}`,
 ---
 
 ## 7. Device to device
+
+This section defines the local link itself. Its largest user is the hub relay of
+§5.9 — a battery device pairing with a hub is an ordinary peering, and the frames
+it sends are ordinary local frames. Read §5.9 for *why* a device would use this;
+read here for *how* it is secured and shaped.
 
 ### 7.1 Pairing (control plane — this is the enforcement point)
 
