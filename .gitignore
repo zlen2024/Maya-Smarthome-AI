@@ -10,3 +10,9 @@ iot_data.db
 
 # Local test database
 software/server/_web_test.db
+
+# code2graph cache — regenerable, 4.3MB
+wiki/graph/graph.json
+
+# Obsidian vault config (wiki/ opens as a vault) — local editor state
+wiki/.obsidian/
