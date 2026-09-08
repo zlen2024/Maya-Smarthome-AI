@@ -118,6 +118,11 @@ Sent in the identify frame. This is the heart of v2.
 }
 ```
 
+Top-level descriptor fields: `id`, `proto`, `status` and `pin` are required;
+`ip`, `model`, `fw` and `report_every` are optional. `report_every` (seconds)
+declares how often the device intends to report and is what lets the server tell
+a sleeping device from a dead one — see §5.7 and §5.8.
+
 ### 5.1 Capability fields
 
 | Field | Required | Meaning |
@@ -374,6 +379,117 @@ Two decisions here are worth copying:
   stop. `calib` is `agent:"deny"` because a mid-calibration robot is stuck until
   a human intervenes. The flags encode "what is safe for an agent to do", not
   "what is important".
+
+### 5.7 Sensor-only devices
+
+A device with **no writable capability at all** is a first-class citizen, not a
+degenerate case. Plenty of useful hardware only ever reports: a salt jar that
+weighs what is left, a soil probe in a field, a water tank level, a mailbox
+sensor. The value is being able to check from somewhere else — knowing the salt
+is nearly out *while you are already at the market*.
+
+**A kitchen salt jar.** One number, and something to say about it.
+
+```json
+{
+  "id": "esp32-saltjar-01", "proto": 2, "status": "online",
+  "pin": "2201", "model": "jar_scale_v1", "fw": "1.1.0",
+  "report_every": 900,
+  "capabilities": [
+    {"key":"weight", "kind":"number", "label":"Salt left", "unit":"g",
+     "min":0, "max":1000, "access":"r", "history":true},
+    {"key":"note",   "kind":"text",   "label":"Status", "access":"r"},
+    {"key":"_batt",  "kind":"number", "unit":"%", "access":"r"}
+  ],
+  "state": {"weight":180, "note":"Running low — about a week left", "_batt":74}
+}
+```
+
+Two things make this work as a glanceable card rather than a bare number:
+
+- **Always give a read-only `number` a `min` and `max`.** With them the app can
+  draw a gauge or progress bar — "Salt ▓▓▒▒▒▒ 180 g" reads at a glance on a phone
+  in a shop. Without them all it can show is `180`, which means nothing unless you
+  already know the jar's capacity.
+- **`history:true`** turns "180 g" into a trend. Falling fast or flat since
+  Tuesday are very different facts.
+
+**The `note` pattern — let the device speak for itself.** A read-only `text`
+capability is the device's own sentence about its state, composed in firmware.
+This is where a contributor's creativity lives, and it costs the protocol
+nothing:
+
+```jsonc
+// Firmware decides what to say. The server and app never parse this --
+// it is shown to the human as-is, so anything goes.
+{"key":"note", "kind":"text", "label":"Status", "access":"r"}
+
+//   "Running low -- about a week left"
+//   "Pokok sedih, tanah kering 3 hari"      <- a farm probe with personality
+//   "Refilled! Back to full."
+```
+
+Because Maya sees capabilities as house context, a device's `note` also lands in
+Maya's context for free — so "Maya, is the salt running out?" is answerable
+without anyone writing a salt-specific tool.
+
+**A farm soil probe.** Several sensors, still nothing writable.
+
+```json
+{
+  "id": "esp32-field-07", "proto": 2, "status": "online",
+  "pin": "7731", "model": "soil_probe_v2", "fw": "2.0.0",
+  "report_every": 1800,
+  "capabilities": [
+    {"key":"moist", "kind":"number", "label":"Soil moisture", "unit":"%",
+     "min":0, "max":100, "access":"r", "history":true},
+    {"key":"temp",  "kind":"number", "label":"Soil temp", "unit":"C", "access":"r", "history":true},
+    {"key":"ph",    "kind":"number", "label":"pH", "min":3, "max":10, "access":"r"},
+    {"key":"mood",  "kind":"text",   "label":"How the plant feels", "access":"r"},
+    {"key":"_batt", "kind":"number", "unit":"%", "access":"r"},
+    {"key":"_rssi", "kind":"number", "unit":"dBm", "access":"r"}
+  ],
+  "state": {"moist":19, "temp":28.4, "ph":6.2, "mood":"Thirsty. No rain since Tuesday.", "_batt":58, "_rssi":-79}
+}
+```
+
+**`report_every`** (seconds, top level, optional) is how often the device intends
+to report. It exists so silence can be interpreted: a probe that promised every
+30 minutes and has said nothing for three hours is a *problem*, while one that
+promised every 30 minutes and reported 5 minutes ago is *fine*. Without it the
+server cannot tell a sleeping device from a dead one — see §5.8.
+
+The app SHOULD render a device whose capabilities are all `access:"r"` as a
+readout card rather than a control card, and MUST NOT show it as broken merely
+for having nothing to press.
+
+### 5.8 Open: battery-powered devices that sleep
+
+**This is not yet decided and firmware should not rely on it.**
+
+Both examples above are realistic only if battery-powered — a salt jar is not
+near a socket, and a field probe certainly is not. Such a device deep-sleeps and
+wakes briefly to report, which breaks an assumption the current protocol inherits
+from v1: **that a device holds a WebSocket open, and that an open socket is what
+"online" means.** A probe reporting every 30 minutes would sit permanently
+`offline` under today's `Device.status`, and today's identify handshake (connect,
+identify, verify PIN) is expensive to repeat on a battery budget.
+
+Three candidate answers, none chosen:
+
+1. **Connect, report, disconnect** — keep the WebSocket, treat a brief session as
+   normal, and derive liveness from `report_every` instead of socket state.
+   Smallest change; still pays the full handshake on every wake.
+2. **An HTTP report endpoint** — `POST /api/devices/{id}/report` with the same
+   state shape. One request, no handshake, far cheaper on battery. Costs a second
+   ingest path that must enforce the same PIN and house checks as the WS one.
+3. **Report through a mains-powered peer** over the local link (§7), so the
+   sleeper never touches the internet at all. Cheapest for the device, but the
+   peering grant becomes a hard dependency for basic reporting.
+
+Whichever is chosen, `status` must stop meaning "socket is open" and start
+meaning "reported within its expected interval". That change affects
+`ConnectionManager`, the device list, and Maya's house context.
 
 ---
 
