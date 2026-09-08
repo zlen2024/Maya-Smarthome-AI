@@ -161,6 +161,105 @@ leak, a physical button — is `switch` with `access:"r"`. A numeric sensor is
 `number` with `access:"r"`. Adding a `sensor` kind would duplicate every value
 type, which is why access direction is a field instead.
 
+#### What each kind is for
+
+**`switch`** — anything with exactly two states.
+As an actuator (`rw`, the default): a relay channel, an LED, a solenoid lock, a
+pump. As a sensor (`access:"r"`): a PIR motion detector, a reed switch on a door,
+a water-leak probe, a physical push button the firmware reports.
+`{"key":"lock","kind":"switch","label":"Front door"}`
+
+**`range`** — a bounded number the user drags. You know the limits.
+Dimmer brightness, fan speed, servo angle, volume, motor duty cycle.
+`{"key":"dim","kind":"range","label":"Brightness","min":0,"max":255}`
+
+**`number`** — a typed numeric value where the *unit* carries the meaning, and
+the range may be open. Almost always a sensor: temperature (DHT22), humidity,
+distance (HC-SR04), soil moisture, power draw in watts, CO2 in ppm. Writable when
+it is a setpoint — a target temperature the user types rather than drags.
+`{"key":"temp","kind":"number","label":"Temperature","unit":"C","access":"r","history":true}`
+
+**`text`** — free-form string. Writable: a message to show on an LCD or OLED.
+Read-only: the last RFID tag scanned, a status line the firmware composes.
+`{"key":"msg","kind":"text","label":"Display","max":32,"access":"w"}`
+
+**`enum`** — a closed set of named choices the firmware defines.
+Operating mode (eco/normal/boost), input source, speed preset.
+`{"key":"mode","kind":"enum","label":"Mode","options":["eco","normal","boost"]}`
+
+**`button`** — a momentary action with no state. Pressing it *does* something;
+there is nothing to read back. Buzzer beep, horn, calibrate, dispense, reset.
+`{"key":"beep","kind":"button","label":"Find me"}`
+
+**`color`** — an RGB value. LED strip, mood lamp, status indicator.
+`{"key":"strip","kind":"color","label":"Light strip"}`
+
+**`time`** — a time of day, device-local, no date. Alarm, "turn on at", the start
+of a daily schedule.
+`{"key":"wake","kind":"time","label":"Wake at"}`
+
+**`duration`** — a length of time in seconds. "Run the fan for 30 minutes",
+watering length, sleep timer. Use `max` to keep the picker sane.
+`{"key":"runfor","kind":"duration","label":"Run for","max":7200}`
+
+**`location`** — a geographic point. Robot position, GPS tracker, pet collar.
+Renders as a map pin, reusing the map the app already uses for child location.
+`{"key":"pos","kind":"location","label":"Position","access":"r"}`
+
+#### Choosing between similar kinds
+
+| If you are unsure | Use | Because |
+|---|---|---|
+| `range` or `number`? | `range` when the user **drags** between known limits; `number` when the value is **measured or typed** and the unit carries the meaning | A slider with no meaningful max is unusable; a temperature reading is not a slider |
+| `switch` or `button`? | `switch` if it has a state you can read back; `button` if pressing it is a one-off event | "Is the lamp on?" has an answer. "Is the horn?" does not |
+| `enum` or `text`? | `enum` when the firmware knows every valid value | An `enum` gives the user a dropdown and gives Maya a list it cannot get wrong |
+| `number` or `range` for a setpoint? | `number` with `min`/`max` | A target temperature is typed, not dragged, and wants its unit shown |
+
+#### Annotated example
+
+The canonical descriptor above, with the reasoning spelled out. JSON has no
+comments — this block is illustrative only, do not send it as-is:
+
+```jsonc
+"capabilities": [
+  // Plain actuator. access defaults to "rw", so it is omitted.
+  {"key":"ch1", "kind":"switch", "label":"Channel 1"},
+
+  // Bounded, draggable -> range. step makes the slider snap to 5s.
+  {"key":"speed", "kind":"range", "label":"Fan speed",
+   "min":0, "max":100, "step":5, "unit":"%"},
+
+  // Measured, not set -> number + access:"r". history draws a sparkline.
+  {"key":"temp", "kind":"number", "label":"Temperature",
+   "unit":"C", "access":"r", "history":true},
+
+  // A binary SENSOR is still a switch -- direction is access, not kind.
+  {"key":"motion", "kind":"switch", "label":"Motion", "access":"r"},
+
+  // Firmware knows every valid value -> enum, so Maya cannot invent one.
+  {"key":"mode", "kind":"enum", "label":"Mode",
+   "options":["eco","normal","boost"]},
+
+  // Write-only: the device shows it, it never reads back.
+  {"key":"msg", "kind":"text", "label":"Display", "max":32, "access":"w"},
+
+  // Time of day, no date. Device-local -- the device owns its own clock.
+  {"key":"wake", "kind":"time", "label":"Wake at"},
+
+  // Seconds. max keeps the picker to a sensible 2 hours.
+  {"key":"runfor", "kind":"duration", "label":"Run for", "max":7200},
+
+  // Momentary: no state to read back.
+  {"key":"horn", "kind":"button", "label":"Horn"},
+
+  // Destructive -> hidden from Maya entirely. See 5.4.
+  {"key":"reset", "kind":"button", "label":"Reset", "agent":"deny"},
+
+  // Reserved key: rendered as device chrome, not as a control. See 5.3.
+  {"key":"_batt", "kind":"number", "unit":"%", "access":"r"}
+]
+```
+
 An app that meets an unknown `kind` MUST render a read-only raw value rather than
 hide the capability — this is what lets a v2.1 device stay usable on a v2.0 app.
 
@@ -212,6 +311,69 @@ At most **32 capabilities** per device, descriptor no larger than **4 KB**
 serialised. A larger descriptor is rejected with `descriptor_too_large`. This
 keeps the frame inside a single `StaticJsonDocument` on the ESP32 side.
 Reserved keys (§5.3) count toward the 32.
+
+### 5.6 Worked examples
+
+Two complete descriptors for hardware someone might actually contribute. Neither
+needs a single line of change in `software/` — that is the whole point.
+
+**A plant waterer.** Soil sensor, a pump, and a daily schedule.
+
+```json
+{
+  "id": "esp32-planter-01", "proto": 2, "status": "online",
+  "pin": "4417", "model": "planter_v1", "fw": "1.0.0",
+  "capabilities": [
+    {"key":"pump",   "kind":"switch",  "label":"Pump"},
+    {"key":"moist",  "kind":"number",  "label":"Soil moisture", "unit":"%", "access":"r", "history":true},
+    {"key":"water_at","kind":"time",   "label":"Water at"},
+    {"key":"amount", "kind":"duration","label":"Water for", "max":120},
+    {"key":"empty",  "kind":"switch",  "label":"Tank empty", "access":"r"},
+    {"key":"prime",  "kind":"button",  "label":"Prime pump", "confirm":true},
+    {"key":"_batt",  "kind":"number",  "unit":"%", "access":"r"}
+  ],
+  "state": {"pump":"off","moist":38,"water_at":"07:30","amount":20,"empty":"off","_batt":91}
+}
+```
+
+Worth noticing: `empty` is a sensor, so it is a `switch` with `access:"r"` rather
+than some new kind. `prime` is `confirm:true` because running a dry pump damages
+it — disruptive, but not destructive enough for `agent:"deny"`. The user can
+still ask Maya "water the plant now" and it will work.
+
+**A small robot.** Movement, a voice, and a presence sensor.
+
+```json
+{
+  "id": "esp32-robot-01", "proto": 2, "status": "online",
+  "pin": "8890", "model": "maya_robot_v1", "fw": "0.3.1",
+  "capabilities": [
+    {"key":"drive",  "kind":"enum",    "label":"Drive", "options":["stop","forward","back","left","right"]},
+    {"key":"speed",  "kind":"range",   "label":"Speed", "min":0, "max":100, "step":10, "unit":"%"},
+    {"key":"head",   "kind":"range",   "label":"Head angle", "min":-90, "max":90, "unit":"deg"},
+    {"key":"say",    "kind":"text",    "label":"Say", "max":120, "access":"w"},
+    {"key":"eyes",   "kind":"color",   "label":"Eyes"},
+    {"key":"near",   "kind":"number",  "label":"Obstacle", "unit":"cm", "access":"r"},
+    {"key":"pos",    "kind":"location","label":"Position", "access":"r"},
+    {"key":"dock",   "kind":"button",  "label":"Return to dock"},
+    {"key":"stop",   "kind":"button",  "label":"Emergency stop"},
+    {"key":"calib",  "kind":"button",  "label":"Calibrate", "agent":"deny"},
+    {"key":"_batt",  "kind":"number",  "unit":"%", "access":"r"}
+  ],
+  "state": {"drive":"stop","speed":40,"head":0,"eyes":"#33CCFF","near":145,"_batt":62}
+}
+```
+
+Two decisions here are worth copying:
+
+- **`drive` is an `enum`, not a `vector`.** Discrete movement commands survive the
+  ~100ms control-plane latency; live joystick driving does not (see the v2.1
+  notes). An `enum` also hands Maya a list it cannot get wrong, so "Maya, move the
+  robot forward" maps cleanly.
+- **`stop` has no `agent` flag** — Maya *should* be able to trigger an emergency
+  stop. `calib` is `agent:"deny"` because a mid-calibration robot is stuck until
+  a human intervenes. The flags encode "what is safe for an agent to do", not
+  "what is important".
 
 ---
 
