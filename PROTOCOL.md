@@ -509,12 +509,32 @@ needed to decide it:
 | Class | Test | Connection | Command latency |
 |---|---|---|---|
 | **Always-on** | has a writable capability that must respond promptly | holds the WebSocket | ~100 ms |
-| **Sleepy** | writable, but latency-tolerant, on batteries | wakes on `report_every` | up to one interval |
-| **Sensor-only** | every capability is `access:"r"` | wakes, reports, sleeps | n/a — the server never needs to reach it |
+| **Sleepy** | has a writable capability, but latency-tolerant, on batteries | wakes on `report_every` | up to one interval |
+| **Sensor-only** | no writable capability **other than reserved `_` config keys** | wakes, reports, sleeps | n/a — the server never needs to reach it |
+
+The dividing line is **not** whether a device sleeps — both of the last two do.
+It is **whether the server ever has something to send down**:
+
+- Always-on — you press it and expect it *now*. A relay channel, a lock, a pump.
+- Sleepy — you set it and it happens *shortly*. An e-ink room label, a scheduled
+  irrigation valve, a battery curtain motor.
+- Sensor-only — you only ever *read* it. A salt jar, a field probe, a tank level.
+
+Note the exception in the sensor-only test. Declaring `_report_every` (§5.8,
+"Letting the user choose the interval") makes a capability writable, but it is
+device configuration delivered on the check-in response, not something the server
+must reach the device to do. **A device does not become sleepy merely by letting
+the user adjust its reporting interval.** Reserved `_` keys never change a
+device's class; only a functional capability does.
 
 **A sensor-only device is the easy case and should be preferred**: because the
 server never has to reach it, it has no reachability problem at all. The salt jar
-and the field probe are both this class.
+and the field probe are both this class, even when their interval is adjustable.
+
+Sleepy is the combination of the other two, not a third mechanism: the `pending`
+queue from sensor-only check-in, carrying the `set` payloads of always-on. An
+implementation can ship always-on and sensor-only first and add sleepy later
+without redesigning either.
 
 #### Check-in: the device pulls, the server never pushes
 
