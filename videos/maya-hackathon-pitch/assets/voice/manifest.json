@@ -1,0 +1,183 @@
+{
+  "lines": [
+    {
+      "id": "01-hook",
+      "frame": 1,
+      "voice": "Sulafat",
+      "text": "Three P.M. You're at work. Is the TV at home still on? And where is your child right now?",
+      "path": "assets/voice/01-hook.wav",
+      "model": "gemini-3.1-flash-tts-preview",
+      "seconds": 7.64
+    },
+    {
+      "id": "02-title",
+      "frame": 2,
+      "voice": "Puck",
+      "text": "This is Maya \u2014 a family-centred A-I-o-T ecosystem for smarter and safer home management. One smart socket, one AI assistant, one family app.",
+      "path": "assets/voice/02-title.wav",
+      "model": "gemini-3.1-flash-tts-preview",
+      "seconds": 10.72
+    },
+    {
+      "id": "03-problem",
+      "frame": 3,
+      "voice": "Sulafat",
+      "text": "Malaysian women's workforce participation just hit a record fifty-six point six percent. In our survey of seventy-three working parents, eighty percent said their children spend two hours or more a day unsupervised.",
+      "path": "assets/voice/03-problem.wav",
+      "model": "gemini-3.1-flash-tts-preview",
+      "seconds": 14.68
+    },
+    {
+      "id": "04-pain",
+      "frame": 4,
+      "voice": "Sulafat",
+      "text": "Parents juggle separate apps \u2014 seventy percent feel app fatigue \u2014 while devices on standby quietly waste almost ten percent of home electricity.",
+      "path": "assets/voice/04-pain.wav",
+      "model": "gemini-3.1-flash-tts-preview",
+      "seconds": 11.04
+    },
+    {
+      "id": "05-shortcomings",
+      "frame": 5,
+      "voice": "Puck",
+      "text": "Today's options fall short. Most smart plugs handle a single socket. Voice assistants follow commands, but aren't linked to your child's screen time or location. And parental apps rarely connect to the home.",
+      "path": "assets/voice/05-shortcomings.wav",
+      "model": "gemini-2.5-flash-preview-tts",
+      "seconds": 12.251
+    },
+    {
+      "id": "06-concept",
+      "frame": 6,
+      "voice": "Sulafat",
+      "text": "Maya connects all three \u2014 home, parent and child \u2014 in one family-centred hub that can act on context.",
+      "path": "assets/voice/06-concept.wav",
+      "model": "gemini-2.5-flash-preview-tts",
+      "seconds": 8.571
+    },
+    {
+      "id": "07-hardware",
+      "frame": 7,
+      "voice": "Puck",
+      "text": "An E-S-P thirty-two, three-channel smart extension switches each outlet independently. Set it up over Bluetooth once, and it stays synced with every family phone in real time.",
+      "path": "assets/voice/07-hardware.wav",
+      "model": "gemini-2.5-flash-preview-tts",
+      "seconds": 10.691
+    },
+    {
+      "id": "08-ai-child",
+      "frame": 8,
+      "voice": "Puck",
+      "text": "Just say, 'Maya, turn off the TV' \u2014 the AI agent finds the right outlet and switches it. The child app shares screen time and location, and parents set which outlets each child may use.",
+      "path": "assets/voice/08-ai-child.wav",
+      "model": "gemini-2.5-flash-preview-tts",
+      "seconds": 10.451
+    },
+    {
+      "id": "09-benefits",
+      "frame": 9,
+      "voice": "Sulafat",
+      "text": "One app instead of many. Hands-free control. Peace of mind at work. Less wasted power \u2014 and no rewiring.",
+      "path": "assets/voice/09-benefits.wav",
+      "model": "gemini-3.1-flash-tts-preview",
+      "seconds": 9.96
+    },
+    {
+      "id": "10a-sdg",
+      "frame": 10,
+      "voice": "Puck",
+      "text": "Maya delivers on four S-D-Gs: eleven, safer communities; three, well-being; seven, clean energy; and twelve, responsible consumption.",
+      "path": "assets/voice/10a-sdg.wav",
+      "model": "gemini-2.5-flash-preview-tts",
+      "seconds": 10.731
+    },
+    {
+      "id": "10b-esg",
+      "frame": 10,
+      "voice": "Sulafat",
+      "text": "And on all three E-S-G pillars: Environmental, less standby waste; Social, safer children; Governance, secure and open by design.",
+      "path": "assets/voice/10b-esg.wav",
+      "model": "gemini-2.5-flash-preview-tts",
+      "seconds": 12.211
+    },
+    {
+      "id": "11-market",
+      "frame": 11,
+      "voice": "Puck",
+      "text": "The market is ready. Smart homes are heading to four hundred and fifty billion US dollars by twenty thirty-two, smart plugs to thirty billion, and parental-control software to over four billion.",
+      "path": "assets/voice/11-market.wav",
+      "model": "gemini-2.5-flash-preview-tts",
+      "seconds": 11.051
+    },
+    {
+      "id": "12-evidence",
+      "frame": 12,
+      "voice": "Puck",
+      "text": "Eighty-four percent of parents find smart extensions useful, and eighty-two percent would install a child monitoring app. Our prototype passed all forty tests on about ninety-five ringgit of hardware \u2014 and development is active: iteration four, for sensors and hubs, is underway.",
+      "path": "assets/voice/12-evidence.wav",
+      "model": "gemini-2.5-flash-preview-tts",
+      "seconds": 16.251
+    },
+    {
+      "id": "13-ip",
+      "frame": 13,
+      "voice": "Sulafat",
+      "text": "Maya is open source under the Apache two point zero license, built on research at Universiti Selangor.",
+      "path": "assets/voice/13-ip.wav",
+      "model": "gemini-2.5-flash-preview-tts",
+      "seconds": 7.331
+    },
+    {
+      "id": "14a-close",
+      "frame": 14,
+      "voice": "Sulafat",
+      "text": "Other smart homes switch things on and off.",
+      "path": "assets/voice/14a-close.wav",
+      "model": "gemini-2.5-flash-preview-tts",
+      "seconds": 2.931
+    },
+    {
+      "id": "14b-close",
+      "frame": 14,
+      "voice": "Puck",
+      "text": "Maya understands your family.",
+      "path": "assets/voice/14b-close.wav",
+      "model": "gemini-2.5-flash-preview-tts",
+      "seconds": 2.691
+    },
+    {
+      "id": "14c-close",
+      "frame": 14,
+      "voice": "Sulafat",
+      "text": "Affordable, intelligent and open \u2014 so every working parent can breathe easy, knowing home is in good hands.",
+      "path": "assets/voice/14c-close.wav",
+      "model": "gemini-2.5-flash-preview-tts",
+      "seconds": 7.811
+    },
+    {
+      "id": "14d-close",
+      "frame": 14,
+      "voice": "Puck",
+      "text": "Maya: home, handled.",
+      "path": "assets/voice/14d-close.wav",
+      "model": "gemini-2.5-flash-preview-tts",
+      "seconds": 1.931
+    }
+  ],
+  "per_frame_seconds": {
+    "1": 7.64,
+    "2": 10.72,
+    "3": 14.68,
+    "4": 11.04,
+    "5": 12.251,
+    "6": 8.571,
+    "7": 10.691,
+    "8": 10.451,
+    "9": 9.96,
+    "10": 22.942,
+    "11": 11.051,
+    "12": 16.251,
+    "13": 7.331,
+    "14": 15.364
+  },
+  "total_voice_seconds": 168.943
+}

@@ -1,0 +1,368 @@
+{
+  "total_seconds": 174.59,
+  "overlap": 0.4,
+  "voice_offset": 0.35,
+  "frames": [
+    {
+      "frame": 1,
+      "slug": "01-hook",
+      "start": 0.0,
+      "duration": 8.24,
+      "lines": [
+        {
+          "id": "01-hook",
+          "voice": "Sulafat",
+          "path": "assets/voice/01-hook.wav",
+          "local_start": 0.35,
+          "seconds": 7.64,
+          "estimated": false,
+          "cues": {
+            "Three P.M.": 0.56,
+            "You're at work.": 1.44,
+            "Is the TV": 2.72,
+            "And where is your child": 4.96
+          }
+        }
+      ]
+    },
+    {
+      "frame": 2,
+      "slug": "02-title",
+      "start": 7.84,
+      "duration": 11.32,
+      "lines": [
+        {
+          "id": "02-title",
+          "voice": "Puck",
+          "path": "assets/voice/02-title.wav",
+          "local_start": 0.35,
+          "seconds": 10.72,
+          "estimated": false,
+          "cues": {
+            "This is Maya": 0.65,
+            "family-centred": 1.86,
+            "One smart socket": 7.02,
+            "one AI assistant": 8.31,
+            "one family app": 9.6
+          }
+        }
+      ]
+    },
+    {
+      "frame": 3,
+      "slug": "03-problem",
+      "start": 18.76,
+      "duration": 15.28,
+      "lines": [
+        {
+          "id": "03-problem",
+          "voice": "Sulafat",
+          "path": "assets/voice/03-problem.wav",
+          "local_start": 0.35,
+          "seconds": 14.68,
+          "estimated": false,
+          "cues": {
+            "Malaysian women": 0.61,
+            "fifty-six point six": 4.55,
+            "In our survey": 6.45,
+            "eighty percent": 9.6,
+            "unsupervised": 13.86
+          }
+        }
+      ]
+    },
+    {
+      "frame": 4,
+      "slug": "04-pain",
+      "start": 33.64,
+      "duration": 11.64,
+      "lines": [
+        {
+          "id": "04-pain",
+          "voice": "Sulafat",
+          "path": "assets/voice/04-pain.wav",
+          "local_start": 0.35,
+          "seconds": 11.04,
+          "estimated": false,
+          "cues": {
+            "Parents juggle": 0.67,
+            "seventy percent": 2.91,
+            "while devices on standby": 5.43,
+            "almost ten percent": 8.24
+          }
+        }
+      ]
+    },
+    {
+      "frame": 5,
+      "slug": "05-shortcomings",
+      "start": 44.88,
+      "duration": 12.85,
+      "lines": [
+        {
+          "id": "05-shortcomings",
+          "voice": "Puck",
+          "path": "assets/voice/05-shortcomings.wav",
+          "local_start": 0.35,
+          "seconds": 12.251,
+          "estimated": false,
+          "cues": {
+            "Today's options": 0.64,
+            "Most smart plugs": 2.26,
+            "Voice assistants": 4.62,
+            "And parental apps": 10.0
+          }
+        }
+      ]
+    },
+    {
+      "frame": 6,
+      "slug": "06-concept",
+      "start": 57.331,
+      "duration": 9.17,
+      "lines": [
+        {
+          "id": "06-concept",
+          "voice": "Sulafat",
+          "path": "assets/voice/06-concept.wav",
+          "local_start": 0.35,
+          "seconds": 8.571,
+          "estimated": false,
+          "cues": {
+            "Maya connects": 0.6,
+            "home,": 2.74,
+            "parent": 3.24,
+            "and child": 3.81,
+            "in one family-centred hub": 4.8
+          }
+        }
+      ]
+    },
+    {
+      "frame": 7,
+      "slug": "07-hardware",
+      "start": 66.102,
+      "duration": 11.29,
+      "lines": [
+        {
+          "id": "07-hardware",
+          "voice": "Puck",
+          "path": "assets/voice/07-hardware.wav",
+          "local_start": 0.35,
+          "seconds": 10.691,
+          "estimated": false,
+          "cues": {
+            "An E-S-P": 0.6,
+            "switches each outlet": 3.64,
+            "Set it up over Bluetooth": 5.79,
+            "and it stays synced": 7.64
+          }
+        }
+      ]
+    },
+    {
+      "frame": 8,
+      "slug": "08-ai-child",
+      "start": 76.993,
+      "duration": 11.05,
+      "lines": [
+        {
+          "id": "08-ai-child",
+          "voice": "Puck",
+          "path": "assets/voice/08-ai-child.wav",
+          "local_start": 0.35,
+          "seconds": 10.451,
+          "estimated": false,
+          "cues": {
+            "Just say": 0.35,
+            "the AI agent finds": 2.38,
+            "The child app": 5.38,
+            "and parents set": 8.03
+          }
+        }
+      ]
+    },
+    {
+      "frame": 9,
+      "slug": "09-benefits",
+      "start": 87.644,
+      "duration": 10.56,
+      "lines": [
+        {
+          "id": "09-benefits",
+          "voice": "Sulafat",
+          "path": "assets/voice/09-benefits.wav",
+          "local_start": 0.35,
+          "seconds": 9.96,
+          "estimated": false,
+          "cues": {
+            "One app": 0.66,
+            "Hands-free": 2.9,
+            "Peace of mind": 4.69,
+            "Less wasted power": 6.75,
+            "and no rewiring": 8.54
+          }
+        }
+      ]
+    },
+    {
+      "frame": 10,
+      "slug": "10-sdg-esg",
+      "start": 97.804,
+      "duration": 23.74,
+      "lines": [
+        {
+          "id": "10a-sdg",
+          "voice": "Puck",
+          "path": "assets/voice/10a-sdg.wav",
+          "local_start": 0.35,
+          "seconds": 10.731,
+          "estimated": false,
+          "cues": {
+            "four S-D-Gs": 2.07,
+            "eleven": 3.08,
+            "three,": 5.18,
+            "seven,": 6.65,
+            "and twelve": 8.28
+          }
+        },
+        {
+          "id": "10b-esg",
+          "voice": "Sulafat",
+          "path": "assets/voice/10b-esg.wav",
+          "local_start": 11.281,
+          "seconds": 12.211,
+          "estimated": false,
+          "cues": {
+            "E-S-G pillars": 13.09,
+            "Environmental": 14.44,
+            "Social": 17.61,
+            "Governance": 19.78
+          }
+        }
+      ]
+    },
+    {
+      "frame": 11,
+      "slug": "11-market",
+      "start": 121.146,
+      "duration": 11.65,
+      "lines": [
+        {
+          "id": "11-market",
+          "voice": "Puck",
+          "path": "assets/voice/11-market.wav",
+          "local_start": 0.35,
+          "seconds": 11.051,
+          "estimated": false,
+          "cues": {
+            "The market is ready": 0.62,
+            "Smart homes": 1.76,
+            "smart plugs to": 6.71,
+            "and parental-control": 8.39
+          }
+        }
+      ]
+    },
+    {
+      "frame": 12,
+      "slug": "12-evidence",
+      "start": 132.397,
+      "duration": 16.85,
+      "lines": [
+        {
+          "id": "12-evidence",
+          "voice": "Puck",
+          "path": "assets/voice/12-evidence.wav",
+          "local_start": 0.35,
+          "seconds": 16.251,
+          "estimated": false,
+          "cues": {
+            "Eighty-four percent": 0.7,
+            "eighty-two percent": 4.33,
+            "Our prototype passed": 7.52,
+            "ninety-five ringgit": 10.09,
+            "and development is active": 11.99,
+            "iteration four": 13.5
+          }
+        }
+      ]
+    },
+    {
+      "frame": 13,
+      "slug": "13-ip",
+      "start": 148.848,
+      "duration": 7.93,
+      "lines": [
+        {
+          "id": "13-ip",
+          "voice": "Sulafat",
+          "path": "assets/voice/13-ip.wav",
+          "local_start": 0.35,
+          "seconds": 7.331,
+          "estimated": false,
+          "cues": {
+            "Maya is open source": 0.62,
+            "Apache": 2.69,
+            "built on research": 4.84
+          }
+        }
+      ]
+    },
+    {
+      "frame": 14,
+      "slug": "14-close",
+      "start": 156.379,
+      "duration": 18.21,
+      "lines": [
+        {
+          "id": "14a-close",
+          "voice": "Sulafat",
+          "path": "assets/voice/14a-close.wav",
+          "local_start": 0.35,
+          "seconds": 2.931,
+          "estimated": false,
+          "cues": {
+            "Other smart homes": 0.35
+          }
+        },
+        {
+          "id": "14b-close",
+          "voice": "Puck",
+          "path": "assets/voice/14b-close.wav",
+          "local_start": 3.431,
+          "seconds": 2.691,
+          "estimated": false,
+          "cues": {
+            "Maya understands": 3.72
+          }
+        },
+        {
+          "id": "14c-close",
+          "voice": "Sulafat",
+          "path": "assets/voice/14c-close.wav",
+          "local_start": 6.422,
+          "seconds": 7.811,
+          "estimated": false,
+          "cues": {
+            "Affordable": 6.42,
+            "intelligent": 7.3,
+            "and open": 8.17,
+            "so every working parent": 8.98
+          }
+        },
+        {
+          "id": "14d-close",
+          "voice": "Puck",
+          "path": "assets/voice/14d-close.wav",
+          "local_start": 14.533,
+          "seconds": 1.931,
+          "estimated": false,
+          "cues": {
+            "Maya: home, handled.": 14.84
+          }
+        }
+      ]
+    }
+  ]
+}

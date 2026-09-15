@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "preferences": {
+    "aspect": {
+      "value": "1920x1080",
+      "confirmed_in": [
+        "maya-hackathon-pitch"
+      ],
+      "updated_at": "2026-09-15T02:16:24.500Z"
+    },
+    "language": {
+      "value": "en",
+      "confirmed_in": [
+        "maya-hackathon-pitch"
+      ],
+      "updated_at": "2026-09-15T02:19:11.684Z"
+    },
+    "flow": {
+      "value": "automation",
+      "confirmed_in": [
+        "maya-hackathon-pitch"
+      ],
+      "updated_at": "2026-09-15T02:19:11.806Z"
+    },
+    "storyboard": {
+      "value": "yes",
+      "confirmed_in": [
+        "maya-hackathon-pitch"
+      ],
+      "updated_at": "2026-09-15T02:19:11.919Z"
+    },
+    "voice": {
+      "value": "gemini-tts",
+      "confirmed_in": [
+        "maya-hackathon-pitch"
+      ],
+      "updated_at": "2026-09-15T02:19:12.026Z"
+    }
+  },
+  "sightings": {}
+}

@@ -1,0 +1,13 @@
+# Build output and regenerable caches
+node_modules/
+renders/
+snapshots/
+.hyperframes/
+.thumbnails/
+tools/__pycache__/
+
+# Scratch audio not used in the final cut
+assets/voice-samples/
+assets/voice/alt-2.5/
+# Lyria source before the 185s crossfade extension (the cut uses track-185s.wav)
+assets/bgm/track.wav

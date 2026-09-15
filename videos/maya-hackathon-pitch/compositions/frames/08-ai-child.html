@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <title>F8 · Your product: @maya AI and child app</title>
+  </head>
+  <body>
+    <template>
+      <style>
+        #root[data-composition-id="f08-ai-child"] { position: absolute; inset: 0; overflow: hidden; font-family: "Montserrat", sans-serif; color: #0A0A0A; }
+        [data-composition-id="f08-ai-child"] .stage { position: absolute; inset: 0; overflow: hidden; background: #E5E4E2; font-family: "Montserrat", sans-serif; color: #0A0A0A; }
+        [data-composition-id="f08-ai-child"] .haze { position: absolute; left: -80px; top: -80px; width: 2080px; height: 1240px; background: radial-gradient(42% 48% at 96% -6%, rgba(10, 10, 10, 0.38) 0%, rgba(10, 10, 10, 0) 70%), radial-gradient(62% 62% at 80% 0%, rgba(83, 104, 120, 0.48) 0%, rgba(83, 104, 120, 0) 72%), radial-gradient(55% 60% at 0% 100%, rgba(255, 255, 255, 0.75) 0%, rgba(255, 255, 255, 0) 70%); }
+        [data-composition-id="f08-ai-child"] .label { font-family: "JetBrains Mono", monospace; font-size: 24px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #3E4F5C; }
+        [data-composition-id="f08-ai-child"] .card { background: rgba(255, 255, 255, 0.6); border: 3px solid rgba(10, 10, 10, 0.12); border-radius: 24px; box-shadow: 0 24px 60px rgba(10, 10, 10, 0.1); box-sizing: border-box; }
+        [data-composition-id="f08-ai-child"] .pad { position: absolute; inset: 0; padding: 90px 120px; box-sizing: border-box; display: flex; flex-direction: column; gap: 26px; }
+        [data-composition-id="f08-ai-child"] .row { display: flex; gap: 40px; flex: 1; align-items: center; }
+        [data-composition-id="f08-ai-child"] .phone { position: relative; width: 380px; height: 760px; flex: none; border: 12px solid #0A0A0A; border-radius: 54px; overflow: hidden; background: #0A0A0A; box-shadow: 0 30px 70px rgba(10, 10, 10, 0.25); box-sizing: border-box; }
+        [data-composition-id="f08-ai-child"] .phone img { position: absolute; left: 0; top: 0; width: 727px; height: auto; display: block; }
+        [data-composition-id="f08-ai-child"] .hl { position: absolute; left: 22px; top: 344px; width: 314px; height: 46px; border: 4px solid #E5E4E2; border-radius: 14px; box-shadow: 0 0 22px rgba(229, 228, 226, 0.7); box-sizing: border-box; }
+        [data-composition-id="f08-ai-child"] .chat { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 22px; min-width: 0; }
+        [data-composition-id="f08-ai-child"] .bub-u { align-self: flex-end; background: #0A0A0A; color: #E5E4E2; border-radius: 28px 28px 6px 28px; padding: 22px 28px; font-size: 34px; font-weight: 700; white-space: nowrap; }
+        [data-composition-id="f08-ai-child"] .caret { display: inline-block; width: 4px; height: 36px; background: #E5E4E2; vertical-align: -6px; margin-left: 4px; }
+        [data-composition-id="f08-ai-child"] .tool { align-self: center; font-family: "JetBrains Mono", monospace; font-size: 23px; font-weight: 700; color: #3E4F5C; border: 3px dashed #536878; border-radius: 14px; padding: 12px 18px; background: rgba(255, 255, 255, 0.6); }
+        [data-composition-id="f08-ai-child"] .bub-a { align-self: flex-start; max-width: 560px; background: rgba(255, 255, 255, 0.78); border: 3px solid rgba(10, 10, 10, 0.12); border-radius: 28px 28px 28px 6px; padding: 18px 28px 22px; box-sizing: border-box; }
+        [data-composition-id="f08-ai-child"] .who { font-family: "JetBrains Mono", monospace; font-size: 20px; font-weight: 700; color: #3E4F5C; letter-spacing: 0.12em; }
+        [data-composition-id="f08-ai-child"] .msg { font-size: 32px; font-weight: 700; margin-top: 6px; }
+        [data-composition-id="f08-ai-child"] .child { width: 620px; flex: none; padding: 36px 40px; display: flex; flex-direction: column; gap: 22px; }
+        [data-composition-id="f08-ai-child"] .ringrow { display: flex; align-items: center; gap: 28px; }
+        [data-composition-id="f08-ai-child"] .ring { width: 210px; height: 210px; flex: none; }
+        [data-composition-id="f08-ai-child"] .ring circle { fill: none; stroke-width: 20; }
+        [data-composition-id="f08-ai-child"] .ring .bg { stroke: rgba(10, 10, 10, 0.1); }
+        [data-composition-id="f08-ai-child"] .ring .fg { stroke: #536878; stroke-linecap: round; }
+        [data-composition-id="f08-ai-child"] .time { font-size: 62px; font-weight: 900; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; line-height: 1; }
+        [data-composition-id="f08-ai-child"] .lim { font-size: 28px; font-weight: 700; color: rgba(10, 10, 10, 0.72); margin-top: 8px; }
+        [data-composition-id="f08-ai-child"] .loc { display: flex; align-items: center; gap: 18px; padding: 16px 22px; border-radius: 18px; background: rgba(255, 255, 255, 0.6); border: 2px solid rgba(10, 10, 10, 0.1); }
+        [data-composition-id="f08-ai-child"] .loc svg { width: 48px; height: 48px; flex: none; }
+        [data-composition-id="f08-ai-child"] .loc b { display: block; font-size: 30px; font-weight: 700; }
+        [data-composition-id="f08-ai-child"] .perms { display: flex; flex-direction: column; }
+        [data-composition-id="f08-ai-child"] .perm { display: flex; align-items: center; justify-content: space-between; padding: 10px 4px; border-top: 2px solid rgba(10, 10, 10, 0.08); }
+        [data-composition-id="f08-ai-child"] .perm b { font-size: 30px; font-weight: 700; flex: 1; }
+        [data-composition-id="f08-ai-child"] .perm .st { font-family: "JetBrains Mono", monospace; font-size: 20px; font-weight: 700; color: rgba(10, 10, 10, 0.64); margin-right: 16px; }
+        [data-composition-id="f08-ai-child"] .tg { position: relative; width: 76px; height: 42px; border-radius: 21px; background: #536878; flex: none; }
+        [data-composition-id="f08-ai-child"] .knob { position: absolute; left: 38px; top: 4px; width: 34px; height: 34px; border-radius: 50%; background: #FFFFFF; }
+      </style>
+      <div data-hf-id="hf-pxtj" id="root" data-composition-id="f08-ai-child" data-width="1920" data-height="1080">
+        <div data-hf-id="hf-tan6" class="stage">
+          <div data-hf-id="hf-k3by" class="haze" data-layout-allow-overflow></div>
+          <div data-hf-id="hf-tjp3" class="pad">
+            <div data-hf-id="hf-3nq7" class="label">Your product · @maya AI + child app</div>
+            <div data-hf-id="hf-thy4" class="row">
+              <div data-hf-id="hf-kda4" class="phone">
+                <img data-hf-id="hf-yuwz" data-layout-allow-overflow src="assets/media/ui-dashboard.png" alt="Maya parent app home dashboard">
+                <div data-hf-id="hf-92b8" class="hl"></div>
+              </div>
+              <div data-hf-id="hf-vshe" class="chat">
+                <div data-hf-id="hf-tlzt" class="bub-u"><span data-hf-id="hf-7aln" class="typed"></span><span data-hf-id="hf-uuxe" class="caret"></span></div>
+                <div data-hf-id="hf-yl36" class="tool">control_device → Tv · OFF</div>
+                <div data-hf-id="hf-zv71" class="bub-a"><div data-hf-id="hf-8fe8" class="who">MAYA</div><div data-hf-id="hf-ag50" class="msg">Done — I turned off the TV.</div></div>
+              </div>
+              <div data-hf-id="hf-rkgw" class="child card">
+                <div data-hf-id="hf-s2tq" class="label">Child app · Ali</div>
+                <div data-hf-id="hf-ji2a" class="ringrow">
+                  <svg data-hf-id="hf-9i52" class="ring" viewBox="0 0 210 210"><circle data-hf-id="hf-1naf" class="bg" cx="105" cy="105" r="90" /><circle data-hf-id="hf-ivpo" class="fg" cx="105" cy="105" r="90" transform="rotate(-90 105 105)" /></svg>
+                  <div data-hf-id="hf-yeow"><div data-hf-id="hf-eqms" class="time">0h 00m</div><div data-hf-id="hf-wq3k" class="lim">of a 2h daily limit</div></div>
+                </div>
+                <div data-hf-id="hf-8l3m" class="loc">
+                  <svg data-hf-id="hf-e7ft" viewBox="0 0 48 48"><path data-hf-id="hf-koj8" d="M24 44s-14-13-14-24a14 14 0 0 1 28 0c0 11-14 24-14 24z" fill="none" stroke="#0A0A0A" stroke-width="4" stroke-linejoin="round" /><circle data-hf-id="hf-0s0b" cx="24" cy="20" r="5" fill="#536878" /></svg>
+                  <div data-hf-id="hf-y7yw"><div data-hf-id="hf-5pap" class="label">Last location</div><b data-hf-id="hf-1j7d">Home · 3:02 PM</b></div>
+                </div>
+                <div data-hf-id="hf-xolh" class="perms">
+                  <div data-hf-id="hf-j2ns" class="label" style="margin-bottom: 8px;">Outlet permissions</div>
+                  <div data-hf-id="hf-c0lj" class="perm p1"><b data-hf-id="hf-nhan">Tv</b><span data-hf-id="hf-fkh4" class="st">ALLOWED</span><div data-hf-id="hf-tk6r" class="tg"><div data-hf-id="hf-0pvg" class="knob"></div></div></div>
+                  <div data-hf-id="hf-3cpo" class="perm p2"><b data-hf-id="hf-3vjn">Ps5</b><span data-hf-id="hf-w6zk" class="st">ALLOWED</span><div data-hf-id="hf-2vo3" class="tg"><div data-hf-id="hf-860k" class="knob"></div></div></div>
+                  <div data-hf-id="hf-44dh" class="perm p3"><b data-hf-id="hf-sbxp">Channel 3</b><span data-hf-id="hf-v02h" class="st">ALLOWED</span><div data-hf-id="hf-2hd2" class="tg"><div data-hf-id="hf-6z3h" class="knob"></div></div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <script>
+        (function () {
+          var ID = "f08-ai-child";
+          var DUR = 11.05;
+          var all = document.querySelectorAll('[data-composition-id="' + ID + '"]');
+          var R = all[all.length - 1];
+          function q(s) { return R.querySelector(s); }
+          function qa(s) { return Array.prototype.slice.call(R.querySelectorAll(s)); }
+          var tl = gsap.timeline({ paused: true });
+          function rise(el, at, o) {
+            o = o || {};
+            tl.fromTo(el, { opacity: 0, x: o.x || 0, y: o.y == null ? 36 : o.y, scale: o.s || 1 }, { opacity: 1, x: 0, y: 0, scale: 1, duration: o.d || 0.5, ease: o.e || "power3.out" }, at);
+          }
+          function clamp(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+
+          tl.fromTo(q(".stage"), { opacity: 0, filter: "blur(10px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.45, ease: "power2.out" }, 0);
+          tl.fromTo(q(".haze"), { x: 0, y: 0 }, { x: -60, y: 30, duration: DUR, ease: "none" }, 0);
+          rise(q(".label"), 0.15, { x: -24, y: 0, d: 0.45 });
+          rise(q(".phone"), 0.3, { x: -60, y: 0, d: 0.6 });
+
+          // "Just say, 'Maya, turn off the TV'" — typed ask, tool call, confirmation.
+          var TEXT = "@maya turn off the TV";
+          var typed = q(".typed");
+          var caret = q(".caret");
+          var ring = q(".ring .fg");
+          var RLEN = ring.getTotalLength();
+          ring.style.strokeDasharray = RLEN;
+          var timeEl = q(".time");
+          var eOut = gsap.parseEase("power3.out");
+          var drv = { t: 0 };
+          function render(t) {
+            var n = Math.floor(clamp((t - 0.5) / 1.3) * TEXT.length);
+            typed.textContent = TEXT.substring(0, n);
+            var typing = t >= 0.5 && t < 1.85;
+            var blinkOn = Math.sin(t * Math.PI * 2 / 0.8) > 0;
+            caret.style.opacity = t >= 2.2 ? "0" : typing ? "1" : blinkOn ? "1" : "0";
+            var p = eOut(clamp((t - 5.7) / 1.6));
+            var mins = Math.round(102 * p);
+            timeEl.textContent = Math.floor(mins / 60) + "h " + (mins % 60 < 10 ? "0" : "") + (mins % 60) + "m";
+            ring.style.strokeDashoffset = RLEN * (1 - 0.85 * p);
+            stEls[0].textContent = t >= offAt[0] ? "BLOCKED" : "ALLOWED";
+            stEls[1].textContent = t >= offAt[1] ? "BLOCKED" : "ALLOWED";
+          }
+          var perms = qa(".perm");
+          var stEls = perms.map(function (p) { return p.querySelector(".st"); });
+          var offAt = [8.05, 8.3];
+          render(0);
+          // One driver renders every text/ring state as a pure function of scene time.
+          tl.fromTo(drv, { t: 0 }, { t: DUR, duration: DUR, ease: "none", onUpdate: function () { render(drv.t); } }, 0);
+          rise(q(".bub-u"), 0.35, { y: 20, s: 0.92, d: 0.4 });
+          rise(q(".tool"), 2.35, { y: 16, s: 0.9, d: 0.4 });
+          tl.fromTo(q(".hl"), { opacity: 0, scale: 1.08 }, { opacity: 1, scale: 1, duration: 0.4, ease: "power3.out" }, 2.6);
+          rise(q(".bub-a"), 3.2, { y: 24, d: 0.45 });
+
+          // "The child app shares screen time and location…"
+          rise(q(".child"), 5.2, { x: 60, y: 0, d: 0.6 });
+          rise(q(".loc"), 6.4, { y: 20, d: 0.45 });
+
+          // "…and parents set which outlets each child may use."
+          rise(q(".perms"), 7.6, { y: 20, d: 0.45 });
+          [0, 1].forEach(function (i) {
+            tl.fromTo(perms[i].querySelector(".knob"), { x: 0 }, { x: -34, duration: 0.3, ease: "power3.inOut", immediateRender: false }, offAt[i]);
+            tl.fromTo(perms[i].querySelector(".tg"), { backgroundColor: "#536878" }, { backgroundColor: "rgba(10,10,10,0.22)", duration: 0.3, ease: "none", immediateRender: false }, offAt[i]);
+          });
+
+          window.__timelines["f08-ai-child"] = tl;
+        })();
+      </script>
+    </template>
+  </body>
+</html>

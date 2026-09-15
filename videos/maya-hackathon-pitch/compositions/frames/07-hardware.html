@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <title>F7 · Your product: the smart extension</title>
+  </head>
+  <body>
+    <template>
+      <style>
+        #root[data-composition-id="f07-hardware"] { position: absolute; inset: 0; overflow: hidden; font-family: "Montserrat", sans-serif; color: #0A0A0A; }
+        [data-composition-id="f07-hardware"] .stage { position: absolute; inset: 0; overflow: hidden; background: #E5E4E2; font-family: "Montserrat", sans-serif; color: #0A0A0A; }
+        [data-composition-id="f07-hardware"] .haze { position: absolute; left: -80px; top: -80px; width: 2080px; height: 1240px; background: radial-gradient(42% 48% at 96% -6%, rgba(10, 10, 10, 0.38) 0%, rgba(10, 10, 10, 0) 70%), radial-gradient(62% 62% at 80% 0%, rgba(83, 104, 120, 0.48) 0%, rgba(83, 104, 120, 0) 72%), radial-gradient(55% 60% at 0% 100%, rgba(255, 255, 255, 0.75) 0%, rgba(255, 255, 255, 0) 70%); }
+        [data-composition-id="f07-hardware"] .label { font-family: "JetBrains Mono", monospace; font-size: 24px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #3E4F5C; }
+        [data-composition-id="f07-hardware"] .card { background: rgba(255, 255, 255, 0.6); border: 3px solid rgba(10, 10, 10, 0.12); border-radius: 24px; box-shadow: 0 24px 60px rgba(10, 10, 10, 0.1); box-sizing: border-box; }
+        [data-composition-id="f07-hardware"] .head { position: absolute; left: 120px; top: 90px; width: 1680px; display: flex; flex-direction: column; gap: 14px; z-index: 2; }
+        [data-composition-id="f07-hardware"] .h1 { font-size: 56px; font-weight: 900; letter-spacing: -0.02em; line-height: 1.05; }
+        [data-composition-id="f07-hardware"] .world { position: absolute; left: 0; top: 0; width: 5200px; height: 1080px; }
+        [data-composition-id="f07-hardware"] .wires { position: absolute; left: 0; top: 0; width: 5200px; height: 1080px; }
+        [data-composition-id="f07-hardware"] .wires path { fill: none; stroke: #536878; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
+        [data-composition-id="f07-hardware"] .nd { position: absolute; display: flex; flex-direction: column; justify-content: center; padding: 0 26px; }
+        [data-composition-id="f07-hardware"] .nd b { font-size: 30px; font-weight: 700; line-height: 1.15; }
+        [data-composition-id="f07-hardware"] .nd span { font-family: "JetBrains Mono", monospace; font-size: 20px; color: rgba(10, 10, 10, 0.64); margin-top: 4px; }
+        [data-composition-id="f07-hardware"] .esp { border-color: #536878; }
+        [data-composition-id="f07-hardware"] .esp b { font-size: 50px; font-weight: 900; color: #536878; letter-spacing: -0.02em; }
+        [data-composition-id="f07-hardware"] .out { position: absolute; left: 1500px; width: 300px; height: 118px; display: flex; align-items: center; gap: 16px; padding: 0 22px; }
+        [data-composition-id="f07-hardware"] .out .dot { width: 26px; height: 26px; border-radius: 50%; background: rgba(10, 10, 10, 0.2); flex: none; }
+        [data-composition-id="f07-hardware"] .out b { font-size: 28px; font-weight: 700; flex: 1; line-height: 1.15; }
+        [data-composition-id="f07-hardware"] .out .st { font-family: "JetBrains Mono", monospace; font-size: 22px; font-weight: 700; color: rgba(10, 10, 10, 0.62); }
+        [data-composition-id="f07-hardware"] .gpio { position: absolute; left: 1010px; top: 716px; font-family: "JetBrains Mono", monospace; font-size: 20px; font-weight: 700; color: #3E4F5C; }
+        [data-composition-id="f07-hardware"] .capA { position: absolute; left: 120px; top: 880px; font-size: 36px; font-weight: 700; }
+        [data-composition-id="f07-hardware"] .st-card { position: absolute; padding: 44px 48px; display: flex; flex-direction: column; gap: 16px; }
+        [data-composition-id="f07-hardware"] .vis { display: flex; align-items: center; gap: 28px; height: 140px; }
+        [data-composition-id="f07-hardware"] .vis svg { height: 130px; width: auto; overflow: visible; }
+        [data-composition-id="f07-hardware"] .vis svg * { fill: none; stroke: #0A0A0A; stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; }
+        [data-composition-id="f07-hardware"] .vis svg .acc { stroke: #536878; }
+        [data-composition-id="f07-hardware"] .st-card h3 { font-size: 48px; font-weight: 900; letter-spacing: -0.02em; margin: 0; line-height: 1.05; }
+        [data-composition-id="f07-hardware"] .st-card p { font-size: 30px; font-weight: 700; margin: 0; line-height: 1.25; color: rgba(10, 10, 10, 0.78); }
+        [data-composition-id="f07-hardware"] .st-card .m { font-family: "JetBrains Mono", monospace; font-size: 24px; font-weight: 700; color: #3E4F5C; }
+      </style>
+      <div data-hf-id="hf-ps05" id="root" data-composition-id="f07-hardware" data-width="1920" data-height="1080">
+        <div data-hf-id="hf-tan6" class="stage">
+          <div data-hf-id="hf-k3by" class="haze" data-layout-allow-overflow></div>
+          <div data-hf-id="hf-n1vw" class="world" data-layout-allow-overflow>
+            <svg data-hf-id="hf-37m4" class="wires" viewBox="0 0 5200 1080" data-layout-allow-overflow>
+              <path data-hf-id="hf-49lh" d="M370 620 L440 620" />
+              <path data-hf-id="hf-c019" d="M690 620 L760 620" />
+              <path data-hf-id="hf-e8zt" d="M1080 620 L1150 620" />
+              <path data-hf-id="hf-mnvh" d="M1410 620 L1455 620 L1455 439 L1500 439" />
+              <path data-hf-id="hf-neyo" d="M1455 620 L1500 620" />
+              <path data-hf-id="hf-8kll" d="M1455 620 L1455 801 L1500 801" />
+              <path data-hf-id="hf-0zsw" class="hop hop1" d="M1830 620 L2100 620" />
+              <path data-hf-id="hf-wjxm" class="hop hop2" d="M2940 610 L3200 610" />
+              <path data-hf-id="hf-zktn" class="hop hop3" d="M3980 610 L4220 610" />
+            </svg>
+            <div data-hf-id="hf-m9va" class="nd card n1" style="left: 120px; top: 560px; width: 250px; height: 120px;"><b data-hf-id="hf-dc56">230V AC mains</b><span data-hf-id="hf-5v3v">wall power in</span></div>
+            <div data-hf-id="hf-xsgu" class="nd card n2" style="left: 440px; top: 560px; width: 250px; height: 120px;"><b data-hf-id="hf-ot9i">5V DC supply</b><span data-hf-id="hf-0k5k">powers the board</span></div>
+            <div data-hf-id="hf-rwvs" class="nd card esp n3" style="left: 760px; top: 540px; width: 320px; height: 160px;"><b data-hf-id="hf-omgu">ESP32</b><span data-hf-id="hf-gscy">Wi-Fi · Bluetooth</span></div>
+            <div data-hf-id="hf-35bi" class="nd card n4" style="left: 1150px; top: 560px; width: 260px; height: 120px;"><b data-hf-id="hf-05t1">3-channel relay</b><span data-hf-id="hf-0i7n">switches mains</span></div>
+            <div data-hf-id="hf-l8r3" class="gpio">GPIO 2 · 4 · 5</div>
+            <div data-hf-id="hf-0yrb" class="out card o1" style="top: 380px;"><div data-hf-id="hf-lu65" class="dot"></div><b data-hf-id="hf-2uou">CH1 · TV</b><span data-hf-id="hf-1tel" class="st">OFF</span></div>
+            <div data-hf-id="hf-nzpn" class="out card o2" style="top: 561px;"><div data-hf-id="hf-ww7l" class="dot"></div><b data-hf-id="hf-wxz9">CH2 · Decoder</b><span data-hf-id="hf-4tgx" class="st">OFF</span></div>
+            <div data-hf-id="hf-9d6f" class="out card o3" style="top: 742px;"><div data-hf-id="hf-y34o" class="dot"></div><b data-hf-id="hf-tvpx">CH3 · Wi-Fi router</b><span data-hf-id="hf-60e0" class="st">OFF</span></div>
+            <div data-hf-id="hf-70hr" class="capA">Three outlets · each one switched independently</div>
+
+            <div data-hf-id="hf-aj62" class="st-card card sB" style="left: 2100px; top: 380px; width: 840px; height: 460px;">
+              <div data-hf-id="hf-bt2y" class="vis">
+                <svg data-hf-id="hf-d3vz" viewBox="0 0 80 130"><rect data-hf-id="hf-u1nf" x="6" y="4" width="68" height="122" rx="14" /><path data-hf-id="hf-nobu" d="M30 110h20" /></svg>
+                <svg data-hf-id="hf-1nd7" viewBox="0 0 150 130"><path data-hf-id="hf-hp2d" class="acc wv w1" d="M40 45 a28 28 0 0 1 0 40" /><path data-hf-id="hf-3d4t" class="acc wv w2" d="M62 30 a48 48 0 0 1 0 70" /><path data-hf-id="hf-jbf9" class="acc wv w3" d="M84 15 a68 68 0 0 1 0 100" /></svg>
+                <svg data-hf-id="hf-blzd" viewBox="0 0 130 130"><rect data-hf-id="hf-mbcl" x="8" y="8" width="114" height="114" rx="26" /><rect data-hf-id="hf-525l" x="42" y="40" width="10" height="26" rx="5" /><rect data-hf-id="hf-lk4k" x="78" y="40" width="10" height="26" rx="5" /><path data-hf-id="hf-2e81" d="M55 96v-8a10 10 0 0 1 20 0v8z" /></svg>
+              </div>
+              <h3 data-hf-id="hf-lhg1">One-time Bluetooth setup</h3>
+              <p data-hf-id="hf-9x0d">The parent app sends the home Wi-Fi and a device PIN</p>
+            </div>
+
+            <div data-hf-id="hf-pzsl" class="st-card card sC" style="left: 3200px; top: 400px; width: 780px; height: 420px;">
+              <div data-hf-id="hf-n6vy" class="vis">
+                <svg data-hf-id="hf-hjb1" viewBox="0 0 130 130"><rect data-hf-id="hf-ocvj" x="14" y="14" width="102" height="40" rx="10" /><rect data-hf-id="hf-z9pn" x="14" y="76" width="102" height="40" rx="10" /><path data-hf-id="hf-4kf4" d="M34 34h6M34 96h6M60 34h36M60 96h36" /></svg>
+              </div>
+              <h3 data-hf-id="hf-b7v0">Cloud server</h3>
+              <div data-hf-id="hf-zyr4" class="m">FastAPI on Fly.io · Singapore</div>
+              <p data-hf-id="hf-2d05">Live WebSocket connection to the socket</p>
+            </div>
+
+            <div data-hf-id="hf-x5gv" class="st-card card sD" style="left: 4220px; top: 400px; width: 780px; height: 420px;">
+              <div data-hf-id="hf-nl6z" class="vis">
+                <svg data-hf-id="hf-latr" viewBox="0 0 80 130"><rect data-hf-id="hf-b6sb" x="6" y="4" width="68" height="122" rx="14" /><path data-hf-id="hf-hgvi" d="M30 110h20" /></svg>
+                <svg data-hf-id="hf-54cz" viewBox="0 0 90 90"><path data-hf-id="hf-1aw5" class="acc" d="M20 34a26 26 0 0 1 46-10M70 56a26 26 0 0 1-46 10M62 12l4 12-12 2M28 78l-4-12 12-2" /></svg>
+                <svg data-hf-id="hf-kwiq" viewBox="0 0 80 130"><rect data-hf-id="hf-crs0" x="14" y="30" width="52" height="96" rx="12" /><path data-hf-id="hf-ekkd" d="M32 112h16" /></svg>
+              </div>
+              <h3 data-hf-id="hf-uvhl">Every family phone, in sync</h3>
+              <div data-hf-id="hf-1m1y" class="m">Parent app · Child app</div>
+            </div>
+          </div>
+          <div data-hf-id="hf-z992" class="head">
+            <div data-hf-id="hf-nsk8" class="label">Your product · how it works</div>
+            <div data-hf-id="hf-2nay" class="h1">ESP32 smart extension · 3 independent outlets</div>
+          </div>
+        </div>
+      </div>
+      <script>
+        (function () {
+          var ID = "f07-hardware";
+          var DUR = 11.29;
+          var all = document.querySelectorAll('[data-composition-id="' + ID + '"]');
+          var R = all[all.length - 1];
+          function q(s) { return R.querySelector(s); }
+          function qa(s) { return Array.prototype.slice.call(R.querySelectorAll(s)); }
+          var tl = gsap.timeline({ paused: true });
+          function rise(el, at, o) {
+            o = o || {};
+            tl.fromTo(el, { opacity: 0, x: o.x || 0, y: o.y == null ? 36 : o.y, scale: o.s || 1 }, { opacity: 1, x: 0, y: 0, scale: 1, duration: o.d || 0.5, ease: o.e || "power3.out" }, at);
+          }
+          function draw(p, at, d) {
+            var len = p.getTotalLength();
+            p.style.strokeDasharray = len;
+            tl.fromTo(p, { strokeDashoffset: len }, { strokeDashoffset: 0, duration: d, ease: "power2.out" }, at);
+          }
+
+          tl.fromTo(q(".stage"), { opacity: 0, filter: "blur(10px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.45, ease: "power2.out" }, 0);
+          tl.fromTo(q(".haze"), { x: 0, y: 0 }, { x: -60, y: 30, duration: DUR, ease: "none" }, 0);
+          rise(q(".head .label"), 0.15, { x: -24, y: 0, d: 0.45 });
+          rise(q(".head .h1"), 0.35, { y: 30, d: 0.5 });
+
+          // Camera: one world wrapper panned as a pure function of time (station A → B → C+D).
+          var world = q(".world");
+          var ease = gsap.parseEase("power3.inOut");
+          function camX(t) {
+            if (t < 5.6) return 0;
+            if (t < 6.6) return -1560 * ease((t - 5.6) / 1.0);
+            if (t < 7.5) return -1560;
+            if (t < 8.7) return -1560 - 1580 * ease((t - 7.5) / 1.2);
+            return -3140;
+          }
+          world.style.transform = "translate(0px, 0px)";
+          var cam = { t: 0 };
+          tl.fromTo(cam, { t: 0 }, { t: DUR, duration: DUR, ease: "none", onUpdate: function () { world.style.transform = "translate(" + camX(cam.t) + "px, 0px)"; } }, 0);
+
+          // "An ESP32 three-channel smart extension…" — the block diagram assembles.
+          [".n1", ".n2", ".n3", ".n4"].forEach(function (s, i) { rise(q(s), 0.6 + i * 0.2, { y: 30, s: s === ".n3" ? 0.85 : 1, d: 0.5 }); });
+          qa(".o1, .o2, .o3").forEach(function (el, i) { rise(el, 1.4 + i * 0.1, { x: 40, y: 0, d: 0.45 }); });
+          qa(".wires path:not(.hop)").forEach(function (p, i) { draw(p, 1.3 + i * 0.12, 0.35); });
+          rise(q(".gpio"), 2.2, { y: 10, d: 0.4 });
+
+          // "…switches each outlet independently." — the three channels come on one by one.
+          var outs = qa(".out");
+          var sts = outs.map(function (o) { return o.querySelector(".st"); });
+          var onAt = [3.64, 3.99, 4.34];
+          outs.forEach(function (o, i) {
+            tl.fromTo(o.querySelector(".dot"), { backgroundColor: "rgba(10,10,10,0.2)", scale: 1 }, { backgroundColor: "#536878", scale: 1.25, duration: 0.25, ease: "power2.out", immediateRender: false }, onAt[i]);
+            tl.to(o.querySelector(".dot"), { scale: 1, duration: 0.3, ease: "power2.out" }, onAt[i] + 0.25);
+            tl.fromTo(o, { borderColor: "rgba(10,10,10,0.12)" }, { borderColor: "#536878", duration: 0.25, ease: "none", immediateRender: false }, onAt[i]);
+          });
+          var sw = { t: 0 };
+          tl.fromTo(sw, { t: 0 }, { t: DUR, duration: DUR, ease: "none", onUpdate: function () { sts.forEach(function (s, i) { s.textContent = sw.t >= onAt[i] ? "ON" : "OFF"; }); } }, 0);
+          rise(q(".capA"), 4.4, { y: 24, d: 0.5 });
+
+          // "Set it up over Bluetooth once…"
+          draw(q(".hop1"), 5.45, 0.7);
+          rise(q(".sB"), 5.9, { x: 80, y: 0, d: 0.6 });
+          qa(".sB .wv").forEach(function (w, i) {
+            tl.fromTo(w, { opacity: 0.15 }, { opacity: 1, duration: 0.3, ease: "power1.out", yoyo: true, repeat: 3, immediateRender: false }, 6.45 + i * 0.15);
+          });
+
+          // "…and it stays synced with every family phone in real time."
+          draw(q(".hop2"), 7.4, 0.6);
+          rise(q(".sC"), 7.9, { x: 80, y: 0, d: 0.6 });
+          draw(q(".hop3"), 8.3, 0.5);
+          rise(q(".sD"), 8.45, { x: 80, y: 0, d: 0.6 });
+
+          window.__timelines["f07-hardware"] = tl;
+        })();
+      </script>
+    </template>
+  </body>
+</html>

@@ -1,0 +1,26 @@
+{
+  "styles": {
+    "Puck": "Read this as an upbeat, confident hackathon pitch presenter. Lively, clear, brisk pace, no long pauses:",
+    "Sulafat": "Read this as a warm, reassuring presenter speaking to busy parents. Natural, clear, steady pace, no long pauses:"
+  },
+  "lines": [
+    {"id": "01-hook", "frame": 1, "voice": "Sulafat", "text": "Three P.M. You're at work. Is the TV at home still on? And where is your child right now?"},
+    {"id": "02-title", "frame": 2, "voice": "Puck", "text": "This is Maya — a family-centred A-I-o-T ecosystem for smarter and safer home management. One smart socket, one AI assistant, one family app."},
+    {"id": "03-problem", "frame": 3, "voice": "Sulafat", "text": "Malaysian women's workforce participation just hit a record fifty-six point six percent. In our survey of seventy-three working parents, eighty percent said their children spend two hours or more a day unsupervised."},
+    {"id": "04-pain", "frame": 4, "voice": "Sulafat", "text": "Parents juggle separate apps — seventy percent feel app fatigue — while devices on standby quietly waste almost ten percent of home electricity."},
+    {"id": "05-shortcomings", "frame": 5, "voice": "Puck", "text": "Today's options fall short. Most smart plugs handle a single socket. Voice assistants follow commands, but aren't linked to your child's screen time or location. And parental apps rarely connect to the home."},
+    {"id": "06-concept", "frame": 6, "voice": "Sulafat", "text": "Maya connects all three — home, parent and child — in one family-centred hub that can act on context."},
+    {"id": "07-hardware", "frame": 7, "voice": "Puck", "text": "An E-S-P thirty-two, three-channel smart extension switches each outlet independently. Set it up over Bluetooth once, and it stays synced with every family phone in real time."},
+    {"id": "08-ai-child", "frame": 8, "voice": "Puck", "text": "Just say, 'Maya, turn off the TV' — the AI agent finds the right outlet and switches it. The child app shares screen time and location, and parents set which outlets each child may use."},
+    {"id": "09-benefits", "frame": 9, "voice": "Sulafat", "text": "One app instead of many. Hands-free control. Peace of mind at work. Less wasted power — and no rewiring."},
+    {"id": "10a-sdg", "frame": 10, "voice": "Puck", "text": "Maya delivers on four S-D-Gs: eleven, safer communities; three, well-being; seven, clean energy; and twelve, responsible consumption."},
+    {"id": "10b-esg", "frame": 10, "voice": "Sulafat", "text": "And on all three E-S-G pillars: Environmental, less standby waste; Social, safer children; Governance, secure and open by design."},
+    {"id": "11-market", "frame": 11, "voice": "Puck", "text": "The market is ready. Smart homes are heading to four hundred and fifty billion US dollars by twenty thirty-two, smart plugs to thirty billion, and parental-control software to over four billion."},
+    {"id": "12-evidence", "frame": 12, "voice": "Puck", "text": "Eighty-four percent of parents find smart extensions useful, and eighty-two percent would install a child monitoring app. Our prototype passed all forty tests on about ninety-five ringgit of hardware — and development is active: iteration four, for sensors and hubs, is underway."},
+    {"id": "13-ip", "frame": 13, "voice": "Sulafat", "text": "Maya is open source under the Apache two point zero license, built on research at Universiti Selangor."},
+    {"id": "14a-close", "frame": 14, "voice": "Sulafat", "text": "Other smart homes switch things on and off."},
+    {"id": "14b-close", "frame": 14, "voice": "Puck", "text": "Maya understands your family."},
+    {"id": "14c-close", "frame": 14, "voice": "Sulafat", "text": "Affordable, intelligent and open — so every working parent can breathe easy, knowing home is in good hands."},
+    {"id": "14d-close", "frame": 14, "voice": "Puck", "text": "Maya: home, handled."}
+  ]
+}
