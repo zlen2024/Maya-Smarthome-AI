@@ -10,7 +10,7 @@ The goal the protocol exists for: a contributor builds new hardware, drops it in
 firmware to app — `ch1`/`ch2`/`ch3` appeared 76 times across 6 files when the
 migration was planned.
 
-## Status: steps 1, 3, 4 and 5 done, step 2 server-complete, spec at revision 2.2 (2026-10-10)
+## Status: steps 1, 3, 4, 5 and 6 done, step 2 server-complete, spec at revision 2.3 (2026-10-10)
 
 §10 defines a six-step migration order. Only the first is implemented.
 
@@ -21,7 +21,7 @@ migration was planned.
 | 3. Maya swaps her relay tool for a generic `set_capability` | **done** |
 | 4. Extract the Arduino library | **done** (compiles for ESP32; not yet flashed) |
 | 5. Peering: grants, local link, audit (§7) | spec done (2.2); **5a server done; 5b library done**; the ESP-NOW radio has never run |
-| 6. Device to Maya (§8) | not started |
+| 6. Device to Maya (§8) | **done** (spec 2.3); the app has no switch for it yet; the real model has not been tried |
 
 **Steps 1–3 needed no firmware change.** The shipped ESP32 still speaks protocol 1 and
 is served by the shim — which is the point of the migration order, and what
@@ -399,3 +399,42 @@ harness cannot stand in for a radio. The next real test is two boards. The hub r
 (§5.9) is a *user* of this link and is not started; neither is device→Maya (§8).
 
 **Cost** on the ESP32: about 18 KB of RAM and 25 KB of flash for the local link.
+
+## Step 6 (2026-10-10): a device asks Maya for help
+
+§8 as first drafted had four bullets and one phrase doing all the work: a device's
+tool calls are "constrained to that device's granted scope". A device has no
+granted scope — grants belonged to children. Revision 2.3 supplies one by **reusing
+what already exists**: a device's reach through Maya is exactly the reach it has over
+the local link, i.e. its active outgoing peer grants. No second permission model, and
+a device cannot gain by asking Maya anything it could not do by radio.
+
+| Question | Answer |
+|---|---|
+| Who may invoke | `Device.can_invoke_agent`, **off by default**, set only by someone who can manage devices (`PUT /api/devices/{id}/agent`). Re-read before *every action*, so switching it off stops a run in progress. |
+| What may Maya do for it | `set_capability` on keys in its active `send` grants that are still eligible (so never `confirm` or `agent:deny` — no person is present to say yes), and `notify_house`. Nothing else exists for it. |
+| What does the model see | The device's name, and only the controls it can reach with their values. No other device, no child. |
+| Hostile text | `text` is data. The prompt says so, but nothing depends on it: every limit is a database check in code. |
+| Cost | A device: 6 an hour, 30 a day; a house: 100 a day; one outstanding; refused attempts are limited too (10 an hour, then silence). Counted before the model is called, whether or not it succeeds. |
+| Attribution | Activity log with `actor_type: "device"` for the request and for each action; chat posts are labelled `[device name]`. |
+
+**Two design choices worth knowing.** Out-of-reach requests all get one sentence —
+"that control is not available to you" — whether the device does not exist, the
+control does not exist, or it merely isn't granted, so Maya cannot be used to learn
+what other devices can do. And the reach is **computed when the action runs**, not
+when the request arrived: revoking a pairing, or withdrawing the permission, between
+the model deciding and the server acting stops the action. Both are tested by
+changing the world inside the model call.
+
+**How it is tested.** `test_agent.py` replaces only `ai.call_model`, plays a robot,
+a fan, an unrelated lock and a child over real WebSockets, and tries to go past what
+the robot was given six ways. Three deliberate bugs — no re-check of the permission
+before an action, reach ignoring the grant's scope, no cap on chat posts — each failed
+it. The library side (`askMaya`) is checked by `test_library.py`, including once
+against the real server; two mutations (accept any reply, no 280-byte limit) failed it.
+
+**Not done.** The app has no switch for `can_invoke_agent` (no Flutter SDK). The real
+model has never been run against this: how `gpt-oss:20b` behaves given hostile text is
+untested, and while no server-side limit depends on it, the quality of its replies
+does. Chains (a device's command causing another device to ask Maya) are bounded by
+the limits and attributed, not detected.

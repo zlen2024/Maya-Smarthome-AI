@@ -89,6 +89,15 @@ control a device declares, by `key`, with a value of that control's own type.
 | `add_homework` | **Parents only** |
 | `read_activity_log` | House members (limit 1–50, default 15) |
 
+### A fourth caller: a device (2026-10-10)
+
+`sender_role` is now `"parent"`, `"child"` or `"device"`. A device's request
+(`type: "agent"` on its WebSocket, PROTOCOL.md §8) uses a different system prompt
+(`ai.DEVICE_SYSTEM_PROMPT`) and a different, smaller tool list (`ai.DEVICE_TOOLS`:
+`set_capability` and `notify_house`), and `_execute_maya_tool` hands it straight to
+`_execute_device_tool`, which refuses any other tool by name whatever the model
+asks for. Details and the test are in [Device protocol v2 §Step 6](device-protocol.md#step-6-2026-10-10-a-device-asks-maya-for-help).
+
 ### Permissions live in the code, not the prompt
 
 `_resolve_child_for` (`main.py`) is the privacy boundary for the three child-data

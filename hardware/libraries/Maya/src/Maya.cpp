@@ -503,6 +503,10 @@ void Maya::refreshHealth() {
   setNumber("_uptime", millis() / 1000);
 }
 
+bool Maya::askMaya(const char* text, mayalib::AgentReplyFn onReply) {
+  return wsConnected && agentRequest(DEVICE_ID.c_str(), text, onReply, sendFrame);
+}
+
 const char* Maya::id() const { return DEVICE_ID.c_str(); }
 bool Maya::connected() const { return wsConnected; }
 
@@ -597,6 +601,7 @@ void Maya::loop() {
     rxTail = (rxTail + 1) % RX_SLOTS;
   }
   syncEspNowPeers(*this);
+  agentTick();   // a request the server never answered is given up on (8.1)
 
   // Zombie-link watchdog: with pings every 15s the server should never be silent
   // for long while "connected". If it is, force a disconnect so the reconnect

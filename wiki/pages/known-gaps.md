@@ -121,3 +121,10 @@ through the real server. **No frame has ever crossed an actual ESP-NOW link**: t
 radio glue in `Maya.cpp` compiles and is otherwise unverified, and the tests carry
 frames through Python. The hub relay and the app's pairing UI are not started. See
 [device-protocol §Step 5b](device-protocol.md#step-5b-2026-10-10-the-librarys-half-of-the-local-link).
+
+## Device-to-Maya: no UI, and no real-model test (2026-10-10)
+
+`PUT /api/devices/{id}/agent` is the only way to allow a device to ask Maya; the app has
+no switch for it (no Flutter SDK on the machine). The scripted model proves the limits;
+how the real `gpt-oss:20b` answers a hostile or garbled device request has not been run.
+See [device-protocol §Step 6](device-protocol.md#step-6-2026-10-10-a-device-asks-maya-for-help).

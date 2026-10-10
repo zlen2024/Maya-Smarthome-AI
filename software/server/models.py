@@ -115,6 +115,9 @@ class Device(Base):
     # the radio-level source address against the peer's MAC. Null until the
     # device has said, and a device without one cannot be paired.
     mac = Column(String, nullable=True)
+    # May this device ask Maya to act (§8.2)? Off by default, set only by a person
+    # who can manage devices, and re-read before every action a request takes.
+    can_invoke_agent = Column(Boolean, default=False, nullable=False)
 
     house = relationship("House", back_populates="devices")
     extensions = relationship("SmartExtension", back_populates="device", cascade="all, delete-orphan")

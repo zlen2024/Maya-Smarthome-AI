@@ -321,3 +321,18 @@ deliberate bugs were confirmed to fail the new test; all four examples compile f
 ESP32. No graph rebuild: the library is outside both graph roots.
 **Found:** `parseIsoUtc` overflowed for dates after 2038 (`long` is 32-bit on the
 ESP32). **Not verified:** any radio.
+
+## [2026-10-10] ingest | Protocol v2 step 6: device to Maya (spec 2.3)
+
+Rewrote `PROTOCOL.md` §8 (revision 2.3): a device's reach is its outgoing peer grants,
+off by default, two tools, data-not-instructions, limits, attribution. Built
+`_execute_device_tool`, `_handle_agent_request`, `PUT /api/devices/{id}/agent`,
+`Device.can_invoke_agent`, `ai.DEVICE_TOOLS`/`DEVICE_SYSTEM_PROMPT`, and the library's
+`askMaya`. `test_agent.py` (6 checks) added; `test_library.py` extended. All server
+self-checks, both library tests and the three examples (ESP32 compile) pass; five
+deliberate bugs (three server, two library) were confirmed to fail the new tests.
+
+Updated: `pages/device-protocol.md` (Step 6), `pages/maya-ai-agent.md`,
+`pages/data-model.md`, `pages/security-notes.md` (§10), `pages/known-gaps.md`,
+`todos.md`, `software/server/README.md`, library README. Graph rebuilt.
+**Not verified:** the real model; any radio.

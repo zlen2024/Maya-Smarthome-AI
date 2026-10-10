@@ -1,6 +1,6 @@
 # Maya Device Protocol
 
-**Version 2 (draft), document revision 2.2** · Status: §10 step 1 implemented
+**Version 2 (draft), document revision 2.3** · Status: §10 step 1 implemented
 2026-10-10; steps 2-6 proposed. The server stores descriptors and shims protocol 1; the app, Maya and
 the firmware are untouched and still speak protocol 1. See
 `wiki/pages/device-protocol.md` for what exists versus what is still on paper —
@@ -12,6 +12,13 @@ document: claiming (§4.1), permissions (§5.10), labels (§5.11), history (§5.
 the status vocabulary (§5.8), the public API surface (§12), and the smaller
 interop gaps marked there. `proto` stays **2** — one optional ack field was added
 (§6.2), which §11 classes as a free change.
+
+Revision 2.3 (2026-10-10) specified device-to-Maya (§8): a device's reach through
+Maya is exactly its outgoing peer grants (§7), the permission to invoke is off by
+default and set only by a person, device text is treated as data, the model sees only
+what the device may reach, and every request is rate limited and attributed. New
+frames `agent` and `agent_reply` were already named; their `status`, limits and
+`retry_after` are new optional fields, so `proto` stays **2**.
 
 Revision 2.2 (2026-10-10) specified the device-to-device link (§7) well enough to
 build: who may pair and what may be granted, the one-way grant and its `role`,
@@ -1331,24 +1338,119 @@ A device may ask Maya to act, which is how a robot becomes an agent:
 {"id":"robot-01", "type":"agent", "req":"a-7", "text":"someone is at the front door"}
 ```
 
-The server runs the normal agent loop with `sender_role: "device"` and replies:
+The server runs the agent loop on the device's behalf and replies:
 
 ```json
-{"id":"robot-01", "type":"agent_reply", "req":"a-7", "text":"I've told the family."}
+{"id":"robot-01", "type":"agent_reply", "req":"a-7", "status":"ok", "text":"I've told the family."}
 ```
 
 **This is a privilege boundary, not a convenience.** A device that can invoke
-Maya can ask Maya to act on *other* devices, so:
+Maya could, if nothing stopped it, ask her to act on *other* devices, to read the
+house, or to talk to the family. Everything below exists to make that reach exactly
+as large as a person chose, and no larger. Revision 2.3 turned the first draft's
+four bullets into rules that can be implemented and tested; the first draft said a
+device's reach was "its granted scope" without saying what a device is granted.
 
-- A device role MUST be granted explicitly per device (`can_invoke_agent`), off
-  by default.
-- Tool calls made on behalf of a device are constrained to that device's granted
-  scope — a device may not reach devices it has no grant for, exactly as a child
-  is constrained by `_child_command_denial` today.
-- Every device-initiated agent turn is written to the activity log with
-  `actor_type: "device"`, so it is attributable.
-- Rate-limit per device. A chattering robot must not be able to exhaust the model
-  budget or spam house chat.
+### 8.1 Frames
+
+- `text` is UTF-8, at most **280 bytes**, and not empty. Anything else is answered
+  `bad_value` and does not reach the model.
+- `req` is chosen by the device and echoed. **One request may be outstanding per
+  device**: a second while one is running is answered `busy`. A device needs to
+  keep one `req` in memory, as with commands (§6.2).
+- `status` is `ok`, or one of: `not_permitted` (the device has not been allowed to
+  invoke Maya), `rate_limited` (with `retry_after` in seconds), `busy`,
+  `bad_value`, `unavailable` (the model is not configured or failed). Anything
+  unrecognised MUST be treated as failure, never as success.
+- `text` in the reply is at most 280 bytes, truncated by the server. A device with
+  a small display or a speaker should not have to guard against a paragraph.
+- The reply travels only over the device's own authenticated WebSocket. A device
+  that has dropped off by the time the model answers simply never receives it; the
+  action, if there was one, still happened and is in the activity log.
+- A device that is waiting MUST give up after **45 seconds** and treat the request
+  as `unavailable`. The server's own model call is bounded well below that.
+
+### 8.2 Who may invoke
+
+**Off by default, per device, and only a person turns it on.** A device is allowed
+to invoke Maya only when a house master (or a member authorised to manage devices —
+the right that lets them claim and pair devices) has set its `can_invoke_agent`
+flag. A flag cannot be set by the device, by an API key, or by a child. It is read
+**at the time of each request and again before each action**, so turning it off
+stops a run that is already in progress, not just the next one.
+
+A blocked device, or one with no house, is never allowed.
+
+### 8.3 What Maya may do for a device
+
+**A device's reach through Maya is exactly the reach it already has over the local
+link (§7): the active grants in which it is the `send` end, and nothing else.** It
+needs no second permission model, and it can gain nothing by asking Maya that it
+could not do by radio. The consequences are deliberate:
+
+- Maya may set a capability on another device only if that device is the `receiver`
+  of an unexpired, unrevoked grant whose `sender` is the invoking device, and the
+  key is in that grant's `scope`, **and** the key is still eligible (§7.1: writable,
+  not reserved, not `confirm:true`, not `agent:"deny"`). Since a `confirm:true`
+  control can never be in a peer scope, **a device can never cause one to be set
+  through Maya**; there is no way to supply the "yes" §5.4 requires, because no
+  person is present.
+- The check is made **when the action runs**, against the grants as they are then.
+  Revoking the pairing between the request and the action stops the action.
+- A request for something outside that reach is answered with the same words as a
+  control that does not exist, so a device cannot use Maya to discover which
+  controls other devices have.
+- **Maya's tools for a device are only two:** `set_capability` (as above) and
+  `notify_house` — post a short message to the house chat, attributed to the device
+  ("*Front-door robot:* …"), at most **two per request** and 280 bytes each. A
+  device has no access to anyone's location, homework, screen time or the activity
+  log, to the house's device list, or to any child's data: none of those tools exist
+  for it, and the executor refuses them even if a model names one.
+- The model is told only what it needs: the device's own name, and for each device
+  it can reach, that device's name and the keys in scope with their current values.
+  It is **not** given the house's other devices or its children.
+
+### 8.4 The device's words are data, not instructions
+
+`text` is whatever the firmware — or whatever the firmware read from a sensor, a
+microphone or a network — chose to send. It is untrusted in the same way a web page
+is. The prompt says so, but **nothing depends on the prompt**: every limit above is
+enforced by the server in code, so a model that is talked into asking for
+something outside the device's reach is simply refused. `notify_house` is the one
+tool through which device-authored words can reach a person (and, in a family chat,
+a child), which is why it is capped and always attributed.
+
+### 8.5 Limits
+
+Every request is a paid model call, so limits apply before the model is invoked and
+**count even when refused**, so a device cannot spend them by being denied:
+
+| Limit | Value |
+|---|---|
+| One device | 6 per hour, 30 per day |
+| One house, all devices | 100 per day |
+| A device that is not allowed to invoke | 10 refused attempts per hour; beyond that, silence |
+| Outstanding per device | 1 |
+
+When a limit is hit the reply is `rate_limited` with `retry_after`. A device that
+is not permitted is told `not_permitted` once the refused-attempt limit allows it,
+so firmware can tell "switched off" from "broken".
+
+### 8.6 Attribution
+
+Every device-initiated turn is written to the activity log with
+`actor_type: "device"` and the device's name: the request itself ("*robot-01 asked
+Maya: …*", the text truncated) and each action Maya took for it ("*… set Fan speed
+on Living-room fan to 60 (via Maya, asked by robot-01)*"). A person reading the log
+can always tell an action a device caused from one a person did.
+
+### 8.7 Chains
+
+A device's request can end with a command to another device, whose firmware may in
+turn invoke Maya. No special loop detection is attempted: each hop passes through
+the limits of §8.5, which bound a loop at a handful of requests an hour, and every
+hop is attributed. A hub or sensor farm that needs many requests is a design
+problem to raise rather than a limit to engineer around.
 
 ---
 
@@ -1432,6 +1534,11 @@ on its own and none of them breaks what is already deployed:
    `MayaCrypto.cpp`; `test_peer_link.py`). The ESP-NOW radio glue in
    `Maya.cpp` compiles but has never run: it cannot be tested without two boards.
 6. Device to Maya.
+   — **done 2026-10-10** (revision 2.3, §8). A device's reach through Maya is
+   exactly its outgoing peer grants; off by default; two tools; bounded and
+   attributed. `test_agent.py` (server) and `test_library.py` (the library's
+   `askMaya`). **The app has no switch for `can_invoke_agent` yet**, so today it is
+   set through `PUT /api/devices/{id}/agent`.
 
 Two pieces of this document sit outside that order because they depend on it
 rather than on each other: **§5.12 (history)** needs step 2 to have somewhere to

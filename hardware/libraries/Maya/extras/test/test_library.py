@@ -99,7 +99,7 @@ class Driver:
             env["MAYA_MAC"] = mac
         args = [exe, profile] + ([state_dir] if state_dir else [])
         self.p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                  text=True, bufsize=1, env=env)
+                                  text=True, encoding="utf-8", bufsize=1, env=env)
 
     def run(self, command):
         """Send one command; return (frames sent, hardware log, other lines)."""
@@ -363,6 +363,68 @@ def test_protocol1_commands_still_answered(exe):
     print("  protocol 1: output_on/off/toggle, all_on/off, led_*, get_status, reboot, factory_reset still work")
 
 
+def test_asking_maya(exe):
+    d = Driver(exe, "lampfan")
+
+    def reply(status, req="a-1", text="", **extra):
+        return {"id": ID, "type": "agent_reply", "req": req, "status": status, "text": text, **extra}
+
+    # 8.1: one frame, in the shape the server expects, with the request id it will echo
+    tx, _, other = d.run("ask someone is at the front door")
+    assert only(tx, "agent request") == {"id": ID, "type": "agent", "req": "a-1",
+                                         "text": "someone is at the front door"}
+    assert other == ["AGENT 1"]
+
+    # one at a time: a second is refused here, without a frame, as the server would
+    tx, _, other = d.run("ask are you there")
+    assert tx == [] and other == ["AGENT 0"]
+
+    # a reply for some other request is not ours
+    assert d.frame(reply("ok", req="a-9", text="not for you"))[2] == ["ACTION none"]
+    assert d.run("ask still waiting")[2] == ["AGENT 0"], "a stray reply must not free the slot"
+
+    tx, _, other = d.frame(reply("ok", text="I have told the family."))
+    assert "AREPLY ok 0 |I have told the family.|" in other, other
+    tx, _, other = d.run("ask next")
+    assert only(tx, "agent request")["req"] == "a-2", "the id moves on"
+
+    # every status the server defines reaches the sketch, retry_after included
+    n = 2   # the request now waiting is a-2
+    for status, extra, expect in [("not_permitted", {}, "AREPLY not_permitted 0 ||"),
+                                  ("rate_limited", {"retry_after": 1800}, "AREPLY rate_limited 1800 ||"),
+                                  ("busy", {}, "AREPLY busy 0 ||"),
+                                  ("bad_value", {}, "AREPLY bad_value 0 ||"),
+                                  ("unavailable", {}, "AREPLY unavailable 0 ||")]:
+        _, _, other = d.frame(reply(status, req=f"a-{n}", **extra))
+        assert expect in other, (status, other)
+        tx, _, other = d.run("ask again")
+        n += 1
+        assert only(tx, "request")["req"] == f"a-{n}" and other == ["AGENT 1"]
+
+    # refused before anything is sent: empty, blank, over 280 bytes. 280 exactly is fine.
+    d.close()
+    d = Driver(exe, "lampfan")
+    for bad in ("", "   ", "x" * 281, "\u00e9" * 141):
+        tx, _, other = d.run("ask " + bad)
+        assert tx == [] and other == ["AGENT 0"], (bad[:10], other)
+    tx, _, other = d.run("ask " + "\u00e9" * 140)
+    assert other == ["AGENT 1"] and len(only(tx, "request")["text"].encode("utf-8")) == 280
+    d.close()
+
+    # a server that never answers: give up at 45 s, then the slot is free again
+    d = Driver(exe, "lampfan")
+    d.run("ms 1000")
+    d.run("ask hello")
+    d.run("ms 45999")
+    assert d.run("tick")[2] == [], "44.999 s is not yet 45"
+    d.run("ms 46000")
+    assert "AREPLY unavailable 0 ||" in d.run("tick")[2]
+    assert d.run("ask again")[2] == ["AGENT 1"]
+    d.close()
+    print("  agent: request frame, one at a time, stray replies ignored, every status delivered with retry_after,")
+    print("         empty/oversize refused before sending, 45 s timeout frees the slot")
+
+
 # ── part B: the real server, the driver standing in for the board ────────────
 def wait_for(read, done, attempts=60, delay=0.05):
     value = read()
@@ -455,6 +517,31 @@ def test_against_the_real_server(exe):
         state = wait_for(lambda: c.get(f"/api/devices/{ID}/capabilities", headers=tok).json()["state"],
                          lambda s: s.get("temp") == 23.5)
         assert state["temp"] == 23.5, state
+
+        # Device to Maya (8): a person has not yet allowed this device to ask, so the
+        # answer is not_permitted and the model is never called ...
+        calls = []
+
+        class Said:
+            content = "I've told the family."
+            tool_calls = None
+        main.ai.call_model = lambda messages, tools=None: (calls.append(1), Said())[1]
+
+        def ask(words):
+            tx, _, other = d.run("ask " + words)
+            assert other == ["AGENT 1"], other
+            ws.send_json(only(tx, "agent request"))
+            frame = ws.receive_json()
+            assert frame["type"] == "agent_reply", frame
+            return d.frame(frame)[2]
+
+        assert "AREPLY not_permitted 0 ||" in ask("someone is at the front door")
+        assert calls == [], "a device that is not allowed must not cost a model call"
+
+        # ... and once a person switches it on, the reply reaches the sketch's callback.
+        assert c.put("/api/devices/esp32-test/agent", json={"allowed": True}, headers=tok).status_code == 200
+        assert "AREPLY ok 0 |I've told the family.|" in ask("someone is at the front door")
+        assert calls == [1]
     finally:
         for step in (ws.close, lambda: session.__exit__(None, None, None)):
             try:
@@ -474,5 +561,6 @@ if __name__ == "__main__":
     test_reboot_and_factory_reset(exe)
     test_declarations_that_break_the_rules(exe)
     test_protocol1_commands_still_answered(exe)
+    test_asking_maya(exe)
     test_against_the_real_server(exe)
     print("OK: the Maya library speaks PROTOCOL.md as the real server reads it")

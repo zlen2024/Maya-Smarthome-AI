@@ -41,6 +41,7 @@ pointing at another backend, but the schema is hand-migrated for SQLite
 | `PeerGrant` | `peer_grants` | One-way device-to-device permission (§7.1): sender, receiver, the shared key, the scope, expiry, `revoked_at`. Revoked rather than deleted so the audit outlives the pairing. The key is never returned by an API. |
 | `PeerLogEntry` | `peer_log` | One audit line a device reported about a grant (§7.3). Capped at 5,000 per house. |
 | `PeerLogCounter` | `peer_log_counters` | Per (grant, reporter, direction, epoch): highest `seq` claimed and frames logged. `grant_id = 0` is the sentinel row for a reporter's total `dropped`. |
+| `Device.can_invoke_agent` | column | May this device ask Maya to act (§8)? Default false; only a person who can manage devices sets it; re-read before every action a request takes. |
 | `Device.mac` | column | WiFi station MAC from identify; null means the device cannot be paired. |
 
 ## Shape notes

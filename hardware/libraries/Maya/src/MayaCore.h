@@ -39,6 +39,8 @@
 #define MAYA_PEER_LOG_CAP 64  // audit ring buffer (7.3 RECOMMENDS at least 64)
 #endif
 #define MAYA_LOCAL_FRAME_MAX 250   // one ESP-NOW payload, MAC included (7.2)
+#define MAYA_AGENT_TEXT_MAX 280    // bytes, a request and a reply (8.1)
+#define MAYA_AGENT_TIMEOUT_MS 45000   // a device gives up after this (8.1)
 #endif
 
 namespace mayalib {
@@ -140,6 +142,10 @@ struct PeerRec {
 typedef std::function<bool(const uint8_t* mac, const uint8_t* data, size_t len)> PeerTx;
 typedef std::function<void(const char* peer, const char* status, const char* failed)> PeerAckFn;
 typedef std::function<void(const char* peer, const char* kind, JsonObjectConst payload)> PeerMsgFn;
+// What came back from Maya (8.1). `status` is ok, not_permitted, rate_limited, busy,
+// bad_value or unavailable; anything else MUST be treated as failure. `retryAfter` is
+// seconds, and only meaningful for rate_limited.
+typedef std::function<void(const char* status, const char* text, uint32_t retryAfter)> AgentReplyFn;
 
 // Where finished frames go. The core builds a frame and hands it over; whether
 // that is a WebSocket or a test's list is not its business.
@@ -208,6 +214,17 @@ class Core {
 
   bool hasPending() const;
 
+  // ── asking Maya for help (8) ─────────────────────────────────────────────
+  // Sends one request and remembers the callback. False if a request is already
+  // waiting (the server allows one at a time), or the text is empty or longer than
+  // 280 bytes: those are refused here, so the sketch learns at once rather than
+  // after a round trip. Whether the device is *allowed* to ask is a person's choice
+  // in the app, not the sketch's: until it is switched on the answer is not_permitted.
+  bool agentRequest(const char* myId, const char* text, AgentReplyFn cb, Send send);
+  // Gives up on a request that has waited past 45 s, with status "unavailable".
+  void agentTick();
+  bool agentWaiting() const { return agentPending_; }
+
   // ── the local link (7) ───────────────────────────────────────────────────
   // Call once, after every capability is declared. Loads the stored grants and
   // moves to a new epoch (7.2), which is what lets a rebooted sender be newer
@@ -260,6 +277,7 @@ class Core {
   const char* applyValues(JsonObjectConst values, const PeerRec* scope, const char** failed,
                           Cap** applied, size_t& nApplied);
   void handlePeerControl(JsonObjectConst root, const char* type);
+  void handleAgentReply(JsonObjectConst root);
   void loadPeers();
   void savePeers();
   bool peerSend(PeerRec& g, const char* kind, std::function<void(JsonObject)> fill);
@@ -307,6 +325,11 @@ class Core {
   uint32_t lastLogFlush_ = 0;
   bool logUrgent_ = false;
   bool peeringStarted_ = false;
+  AgentReplyFn agentCb_;
+  bool agentPending_ = false;
+  char agentReq_[16] = {0};
+  uint32_t agentSince_ = 0;
+  uint32_t agentCount_ = 0;
 };
 
 // 5.1 - `[a-z0-9_]{1,24}`.

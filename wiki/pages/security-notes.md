@@ -260,3 +260,26 @@ exposes the keys, which is the same exposure device PINs already have (§3). The
 mitigations are the ones §7.4 builds in: grants expire (30 days by default, 365 at
 most), re-pairing rotates the key, and revocation is immediate for a connected
 device and corrected by `peer_sync` for one that was offline.
+
+## 10. A device that can ask Maya is a new way to reach the house
+
+Added with step 6. A device invoking Maya could, if nothing stopped it, ask her to act
+on other devices, read the house, or talk to the family. What stops it, all in code:
+
+- **Permission is off by default and only a person turns it on** — a device cannot set
+  it, nor can a child or an API key.
+- **Reach is the device's own outgoing peer grants**, recomputed when each action runs.
+  A control marked `confirm:true` or `agent:"deny"` can never be in a peer scope, so a
+  device can never cause one to be set through Maya.
+- **Two tools only.** The household tools (a child's location, homework, screen time, the
+  activity log) do not exist for a device, and the executor refuses them by name.
+- **The model sees only what the device can reach.** Not the other devices, not the children.
+- **The device's text is untrusted.** The prompt says so, but nothing depends on it.
+- **Bounded**: 6/hour and 30/day per device, 100/day per house, one outstanding request,
+  refused attempts limited too, so a device cannot spend the model budget.
+
+**Residual risks, stated:** `notify_house` puts words a device chose — through the model
+— into the family chat, where a child can read them. It is capped (two per request, 280
+bytes) and always labelled with the device's name, but it is the one place untrusted text
+reaches a person. A hostile *firmware* can also spend its allowance every hour. And the
+quality of the model's behaviour under hostile text has not been tested with the real model.

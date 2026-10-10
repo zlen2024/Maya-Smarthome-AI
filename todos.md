@@ -178,7 +178,18 @@ descriptors; shims protocol 1. Nothing else changes." Status and reasoning:
   get relative expiry instead.
 - [ ] Peering UI in the app (pair, list, revoke, audit view) — needs the Flutter SDK.
 - [ ] Hub relay (§5.9) is a *user* of peering and is not started.
-- [ ] **Step 6** — device to Maya (§8).
+- [x] **Step 6 — device to Maya** (2026-10-10, spec revision 2.3). `agent` /
+  `agent_reply`; permission off by default and set only by a person
+  (`PUT /api/devices/{id}/agent`); reach = the device's outgoing peer grants, checked
+  again when each action runs; tools: `set_capability` and `notify_house` only;
+  limits 6/h and 30/day per device, 100/day per house, one outstanding; every turn
+  attributed to the device. Library: `maya.askMaya(text, callback)`.
+  `test_agent.py` (6 checks, 3 deliberate bugs confirmed to fail it).
+- [ ] App: a switch for "may ask Maya" on the device screen, and show device-initiated
+  turns in the activity feed (needs the Flutter SDK).
+- [ ] Not tried against the real model: how `gpt-oss:20b` behaves when the request text
+  is hostile, and whether the device prompt keeps it on task. The server-side limits do
+  not depend on it, but the quality of the replies does.
 - [ ] **Open security finding, not fixed:** `POST /api/devices/register` lets any
   house with the right to add devices re-claim a device id already claimed by
   another house, moving it. The device itself stays safe (the PIN the new claimer

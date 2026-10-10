@@ -20,6 +20,7 @@
 //   plog                       flush the audit buffer if it is due
 //   ms <n> / clock <n>         set the device's millis() / wall clock (0 = unknown)
 //   peers                      list held grants
+//   ask <text>                 ask Maya for help; tick = let a waiting request time out
 //   sync                       print SYNC, so the caller knows the lines above are complete
 //
 // stdout
@@ -235,6 +236,15 @@ int main(int argc, char** argv) {
       g_clock = (uint32_t)strtoul(line.c_str() + 6, nullptr, 10);
     } else if (line == "peers") {
       printf("PEERS %d epoch=%u pending=%d\n", (int)m.peerCount(), (unsigned)m.epoch(), (int)m.peerLogPending());
+    } else if (line.rfind("ask ", 0) == 0) {
+      std::string text = line.substr(4);
+      bool sent = m.agentRequest(ID, text.c_str(),
+          [](const char* status, const char* t, uint32_t retry) {
+            printf("AREPLY %s %u |%s|\n", status, (unsigned)retry, t);
+          }, tx);
+      printf("AGENT %d\n", sent);
+    } else if (line == "tick") {
+      m.agentTick();
     } else if (line == "sync") {
       printf("SYNC\n");   // the caller reads until this, so it knows the command is done
     }

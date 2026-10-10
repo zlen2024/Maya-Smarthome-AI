@@ -522,6 +522,49 @@ void Core::handleSet(JsonObjectConst root, const char* myId, Send send) {
   sendAck(myId, req, status, failed, applied, nApplied, send);
 }
 
+// ---------------------------------------------------------------------------
+// asking Maya for help (8)
+// ---------------------------------------------------------------------------
+
+bool Core::agentRequest(const char* myId, const char* text, AgentReplyFn cb, Send send) {
+  if (agentPending_ || !text || !cb || !send) return false;
+  size_t n = strlen(text);
+  bool blank = true;
+  for (size_t i = 0; i < n; i++) if (text[i] != ' ' && text[i] != '\t' && text[i] != '\n') { blank = false; break; }
+  if (n == 0 || blank || n > MAYA_AGENT_TEXT_MAX) return false;
+
+  snprintf(agentReq_, sizeof agentReq_, "a-%lu", (unsigned long)++agentCount_);
+  DynamicJsonDocument doc(MAYA_AGENT_TEXT_MAX + 160);
+  doc["id"] = myId;
+  doc["type"] = "agent";
+  doc["req"] = agentReq_;
+  doc["text"] = text;
+  if (!sendDoc(doc, send)) return false;
+  agentCb_ = cb;
+  agentPending_ = true;
+  agentSince_ = millis_ ? millis_() : 0;
+  return true;
+}
+
+void Core::handleAgentReply(JsonObjectConst root) {
+  const char* req = root["req"] | (const char*)nullptr;
+  // A reply for anything but the request being waited on is stale or someone else's.
+  if (!agentPending_ || !req || strcmp(req, agentReq_) != 0) return;
+  AgentReplyFn cb = agentCb_;
+  agentPending_ = false;
+  agentCb_ = nullptr;
+  if (cb) cb(root["status"] | "unavailable", root["text"] | "", root["retry_after"] | 0u);
+}
+
+void Core::agentTick() {
+  if (!agentPending_ || !millis_) return;
+  if (millis_() - agentSince_ < MAYA_AGENT_TIMEOUT_MS) return;
+  AgentReplyFn cb = agentCb_;
+  agentPending_ = false;
+  agentCb_ = nullptr;
+  if (cb) cb("unavailable", "", 0);
+}
+
 // A v2 device MUST still answer the legacy command names (4), so that it works
 // against a server that has not been upgraded yet.
 Action Core::handleLegacy(JsonObjectConst root, const char* cmd, const char* myId,
@@ -595,6 +638,7 @@ Action Core::onFrame(const char* data, size_t len, const char* myId, uint32_t up
       return NONE;
     }
     if (!strncmp(type, "peer_", 5)) { handlePeerControl(root, type); return NONE; }
+    if (!strcmp(type, "agent_reply")) { handleAgentReply(root); return NONE; }
     if (!strcmp(type, "reboot"))        { sendSimpleAck(myId, req, "ok", send); return REBOOT; }
     if (!strcmp(type, "factory_reset")) { sendSimpleAck(myId, req, "ok", send); return FACTORY_RESET; }
     return NONE;   // welcome, error, and anything newer than this library: not ours to act on

@@ -100,6 +100,27 @@ device must hear the time from SNTP for a grant to expire, and without it a gran
 lasts until it is revoked; a frame can only reach a peer on the same WiFi channel,
 which a device in station mode on the same router is.
 
+## Asking Maya for help
+
+```cpp
+maya.askMaya("someone is at the front door", [](const char* status, const char* text, uint32_t retryAfter) {
+  if (!strcmp(status, "ok")) showOnDisplay(text);        // "I've told the family."
+});
+```
+
+The reply arrives in the callback during `loop()`. `status` is `ok`, `not_permitted`,
+`rate_limited` (see `retryAfter`), `busy`, `bad_value` or `unavailable`; treat anything
+else as failure. `askMaya` itself returns `false` if the device is offline, a request is
+already waiting (one at a time), or the text is empty or over 280 bytes.
+
+**A person has to allow it first**, in the app (until then the status is
+`not_permitted`), and what Maya may *do* for the device is exactly what it could already
+do over the local link: the controls named in its `send` grants, nothing more. She can
+also post a short message to the family chat, always labelled with the device's name.
+The device's text is treated as data, not instructions. Limits: 6 requests an hour and
+30 a day per device, 100 a day per house. Give up after 45 s if no reply comes (the
+library does this for you and reports `unavailable`).
+
 ## Reporting
 
 `setSwitch`, `setNumber`, `setText`, `setLocation` tell the library what the
@@ -156,7 +177,9 @@ could not build the driver, which is **not** a pass.
 - **The ESP-NOW radio has not run.** `Maya.cpp`'s radio glue compiles for ESP32 but
   was never put on the air; frames in the tests travel through Python. Two boards
   are the first real test.
-- Not implemented yet: device→Maya (§8), the hub relay (§5.9), and sleeping devices
-  (`report_every`, §5.8).
+- `askMaya` is tested for its frames, one-at-a-time rule, every reply status, the 280-byte
+  limit and the 45 s timeout, and once end to end against the real server. The model on the
+  other end was scripted, not real.
+- Not implemented yet: the hub relay (§5.9) and sleeping devices (`report_every`, §5.8).
 - Cost: the local link adds ~18 KB of RAM (grant tables, the 64-entry audit buffer,
   the receive queue) and ~25 KB of flash.

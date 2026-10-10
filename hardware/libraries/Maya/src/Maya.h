@@ -45,6 +45,16 @@ class Maya : public mayalib::Core {
   // to the grant's scope. onPeerMessage()/onPeerAck() deliver events and answers.
   // The library reports what the link did to the server on its own.
 
+  // Ask Maya for help (PROTOCOL.md 8). The reply arrives in the callback, in loop():
+  //   maya.askMaya("someone is at the front door", [](const char* status, const char* text, uint32_t) {
+  //     if (!strcmp(status, "ok")) show(text);
+  //   });
+  // Returns false if offline, a request is already waiting, or the text is empty or
+  // over 280 bytes. A person must first allow this device to ask, in the app: until
+  // then the status is "not_permitted". Maya will only act on controls this device
+  // already has a local-link grant for - asking her gains it nothing else.
+  bool askMaya(const char* text, mayalib::AgentReplyFn onReply);
+
   const char* id() const;
   bool connected() const;
 
