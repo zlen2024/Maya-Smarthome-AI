@@ -269,6 +269,7 @@ CHILD_PIN_LOCK = FailureLock(5,  900,  900,  "child sign-in")     # per child
 ADMIN_LOCK     = FailureLock(5,  900,  1800, "admin sign-in")     # per IP
 LOGIN_RATE     = RateLimit(30, 300, "login")                      # per IP
 REGISTER_RATE  = RateLimit(5, 3600, "account registration")       # per IP
+CLAIM_CONFLICT_RATE = RateLimit(5, 3600, "device claim conflicts")  # per account: stops guessing which ids exist
 PEER_LOG_RATE  = RateLimit(12, 60, "peer log")                   # per device (§7.3)
 VOICE_RATE     = RateLimit(20, 60, "voice command")               # per caller
 VOICE_DAY_RATE = RateLimit(300, 86400, "voice command (daily)")   # per caller
@@ -1345,6 +1346,22 @@ async def register_device(payload: dict, db: Session = Depends(get_db),
     moved_grants = []
     if existing:
         if existing.house_id != house_id:
+            # A device another house has claimed is theirs until *they* let it go
+            # (§4.1). Without this, anyone who could add devices could take one
+            # from its owner by naming its id, which is `esp32-` plus half the MAC.
+            # Two exceptions, neither a way around the owner: a global admin, who
+            # exists to repair exactly this, and a record whose house no longer
+            # exists, which nobody is left to object for.
+            owned = existing.house_id is not None and db.query(House).filter(
+                House.house_id == existing.house_id).first() is not None
+            if owned and current_user.role != AccountRole.admin:
+                # Counted before answering, so the 409 itself cannot be used to
+                # walk the id space asking "is this one taken?".
+                CLAIM_CONFLICT_RATE.hit(f"acc:{current_user.acc_id}")
+                raise HTTPException(
+                    status_code=409,
+                    detail="This device is already registered to another house. "
+                           "Its owner must remove it from their house first.")
             # A device that changes house takes no peering with it: those grants
             # were a decision of the old house's members (§7.4).
             moved_grants = peering.revoke_for_device(db, device_id)

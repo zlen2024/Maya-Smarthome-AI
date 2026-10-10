@@ -190,13 +190,10 @@ descriptors; shims protocol 1. Nothing else changes." Status and reasoning:
 - [ ] Not tried against the real model: how `gpt-oss:20b` behaves when the request text
   is hostile, and whether the device prompt keeps it on task. The server-side limits do
   not depend on it, but the quality of the replies does.
-- [ ] **Open security finding, not fixed:** `POST /api/devices/register` lets any
-  house with the right to add devices re-claim a device id already claimed by
-  another house, moving it. The device itself stays safe (the PIN the new claimer
-  sets will not match its firmware, so it cannot connect), but the old owner
-  silently loses the record. Device ids are `esp32-` plus the low 32 bits of the
-  MAC. A fix is a design decision (who may take a claimed device, and how the
-  previous owner is told), so it was recorded rather than changed.
+- [x] **Re-claim of another house's device — fixed** (2026-10-10). A claimed id is
+  refused (`409`, counted) until its owner removes it; an admin or an orphan record may
+  move; pairings never follow. See security-notes §8.
+- [ ] Review how the Flutter add-device screen words that `409` (no SDK to run it).
 - [ ] `report_every` is stored but unread: the §5.8 `status` vocabulary exists on
   paper only, and the three call sites are `ConnectionManager`, the device list
   endpoint and Maya's house context.

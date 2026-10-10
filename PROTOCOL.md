@@ -141,8 +141,16 @@ Rules:
   device** (§4), not at claim time — that identify is when three channels first
   become a known fact. A protocol-2 device never gets them, even if it declares
   `ch1`-`ch3`.
-- Re-claiming an existing id updates the name and PIN and leaves the descriptor
-  alone. The firmware re-declares on its next identify anyway.
+- Re-claiming an id **by the house that already owns it** updates the name and PIN
+  and leaves the descriptor alone; the firmware re-declares on its next identify
+  anyway.
+- **An id another house has claimed cannot be claimed.** It is answered `409` until
+  that house removes the device, because a device id is `esp32-` plus half the MAC and
+  a rule that let anyone who could add devices take one by naming it would let them
+  take it from its owner. Two exceptions, neither a route around the owner: a global
+  administrator, and a record whose house no longer exists. The refusals are
+  rate-limited per account so the `409` cannot be used to ask which ids are taken. A
+  device that does change house takes none of its peering grants with it (§7.4).
 - Who may claim is a house question, not a protocol one: the master or a member
   they have authorised.
 

@@ -232,23 +232,37 @@ several instances each would hold its own counters, so the effective limit is
 multiplied by the instance count. Counters also reset on restart. This is why the
 lockouts that matter also write to the activity log, which survives both.
 
-## 8. Any house can re-claim a device id another house owns — OPEN
+## 8. Any house could re-claim a device id another house owned — FIXED 2026-10-10
 
-Found 2026-10-10 while testing step 5a. `POST /api/devices/register` sets
-`existing.house_id` to the caller's house without asking whether the device is
-already someone else's. Anyone with the right to add devices can therefore take a
-device record away from the house that owns it, given its id (`esp32-` plus the
-low 32 bits of the MAC).
+Found while testing step 5a. `POST /api/devices/register` set `existing.house_id` to
+the caller's house without asking whether the device already belonged to someone else,
+so anyone who could add devices could take a device record from its owner by naming its
+id (`esp32-` plus the low 32 bits of the MAC). The device itself stayed safe — the PIN
+the claimer set would not match the firmware's, so the board was refused at identify —
+but the owner silently lost the record and every pairing it carried.
 
-**What this does not do:** it does not give control of the device. The PIN the new
-claimer sets will not match the PIN in the firmware, so the board is refused at
-identify. **What it does:** the legitimate owner silently loses the record, and
-(until now) the peering grants made by the old house stayed live — step 5a now
-revokes them on a change of house.
+**The fix** (PROTOCOL.md §4.1): an id another house has claimed is answered `409` until
+that house removes the device. Re-claiming within the same house is unchanged (ordinary
+re-provisioning, pairings kept). Two exceptions, neither a way round the owner: a global
+admin, whose job includes repairing exactly this, and a record whose house no longer
+exists, which nobody is left to object for. A device that does change house takes none
+of its peering grants with it.
 
-**Not fixed**, because the right fix is a decision about product behaviour: who may
-take a claimed device (the previous owner releasing it? a physical reset?), and how
-the previous house is told. Recorded in `todos.md`.
+**The 409 is itself counted** (5 an hour per account, then `429`), so the refusal
+cannot be used to walk the id space asking which ids are taken. It does confirm that an
+id is registered, which is a weaker disclosure than the one it replaced.
+
+**Tested** (`test_peering.py`, `test_a_claimed_device_cannot_be_taken`): the second
+house is refused and the owner's name, PIN and pairings are untouched; the owner may
+re-claim; removal frees the id; an admin and an orphan record may move; and with the
+guard deliberately removed the test fails, which is the original hijack.
+
+**What this costs:** a second-hand device must be removed from the previous owner's
+house before it can be claimed. If that owner cannot be reached, an admin can move it.
+There is no "I have the device in my hand" override — a physical reset clears the
+board, not the server's record, and a rule that trusted possession would be the hole
+again. The app's add-device screen now receives a `409` with an explanation; its
+wording has not been reviewed (no Flutter SDK).
 
 ## 9. Peering keys are stored in clear — by necessity
 

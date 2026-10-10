@@ -42,6 +42,22 @@ FAN = {
 }
 
 
+def release(device_id):
+    """Stand in for the previous owner removing a device from their house. These
+    tests reuse a few device ids across many households in one database, and a
+    claimed device can no longer be taken by naming its id (PROTOCOL.md 4.1)."""
+    import main
+    db = main.SessionLocal()
+    try:
+        device = db.query(main.Device).filter(main.Device.device_id == device_id).first()
+        if device:
+            main.peering.revoke_for_device(db, device_id)
+            db.delete(device)
+            db.commit()
+    finally:
+        db.close()
+
+
 def household(c, email, house, devices):
     """A master, a house, and claimed devices: [(id, pin)]. Returns (headers, ...)."""
     import main
@@ -51,6 +67,7 @@ def household(c, email, house, devices):
     tok = {"Authorization": "Bearer " + r.json()["token"]}
     c.post("/api/houses", json={"location": house}, headers=tok)
     for device_id, pin in devices:
+        release(device_id)
         reg = c.post("/api/devices/register", json={"device_id": device_id, "name": device_id, "pin": pin},
                      headers=tok)
         assert reg.status_code == 200, reg.text
@@ -411,11 +428,12 @@ def test_removing_a_device_ends_its_grants():
     print("  removal: deleting a device revokes its grants and tells the other end; the audit survives")
 
 
-def test_reclaiming_into_another_house_ends_grants():
+def test_a_claimed_device_cannot_be_taken():
     from fastapi.testclient import TestClient
     import main
 
     c = TestClient(main.app)
+    main.CLAIM_CONFLICT_RATE.clear_all()
     tok = household(c, "p7@x.test", "First House", [("esp32-probe", "4821"), ("esp32-fan", "5937")])
     probe = Board(c, "esp32-probe", "4821", PROBE)
     fan = Board(c, "esp32-fan", "5937", FAN)
@@ -423,17 +441,90 @@ def test_reclaiming_into_another_house_ends_grants():
         g = pair(c, tok).json()["grant_id"]
         probe.next(), fan.next()
 
-        # Another house claims the fan. The first house's decision to let the probe
-        # address it must not follow the fan into a house that never made it.
-        tok2 = household(c, "p8@x.test", "Second House", [("esp32-fan", "5937")])
-        assert probe.next() == {"id": "esp32-probe", "type": "peer_revoke", "grant_id": g}
-        assert c.get("/api/peerings", headers=tok).json()["peerings"] == []
-        # ...and the old house can no longer read that audit.
-        assert c.get(f"/api/peerings/{g}/audit", headers=tok2).status_code == 404
+        # A second house names the fan's id. Before this rule it simply took it.
+        main.REGISTER_RATE.clear_all()
+        r = c.post("/api/auth/register", json={"email": "p8@x.test", "password": "owner-pass", "name": "Thief"})
+        tok2 = {"Authorization": "Bearer " + r.json()["token"]}
+        c.post("/api/houses", json={"location": "Second House"}, headers=tok2)
+        r = c.post("/api/devices/register", json={"device_id": "esp32-fan", "name": "Mine now", "pin": "7351"},
+                   headers=tok2)
+        assert r.status_code == 409 and "another house" in r.json()["detail"], r.text
+
+        # Nothing about the real owner's setup moved.
+        db = main.SessionLocal()
+        try:
+            dev = db.query(main.Device).filter(main.Device.device_id == "esp32-fan").first()
+            assert dev.name == "esp32-fan" and dev.pin == "5937", "the owner's name and PIN must be untouched"
+            assert dev.house_id == db.query(main.Device).filter(main.Device.device_id == "esp32-probe").first().house_id
+        finally:
+            db.close()
+        assert [p["grant_id"] for p in c.get("/api/peerings", headers=tok).json()["peerings"]] == [g]
+
+        # The refusal is counted, so it cannot be used to ask which ids exist.
+        for _ in range(4):
+            assert c.post("/api/devices/register", json={"device_id": "esp32-fan", "name": "x", "pin": "7351"},
+                          headers=tok2).status_code == 409
+        r = c.post("/api/devices/register", json={"device_id": "esp32-fan", "name": "x", "pin": "7351"}, headers=tok2)
+        assert r.status_code == 429, r.text
+        # ...but a house claiming an id nobody owns is unaffected.
+        assert c.post("/api/devices/register", json={"device_id": "esp32-free", "name": "x", "pin": "7351"},
+                      headers=tok2).status_code == 200
+
+        # The owner re-claiming their own device is ordinary re-provisioning.
+        assert c.post("/api/devices/register", json={"device_id": "esp32-fan", "name": "Renamed", "pin": "5937"},
+                      headers=tok).status_code == 200
+        assert [p["grant_id"] for p in c.get("/api/peerings", headers=tok).json()["peerings"]] == [g], \
+            "re-claiming within the same house must keep its pairings"
+
+        # Letting go is the owner's act: after they remove it, it can be claimed.
+        main.CLAIM_CONFLICT_RATE.clear_all()
+        assert c.delete("/api/devices/esp32-fan", headers=tok).status_code == 200
+        assert probe.next()["type"] == "peer_revoke"
+        assert c.post("/api/devices/register", json={"device_id": "esp32-fan", "name": "Second", "pin": "7351"},
+                      headers=tok2).status_code == 200
+
+        # A global admin can take a device (they exist to repair this), and the
+        # pairing the old house made does not follow it.
+        c.post("/api/devices/register", json={"device_id": "esp32-cam", "name": "cam", "pin": "6143"}, headers=tok)
+        cam = Board(c, "esp32-cam", "6143", dict(FAN, mac="24:6F:28:AA:BB:55"))
+        try:
+            g2 = pair(c, tok, from_id="esp32-probe", to_id="esp32-cam").json()["grant_id"]
+            probe.next(), cam.next()
+            db = main.SessionLocal()
+            try:
+                admin = db.query(main.Account).filter(main.Account.email == "p8@x.test").first()
+                admin.role = main.AccountRole.admin
+                db.commit()
+            finally:
+                db.close()
+            r = c.post("/api/devices/register", json={"device_id": "esp32-probe", "name": "Admin took it", "pin": "7351"},
+                       headers=tok2)
+            assert r.status_code == 200, r.text
+            assert c.get("/api/peerings", headers=tok).json()["peerings"] == []
+            assert cam.next() == {"id": "esp32-cam", "type": "peer_revoke", "grant_id": g2}
+
+
+        finally:
+            cam.close()
+
+        # A record whose house is gone has no one left to object.
+        db = main.SessionLocal()
+        try:
+            db.query(main.Device).filter(main.Device.device_id == "esp32-free").first().house_id = 999999
+            db.commit()
+            admin = db.query(main.Account).filter(main.Account.email == "p8@x.test").first()
+            admin.role = main.AccountRole.parent
+            db.commit()
+        finally:
+            db.close()
+        assert c.post("/api/devices/register", json={"device_id": "esp32-free", "name": "Orphan", "pin": "7351"},
+                      headers=tok2).status_code == 200
     finally:
         probe.close()
         fan.close()
-    print("  re-claim: a device that changes house takes no peering with it")
+    print("  claim: another house's device cannot be taken by naming it (409, owner's data untouched, counted so")
+    print("         ids cannot be probed); the owner may re-claim; removal frees it; an admin or an orphan record may move,")
+    print("         and the old pairings do not follow")
 
 
 if __name__ == "__main__":
@@ -442,6 +533,6 @@ if __name__ == "__main__":
     test_audit()
     test_peer_log_rate_limit()
     test_removing_a_device_ends_its_grants()
-    test_reclaiming_into_another_house_ends_grants()
+    test_a_claimed_device_cannot_be_taken()
     print("OK: grants are explicit, one-way and finite; revokes are corrected on reconnect; "
           "the audit compares both ends")

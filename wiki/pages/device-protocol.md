@@ -352,7 +352,7 @@ frame" now read past it.
 **Not done:** the library's side (5b — it does not yet send `mac`, so **no real
 device can be paired**: the server refuses one with no MAC), the ESP-NOW radio,
 the app UI, and the hub relay of §5.9. One security finding was recorded and not
-fixed — see [security notes](security-notes.md#8-any-house-can-re-claim-a-device-id-another-house-owns--open).
+fixed the same day — see [security notes](security-notes.md#8-any-house-could-re-claim-a-device-id-another-house-owned--fixed-2026-10-10).
 
 ## Step 5b (2026-10-10): the library's half of the local link
 

@@ -336,3 +336,12 @@ Updated: `pages/device-protocol.md` (Step 6), `pages/maya-ai-agent.md`,
 `pages/data-model.md`, `pages/security-notes.md` (§10), `pages/known-gaps.md`,
 `todos.md`, `software/server/README.md`, library README. Graph rebuilt.
 **Not verified:** the real model; any radio.
+
+## [2026-10-10] fix | Re-claim of another house's device (security-notes §8)
+
+`register_device` now refuses (`409`, rate-limited per account) an id another house has
+claimed; admins and orphan records are exempt; pairings are revoked when a device does
+change house. `PROTOCOL.md` §4.1 updated. `test_peering.py`'s re-claim test was rewritten
+for the new rule and confirmed to fail with the guard removed; its `household` helper now
+releases an id before reusing it, standing in for the previous owner. All server
+self-checks and both library tests pass. Not reviewed: the app's wording of the 409.
