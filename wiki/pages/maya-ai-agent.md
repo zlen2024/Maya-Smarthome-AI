@@ -74,12 +74,15 @@ must not poison Maya's own message.
 
 ## Tools
 
-Six, declared in `ai.TOOLS` (`ai.py:32`) and executed by `_execute_maya_tool`
-(`main.py:1468`):
+Six, declared in `ai.TOOLS` and executed by `_execute_maya_tool` in `main.py`.
+**`control_device` was replaced by `set_capability` on 2026-10-10** (protocol v2
+step 3): the old tool could only switch one of three relay channels, so a fan's
+speed or a lamp's colour was out of Maya's reach. The new one addresses any
+control a device declares, by `key`, with a value of that control's own type.
 
 | Tool | Who may call it |
 |---|---|
-| `control_device` | Anyone in the house; child commands pass `_child_command_denial` |
+| `set_capability` | Anyone in the house; a child passes `_child_capability_denial` (their own grants, §5.10); gated by `agent:"deny"` and `confirm:true` below |
 | `get_child_location` | Parents; a child asking about anyone else gets *"You can only ask about yourself."* |
 | `list_homework` | ditto |
 | `get_screen_time` | ditto |
@@ -100,6 +103,32 @@ correct and matches the implementation — `_execute_maya_tool` re-checks device
 existence and house scope, `device.blocked`, `_child_command_denial`, and
 parent-only guards, then logs to the activity log via `log_activity`. The model
 is never trusted with authorization.
+
+### `set_capability`: two gates a misbehaving model cannot walk through
+
+Both gates are claims about code, so `test_maya.py` tests them with a model
+scripted to misbehave rather than one that cooperates.
+
+**`agent:"deny"` (§5.4).** `_maya_context` builds the house state from
+`descriptor_payload(for_agent=True)`, so a deny-listed capability never appears
+in what Maya reads. That alone is not the control — a model can name a key it was
+never shown — so the executor filters `agent != "allow"` as well, and the
+refusal is *identical* to the one for a key that does not exist
+(`"<device> has no control called <key>"`). It leaks nothing about what was
+hidden.
+
+**`confirm:true` (§5.4).** The first call for such a capability changes nothing
+and returns instructions to ask the user. The `confirmed` argument is not
+evidence on its own — a model can write `true` — so the server remembers the ask
+in `_MAYA_PENDING` and honours the flag only for **the same value, in a later
+run (`run_id` is per user message), within five minutes**. A newer ask replaces an
+older one, and a spent confirmation is deleted. The table is in RAM like the
+voice sessions: losing it on restart just means Maya asks again, the safe
+direction.
+
+The house state she reads also marks controls `read-only`, `needs confirmation`
+and, for a child, `not allowed for you`, so she can decline sensibly instead of
+trying and failing.
 
 ### The dispatch has no graph edges
 

@@ -10,7 +10,7 @@ report artifacts that still need manual updating. Generated alongside the report
 - [x] LLM natural-language command processing. Provider is **Ollama Cloud** (`gpt-oss:20b-cloud` via `https://ollama.com`, `OLLAMA_API_KEY` secret) — not OpenRouter as originally planned. Logic in `server/ai.py`.
 - [x] AI in the family chat: a user types **`@maya …`** in the house chat; Maya reads recent `msg_history` + device state, replies as a chat participant (`sender_type="ai"`), and switches devices. Wired into the `/ws/mobile` chat handler (`_run_maya`).
 - [x] Runs as the invoking sender: a child's `@maya` commands hit the same per-relay permission checks as a manual tap (shared `_child_command_denial`).
-- [x] Maya is a **tool-calling agent** (Ollama tools): `control_device`, `get_child_location`, `list_homework`, `get_screen_time`, `add_homework`, `read_activity_log`. Agent loop in `main.py` (capped 5 steps). Tools enforce child=self-only, parent=any child in house; control keeps per-relay checks.
+- [x] Maya is a **tool-calling agent** (Ollama tools): `set_capability` (was `control_device` until protocol v2 step 3, 2026-10-10), `get_child_location`, `list_homework`, `get_screen_time`, `add_homework`, `read_activity_log`. Agent loop in `main.py` (capped 5 steps). Tools enforce child=self-only, parent=any child in house; control checks the child's own capability grants.
 - [x] **Activity log** (`activity_log` table + `log_activity`): device switches, homework assign/complete, member join, child login, Maya-driven actions. `GET /api/activity` (parent=house, child=own) + Maya's `read_activity_log`.
 - [x] **Rename relay channels** (`PUT /api/relays/{id}`, device-managers): channel gets a real name ("Television"); shown/edited in Devices tab; Maya maps names via context.
 - [x] **@-mention** in chat: `@` autocomplete (Maya + members + children); `mentions` table marks messages per target, unseen until the target opens chat; unseen badge on the Chat tab.
@@ -141,7 +141,18 @@ descriptors; shims protocol 1. Nothing else changes." Status and reasoning:
   rename) and `device_management_tab.dart` still read the v1 shapes. They keep
   working through the shim and the facade, but show nothing for a non-channel
   capability.
-- [ ] **Step 3** — Maya's six tools become one `set_capability`, honouring `confirm`.
+- [x] **Step 3 (2026-10-10)** — Maya's relay tool `control_device` becomes
+  `set_capability(device_id, key, value, confirmed)`; her house state is built from
+  descriptors, so any device is visible and controllable. (Only that one of the
+  six was a relay tool; the other five are child-data/activity tools and are
+  unchanged.) `agent:"deny"` is filtered from her context **and** in the executor,
+  with a refusal identical to a key that does not exist. `confirm:true` is honoured
+  only for the same value, in a later turn, within five minutes — her own
+  `confirmed:true` is not evidence. Self-check `test_maya.py` (7 checks) scripts a
+  model that misbehaves on purpose.
+- [x] Fixed a pre-existing bug on that path: `_dispatch_set` sent a v2 `set` frame
+  to protocol-1 boards, which would have timed out. It now translates to the v1
+  command (`_dispatch_set_v1`), for the REST endpoint and Maya alike.
 - [ ] **Step 4** — extract the Arduino library. **Step 5** — peering (§7).
   **Step 6** — device to Maya (§8).
 - [ ] `report_every` is stored but unread: the §5.8 `status` vocabulary exists on

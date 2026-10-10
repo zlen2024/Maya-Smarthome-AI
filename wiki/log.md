@@ -240,3 +240,39 @@ shapes and keep working through the shim; they are recorded as remaining rather
 than quietly left.
 
 All four server self-checks pass (`test_grants.py` is new, 5 checks).
+
+## [2026-10-10] ingest | Step 3: Maya drives any device through set_capability
+
+`control_device` was the only one of Maya's six tools that addressed relays, so
+it is the one replaced — the plan's "swaps her six fixed tools" overstates it, and
+`PROTOCOL.md` §10 now says so. `set_capability(device_id, key, value, confirmed)`
+addresses any control a device declares, and her house state is built from
+`descriptor_payload(for_agent=True)` instead of relay rows. Details on
+[Maya AI agent](pages/maya-ai-agent.md#set_capability-two-gates-a-misbehaving-model-cannot-walk-through).
+
+**The two gates are tested against a model that misbehaves**, because they are
+claims about code rather than about prompts. `test_maya.py` replaces only
+`ai.call_model` with a script; everything else is the real app, reached through
+`/api/maya/voice` so it runs in the app's own event loop. The script names a
+capability it was never shown (`agent:"deny"` — refused with the *same* message as
+a key that does not exist, so nothing leaks) and passes `confirmed:true` with
+nobody having asked (`confirm:true` — refused; honoured only for the same value,
+in a later run, within five minutes).
+
+**A pre-existing bug on the path step 3 needed.** `_dispatch_set` sent a v2
+`{"type":"set"}` frame to every device, including protocol-1 boards that have
+never heard of one, so `POST /capability` against a v1 device would have timed
+out. It now translates to the v1 command each key always mapped to. It survived
+step 2 because the step-1 tests drove the v1 *command* endpoint against a v1
+device and the *set* endpoint only against a v2 one — each path was covered, the
+crossing was not.
+
+**Two test-authoring slips worth recording** since both looked like app bugs
+first: the confirm test hung because one scenario (confirmed:true with nothing
+pending) legitimately *replaced* the pending ask for the same key, so the next
+"yes" was correctly refused and the test then blocked waiting for a frame that
+was never sent; and the context showed ranges as `0.0..100.0` because bounds are
+stored as floats, which reads like a decimal control to a model. The first was
+the test's ordering, the second was fixed in `_describe_capability`.
+
+All five server self-checks pass. Dart unchanged by this step.

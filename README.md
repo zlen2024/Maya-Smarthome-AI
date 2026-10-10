@@ -29,7 +29,7 @@ assistant you can talk to, and child supervision (screen time and location).
 |---|---|
 | Mobile | Flutter (Dart), Android. `web_socket_channel`, `flutter_blue_plus`, `mobile_scanner`, native STT/TTS |
 | Backend | FastAPI (Python), SQLAlchemy, SQLite, JWT + bcrypt, WebSockets, Docker on Fly.io |
-| AI | Ollama Cloud `gpt-oss:20b-cloud` agent. Tools: `control_device`, `get_child_location`, `get_screen_time`, `list_homework`, `add_homework`, `read_activity_log` |
+| AI | Ollama Cloud `gpt-oss:20b-cloud` agent. Tools: `set_capability`, `get_child_location`, `get_screen_time`, `list_homework`, `add_homework`, `read_activity_log` |
 | Firmware | C++ (Arduino core for ESP32), relays on GPIO 2/4/5, BLE provisioning, WebSocket client with watchdog reconnect |
 
 ## Repository layout

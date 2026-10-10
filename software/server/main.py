@@ -3,6 +3,7 @@ import json
 import random
 import string
 import asyncio
+import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from fastapi import (FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException,
@@ -1704,6 +1705,28 @@ def _next_req() -> str:
     return f"c-{_req_counter}"
 
 
+async def _dispatch_set_v1(device_id: str, resolved: dict) -> dict:
+    """Apply a validated set to a protocol-1 device, one v1 command per key.
+
+    Stops at the first failure and reports it as §6.2 asks: the failing key, and
+    the state that did apply before it. There is no rollback, for the same reason
+    as on the wire — a relay that clicked has clicked.
+    """
+    applied: dict = {}
+    for key, value in resolved.items():
+        result = await _dispatch_command(device_id, "on" if value == "on" else "off",
+                                         int(key[-1]))
+        status = result.get("status")
+        if status != "ok":
+            out = {"status": status, "device_id": device_id, "state": applied}
+            if applied:
+                out["failed"] = key
+            return out
+        # The ack carries all three channels (Appendix A); keep what we set.
+        applied.update({k: result[k] for k in ("ch1", "ch2", "ch3") if k in result})
+    return {"status": "ok", "device_id": device_id, "state": applied}
+
+
 async def _dispatch_set(db: Session, device_id: str, values: dict,
                         confirmed: bool = False) -> dict:
     """Set one or more capabilities on a protocol-2 device (§6.2).
@@ -1741,6 +1764,13 @@ async def _dispatch_set(db: Session, device_id: str, values: dict,
         except ValueError as e:
             return {"status": "bad_value", "device_id": device_id, "key": key,
                     "detail": str(e)}
+
+    device = db.query(Device).filter(Device.device_id == device_id).first()
+    if device is not None and (device.proto or 1) < 2:
+        # A protocol-1 board has never heard of a `set` frame and would let the
+        # command time out. Its capabilities are the shim's three switches, so
+        # each key maps to the v1 command it always understood (Appendix A).
+        return await _dispatch_set_v1(device_id, resolved)
 
     req = _next_req()
     payload = json.dumps({"id": device_id, "type": "set", "req": req, "values": resolved})
@@ -1824,20 +1854,58 @@ _VOICE_SESSION_TTL = timedelta(minutes=5)   # idle timeout = "session end"
 _VOICE_MEM_TURNS = 8                          # user+assistant turns kept per session
 
 
+def _describe_capability(cap: dict, value, child_view: bool) -> str:
+    """One control as a line of the house state Maya reads.
+
+    Everything she may need to pick a key and a legal value is here, because the
+    tool validates against the declaration anyway and a model that guesses a
+    range wastes a round trip. `agent:"deny"` capabilities never reach this
+    function: they are filtered out of the descriptor before it is called.
+    """
+    kind = cap.get("kind", "")
+    parts = [f'key={cap["key"]} "{cap.get("label", cap["key"])}" {kind}']
+    if kind == "enum" and cap.get("options"):
+        parts.append("options=" + "/".join(str(o) for o in cap["options"]))
+    elif cap.get("min") is not None or cap.get("max") is not None:
+        # Bounds are stored as floats; "0.0..100.0" reads like a decimal control.
+        def trim(n):
+            return "" if n is None else (int(n) if float(n).is_integer() else n)
+        parts.append(f'range={trim(cap.get("min"))}..{trim(cap.get("max"))}')
+    if cap.get("access") == "r":
+        parts.append("read-only")
+    elif child_view and cap.get("may_write") is False:
+        parts.append("not allowed for you")
+    if cap.get("confirm"):
+        parts.append("needs confirmation")
+    shown = "—" if value is None else (json.dumps(value) if not isinstance(value, str) else value)
+    unit = cap.get("unit") or ""
+    return f'    {" ".join(parts)} = {shown}{unit if value is not None else ""}'
+
+
 def _maya_context(db: Session, house_id: int, sender_role: str, child_id: int | None) -> str:
-    """House state injected into the system prompt: devices (with channel names)
-    and the child roster the caller is allowed to see."""
+    """House state injected into the system prompt: each device with the controls
+    it reports and their current values, and the child roster the caller may see.
+
+    Built from descriptors (PROTOCOL.md §5) rather than from relay rows, so a fan
+    with a speed slider is as visible to Maya as a three-channel extension.
+    Capabilities marked `agent:"deny"` are removed here, before the model is ever
+    called — enforced in code, not asked of the prompt (§5.4).
+    """
     lines = ["House state — devices:"]
     devices = db.query(Device).filter(Device.house_id == house_id).all()
     if not devices:
         lines.append("  (none registered)")
     for d in devices:
         online = "online" if d.device_id in manager.active_connections else "offline"
-        ext = db.query(SmartExtension).filter(SmartExtension.device_id == d.device_id).first()
-        relays = db.query(Relay).filter(Relay.se_id == ext.se_id).all() if ext else []
-        chans = ", ".join(f"ch{r.channel_number}=\"{r.name}\" ({'on' if r.is_on else 'off'})"
-                          for r in sorted(relays, key=lambda r: r.channel_number))
-        lines.append(f"- device_id={d.device_id} name=\"{d.name}\" ({online}) [{chans}]")
+        payload = capability_store.descriptor_payload(
+            db, d, for_agent=True, child_id=child_id if sender_role == "child" else None)
+        lines.append(f'- device_id={d.device_id} name="{d.name}" ({online})')
+        caps = payload["capabilities"]
+        if not caps:
+            lines.append("    (no controls reported yet)")
+        for cap in caps:
+            lines.append(_describe_capability(cap, payload["state"].get(cap["key"]),
+                                              sender_role == "child"))
 
     lines.append("Children in this house:")
     if sender_role == "child":
@@ -1887,40 +1955,79 @@ def _resolve_child_for(db: Session, house_id: int, sender_role: str, child_id: i
     return part[0], None
 
 
+# Confirmations Maya has asked for and not yet received, in RAM like the voice
+# sessions: losing them on a restart just means she asks again, which is the safe
+# direction. Keyed (house, role, sender, device, capability).
+_MAYA_PENDING: dict = {}
+
+
 async def _execute_maya_tool(db: Session, house_id: int, sender_role: str, sender_id: int,
-                             sender_name: str, child_id: int | None, name: str, args: dict) -> str:
+                             sender_name: str, child_id: int | None, name: str, args: dict,
+                             run_id: str = "") -> str:
     """Run one tool call as the invoking sender and return a text result for the
     model. All permission/privacy enforcement lives here."""
     try:
-        if name == "control_device":
+        if name == "set_capability":
             device = db.query(Device).filter(
                 Device.device_id == str(args.get("device_id", "")), Device.house_id == house_id).first()
             if not device:
                 return "Error: no such device in this house."
             if device.blocked:
                 return f"Error: {device.name} is blocked."
-            cmd = str(args.get("cmd", ""))
-            channel = args.get("channel", 1)
-            if not isinstance(channel, int) or not 1 <= channel <= 3:
-                channel = 1
-            if cmd not in ("on", "off", "all_on", "all_off"):
-                return "Error: cmd must be on/off/all_on/all_off."
+            key = str(args.get("key", ""))
+            value = args.get("value")
+            # `agent:"deny"` is enforced here as well as in the context: a model
+            # that was never shown a capability can still name it, and the answer
+            # must be indistinguishable from the capability not existing (§5.4).
+            caps = {c.key: c for c in capability_store.load_capabilities(db, device.device_id)
+                    if c.agent == "allow"}
+            cap = caps.get(key)
+            if cap is None:
+                return f"Error: {device.name} has no control called {key}."
+            if not cap.writable:
+                return f"Error: {cap.label} is read-only."
             if sender_role == "child":
-                denial = _child_command_denial(db, child_id, device.device_id, cmd, channel)
+                denial = _child_capability_denial(db, child_id, device.device_id, key)
                 if denial:
                     return f"Denied: {denial}"
-            result = await _dispatch_command(device.device_id, cmd, channel)
+            label = capability_store.house_labels(db, device.device_id).get(key, cap.label)
+
+            confirmed = False
+            if cap.confirm:
+                # §5.4: Maya sets a confirm:true capability only after an explicit
+                # yes in a turn *after* the one where she asked. The flag she
+                # passes is not evidence on its own — a model can write `true` —
+                # so the server remembers that it asked, and honours the flag only
+                # for the same value, in a later run, within five minutes.
+                pend_key = (house_id, sender_role, sender_id, device.device_id, key)
+                now = time.monotonic()
+                for k in [k for k, v in _MAYA_PENDING.items() if v["until"] < now]:
+                    del _MAYA_PENDING[k]
+                pend = _MAYA_PENDING.get(pend_key)
+                if not (args.get("confirmed") is True and pend and pend["value"] == value
+                        and pend["run"] != run_id):
+                    _MAYA_PENDING[pend_key] = {"value": value, "run": run_id, "until": now + 300}
+                    return (f"Needs confirmation: nothing was changed. Tell the user you are about "
+                            f"to set {label} on {device.name} to {json.dumps(value)} and ask them "
+                            f"to confirm. Only after they clearly say yes, call set_capability "
+                            f"again with the same value and confirmed=true.")
+                del _MAYA_PENDING[pend_key]
+                confirmed = True
+
+            result = await _dispatch_set(db, device.device_id, {key: value}, confirmed=confirmed)
             status = result.get("status")
             if status == "not_connected":
                 return f"Error: {device.name} is offline."
             if status == "timeout":
                 return f"Error: {device.name} did not respond."
-            label = _channel_label(db, device, channel) if cmd in ("on", "off") else device.name
-            verb = {"on": "ON", "off": "OFF", "all_on": "all ON", "all_off": "all OFF"}[cmd]
-            log_activity(db, house_id, "ai", sender_id, sender_name,
-                         "device_switch", f'{sender_name} turned {verb} "{label}" (via Maya)')
+            if status != "ok":
+                detail = result.get("detail") or status
+                return f"Error: {device.name} did not change {label} ({detail})."
+            shown = result.get("state", {}).get(key, value)
+            log_activity(db, house_id, "ai", sender_id, sender_name, "device_switch",
+                         f'{sender_name} set "{label}" to {json.dumps(shown)} on {device.name} (via Maya)')
             db.commit()
-            return f"Done: {label} is now {verb}."
+            return f"Done: {label} on {device.name} is now {json.dumps(shown)}."
 
         if name in ("get_child_location", "list_homework", "get_screen_time"):
             child, err = _resolve_child_for(db, house_id, sender_role, child_id, args.get("child_name", ""))
@@ -1995,6 +2102,7 @@ async def run_maya_agent(db: Session, house_id: int, sender_role: str, sender_id
     reply text. Shared by the chat path (which posts the reply to chat) and the
     voice path (which returns it privately). Tool side effects still happen."""
     reply = None
+    run_id = secrets.token_hex(4)   # one per user message; see the confirm gate
     for _ in range(MAYA_MAX_STEPS):
         # ollama Client is synchronous network IO — keep it off the event loop.
         msg = await asyncio.to_thread(ai.call_model, messages)
@@ -2004,7 +2112,7 @@ async def run_maya_agent(db: Session, house_id: int, sender_role: str, sender_id
                 call = ai.tool_call_dict(tc)
                 result = await _execute_maya_tool(
                     db, house_id, sender_role, sender_id, sender_name, child_id,
-                    call["name"], call["arguments"])
+                    call["name"], call["arguments"], run_id)
                 messages.append({"role": "tool", "content": result, "tool_name": call["name"]})
             continue
         reply = (msg.content or "").strip()

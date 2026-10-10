@@ -10,7 +10,7 @@ The goal the protocol exists for: a contributor builds new hardware, drops it in
 firmware to app — `ch1`/`ch2`/`ch3` appeared 76 times across 6 files when the
 migration was planned.
 
-## Status: step 1 done, step 2 server-complete, spec at revision 2.1 (2026-10-10)
+## Status: steps 1 and 3 done, step 2 server-complete, spec at revision 2.1 (2026-10-10)
 
 §10 defines a six-step migration order. Only the first is implemented.
 
@@ -18,7 +18,7 @@ migration was planned.
 |---|---|
 | 1. Server accepts and stores descriptors; shims protocol 1 | **done** |
 | 2. App renders from the descriptor instead of three hardcoded toggles | server done; app partly — see below |
-| 3. Maya swaps her six fixed tools for a generic `set_capability` | not started |
+| 3. Maya swaps her relay tool for a generic `set_capability` | **done** |
 | 4. Extract the Arduino library | not started |
 | 5. Peering: grants, local link, audit (§7) | not started |
 | 6. Device to Maya (§8) | not started |
@@ -188,6 +188,32 @@ is the next step before any APK.
   `device_management_tab.dart`. Both keep working through the shim and the
   facade; neither shows a non-channel capability.
 
+## Step 3 (2026-10-10): Maya drives any device
+
+Only `control_device` was a relay tool; the other five (child location, homework,
+screen time, activity log) have nothing to do with capabilities, so the plan's
+"swaps her six fixed tools" overstates it. `set_capability(device_id, key, value,
+confirmed)` replaces the one that mattered, and Maya's house state is now built
+from `descriptor_payload(for_agent=True)` — a fan's speed slider is as visible to
+her as a three-channel extension. Details of both gates are in
+[Maya AI agent](maya-ai-agent.md#set_capability-two-gates-a-misbehaving-model-cannot-walk-through).
+
+**A pre-existing bug surfaced, on the path step 3 depends on.** `_dispatch_set`
+sent a `{"type":"set"}` frame to *every* device, including protocol-1 boards,
+which have never heard of one — so `POST /capability` against a v1 device would
+have timed out. It now translates to the v1 command each key always mapped to
+(`_dispatch_set_v1`), stopping at the first failure and reporting `failed` plus
+what did apply, as §6.2 asks. `test_maya.py` covers both entry points. It went
+unnoticed through step 2 because the step-1 tests only exercised the v1 *command*
+endpoint against a v1 device, and the `set` endpoint only against a v2 one.
+
+**The model is the only thing replaced in the test.** `test_maya.py` swaps
+`ai.call_model` for a script, and everything else — the context she reads, the
+executor and every permission check, the dispatch over a WebSocket — is the real
+app, reached through `/api/maya/voice` so it runs in the app's own event loop.
+The script misbehaves on purpose: it names a capability it was never shown, and
+passes `confirmed:true` with nobody having asked.
+
 ## What a reader will not find
 
 Specified, not built — each has a section to build against:
@@ -199,9 +225,6 @@ Specified, not built — each has a section to build against:
 - **History** (§5.12). The flag is stored per capability; no series is retained.
 - **The public API's v2 surface** (§12). `/api/open/v1/*` is unchanged and still
   speaks three channels through the shim.
-- **Maya's generic tool** (step 3). Her six fixed tools still address channels,
-  and `descriptor_payload(for_agent=True)` — which filters `agent:"deny"` — is
-  tested but not yet called by anything.
 - **Any of §7 or §8** — peering, the local ESP-NOW link, the audit plane, or
   device-to-Maya. Steps 5 and 6.
 

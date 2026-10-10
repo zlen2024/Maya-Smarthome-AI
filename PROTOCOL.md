@@ -1245,6 +1245,13 @@ on its own and none of them breaks what is already deployed:
 3. Maya swaps its six fixed tools for a generic `set_capability`, driven by the
    descriptors already in its house context — filtering `agent:"deny"` and
    honouring `confirm` (§5.4) **in the same change**, not as a follow-up.
+   — **done 2026-10-10.** Only one of the six (`control_device`) was a relay tool
+   and it is the one replaced; the other five are child-data and activity tools
+   with nothing to do with capabilities, so "six fixed tools" above overstates
+   the change. Both gates are enforced in code and tested against a model
+   scripted to misbehave (`test_maya.py`). `confirm` is honoured only for the
+   same value, in a later turn than the ask, within five minutes — a
+   model-supplied `confirmed:true` is not evidence by itself.
 4. **Extract the Arduino library** — by now it only has to implement a written
    protocol, so it is thin and stable.
 5. Peering: grants, local link, audit.

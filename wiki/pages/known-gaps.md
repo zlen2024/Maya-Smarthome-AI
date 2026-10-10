@@ -93,13 +93,17 @@ mobile. Firmware pages are written from source reading, not graph queries.
   step 2 moves the app onto the descriptor — see
   [device protocol](device-protocol.md). Until then a change to one write path
   that misses the other will silently desynchronise them.
-- **Two test files, no test runner.** `software/server/test_screen_limit.py`
-  (55 lines) and `software/server/test_security.py` (274 lines, added 2026-10-10 —
-  abuse limits, PIN rules, the join→child-location chain, and device identify over
-  a real WebSocket), plus a default `software/mobile/test/widget_test.dart`
-  (16 lines). Both server tests are plain scripts run with `python <file>`; there
-  is no pytest, no CI, and nothing covering the Maya agent loop or command
-  dispatch. `test_security.py` needs `httpx<0.28` for Starlette 0.36's TestClient.
+- **Five self-check scripts, no test runner.** `test_screen_limit.py`,
+  `test_security.py` (abuse limits, PIN rules, the join→GPS chain),
+  `test_descriptor.py` (protocol 2 step 1), `test_grants.py` (step 2: claiming,
+  grants, labels) and `test_maya.py` (step 3: Maya's `set_capability` against a
+  scripted model), all in `software/server/`, plus a default
+  `software/mobile/test/widget_test.dart` (16 lines). Each is a plain script run
+  with `python <file>`; there is no pytest and no CI. The agent loop's *model*
+  is only ever tested through the scripted stand-in — nothing exercises a real
+  Ollama response. The app's Dart is **uncompiled and untested** (no Flutter SDK
+  on the machine it was written on). Server tests need `httpx<0.28` for
+  Starlette 0.36's TestClient.
 - **No rate limiting outside the named guards.** `ratelimit.py` covers the
   endpoints listed in [security-notes](security-notes.md#abuse-limits-in-one-place);
   everything else — chat, device commands, the REST device API — is unmetered. The

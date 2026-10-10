@@ -18,11 +18,13 @@ from fastapi import HTTPException
 OLLAMA_HOST = "https://ollama.com"
 DEFAULT_MODEL = "gpt-oss:20b-cloud"
 
-SYSTEM_PROMPT = """You are Maya, the AI assistant inside a family smart-home chat. Household members talk to you by mentioning @maya. You can chat, control smart power extension devices (each has up to 3 named relay channels), and look up household info using the provided tools.
+SYSTEM_PROMPT = """You are Maya, the AI assistant inside a family smart-home chat. Household members talk to you by mentioning @maya. You can chat, control the smart devices in the house, and look up household info using the provided tools. Each device lists the controls it reports (a switch, a speed slider, a mode, a button...) with a key, a type, its current value and its limits.
 
 Guidelines:
 - Use a tool when the user asks you to DO something (switch a device, assign homework) or asks for live info (a child's location, homework, screen-time, recent activity). Chat directly when no tool is needed.
-- Match the user's words ("the TV", "channel 2", "Ali") to the device_ids, channel numbers and names in the house state below.
+- Match the user's words ("the TV", "the fan speed", "Ali") to the device_ids, control keys and names in the house state below. Use a control's key exactly as listed, and a value of the control's own type.
+- A control marked "needs confirmation" is never set on the first ask: tell the user what you are about to do and ask. Only after they clearly say yes, call the tool again with confirmed=true.
+- Controls marked "read-only" can be reported but not changed.
 - Never claim you did something unless the tool result confirms it. If a tool returns an error or refusal, tell the user plainly.
 - Keep replies to 1-3 short sentences. Never mention tools, JSON, or that you are a model.
 - Permission and privacy are enforced by the tools, not by you: just call the tool and report what it returns."""
@@ -31,13 +33,14 @@ Guidelines:
 # enforces who may call what — these descriptions only guide the model.
 TOOLS = [
     {"type": "function", "function": {
-        "name": "control_device",
-        "description": "Switch a smart-extension relay channel on or off.",
+        "name": "set_capability",
+        "description": "Change one control on a device: switch a channel on or off, set a speed or mode, press a button. Use the device_id and key exactly as listed in the house state.",
         "parameters": {"type": "object", "properties": {
             "device_id": {"type": "string", "description": "Device id from the house state."},
-            "cmd": {"type": "string", "enum": ["on", "off", "all_on", "all_off"]},
-            "channel": {"type": "integer", "description": "Channel 1-3. Ignored for all_on/all_off.", "minimum": 1, "maximum": 3},
-        }, "required": ["device_id", "cmd"]},
+            "key": {"type": "string", "description": "The control's key, e.g. ch1 or speed."},
+            "value": {"description": "New value in the control's own type: \"on\" or \"off\" for a switch, a number for a slider or number, text for a mode or text control, null to press a button."},
+            "confirmed": {"type": "boolean", "description": "true only after the user has clearly said yes to a control marked as needing confirmation."},
+        }, "required": ["device_id", "key"]},
     }},
     {"type": "function", "function": {
         "name": "get_child_location",
@@ -128,8 +131,8 @@ if __name__ == "__main__":
     class _FakeTC:
         def __init__(self, name, args): self.function = _FakeFn(name, args)
 
-    d = tool_call_dict(_FakeTC("control_device", {"device_id": "D", "cmd": "on", "channel": 2}))
-    assert d == {"name": "control_device", "arguments": {"device_id": "D", "cmd": "on", "channel": 2}}
+    d = tool_call_dict(_FakeTC("set_capability", {"device_id": "D", "key": "ch2", "value": "on"}))
+    assert d == {"name": "set_capability", "arguments": {"device_id": "D", "key": "ch2", "value": "on"}}
 
     d = tool_call_dict(_FakeTC("list_homework", '{"child_name": "Ali"}'))
     assert d == {"name": "list_homework", "arguments": {"child_name": "Ali"}}
@@ -137,6 +140,6 @@ if __name__ == "__main__":
     d = tool_call_dict(_FakeTC("x", "not json"))
     assert d == {"name": "x", "arguments": {}}
 
-    assert TOOL_NAMES == {"control_device", "get_child_location", "list_homework",
+    assert TOOL_NAMES == {"set_capability", "get_child_location", "list_homework",
                           "get_screen_time", "add_homework", "read_activity_log"}
     print("ai.py self-check OK")
