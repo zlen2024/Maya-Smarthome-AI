@@ -1235,6 +1235,13 @@ on its own and none of them breaks what is already deployed:
    permission model, the names and the claim shape all still assume three
    relays. The old per-relay permission table and `Relay.name` are converted in
    the same change, not left beside the new ones.
+   — **server half done 2026-10-10** (§4.1, §5.10, §5.11, with the per-relay
+   permissions migrated onto capability keys and the old table dropped;
+   `/api/permissions` kept as a translating facade over the same store).
+   **App: the device list and the permission sheet are descriptor-driven; the
+   home summary and device-management screens still read the v1 shapes**, which
+   keep working through the shim. The Dart was not compiled — no Flutter SDK on
+   the machine it was written on.
 3. Maya swaps its six fixed tools for a generic `set_capability`, driven by the
    descriptors already in its house context — filtering `agent:"deny"` and
    honouring `confirm` (§5.4) **in the same change**, not as a follow-up.

@@ -196,3 +196,47 @@ All three server self-checks still pass. Reconciled
 [device protocol](pages/device-protocol.md) with a revision-2.1 section and a
 rewritten "what a reader will not find" — every entry there now names the section
 it can be built against.
+
+## [2026-10-10] ingest | Step 2 server half: claiming, grants, labels converted
+
+§10 bundles three conversions into step 2 because they touch the same tables, and
+all three are now done on the server: §4.1 (claiming creates the device record
+and nothing else), §5.10 (`capability_grants` replaces the per-relay
+`permissions`) and §5.11 (`capability_labels` replaces `Relay.name` as the
+store). New page section: [device protocol](pages/device-protocol.md#step-2-2026-10-10-the-three-conversions-and-the-app).
+
+**The data was converted, not duplicated.** The migration copies each per-relay
+permission onto `(device_id, "ch<n>")`, counts what landed, then drops the
+`permissions` table — and only drops it if the count holds, because a failure
+that leaves both tables with nothing reading the old one is recoverable while
+dropping first is not. Relay names that still read "Channel N" carry no intent,
+so they are left out and the firmware's own label applies. Verified against a
+database still carrying the old table: three permissions became three grants with
+their allow/deny values intact, two real names became labels, the table went.
+
+`/api/permissions` survives as a **translating facade** over the grant store so
+the shipped app keeps working — a second spelling, not a second source of truth,
+which is the distinction §10 draws when it says the old table converts in the
+same change.
+
+**A bug fell out of §4.1.** Re-claiming a device used to reset every channel name
+back to "Channel N", silently wiping a member's "Television" on every
+re-provision. The block that did it was the same block §4.1 required removing, so
+the fix came free with the rule.
+
+**Enforcement now runs through one function.** `_child_capability_denial` answers
+for the v1 command endpoint, the capability endpoint and Maya alike, so a check
+cannot be dropped from one path without being dropped from all three. A
+capability nobody has granted is denied, which is what stops a firmware update
+widening a child's reach — `test_grants.py` asserts that a key that disappears
+and returns comes back denied.
+
+**The app was written, not compiled.** There is no Flutter SDK on this machine,
+so `capability_control.dart` (new, all ten kinds plus a read-only fallback for an
+unknown one), the rewritten `devices_tab.dart` and the capability-based permission
+sheet are reviewed rather than built. `flutter analyze` is the next step before
+any APK. `home_tab.dart` and `device_management_tab.dart` still read the v1
+shapes and keep working through the shim; they are recorded as remaining rather
+than quietly left.
+
+All four server self-checks pass (`test_grants.py` is new, 5 checks).

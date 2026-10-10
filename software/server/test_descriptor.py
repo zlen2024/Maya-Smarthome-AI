@@ -380,13 +380,13 @@ def test_v2_set_round_trip():
         got = c.get("/api/devices/esp32-fan/capabilities", headers=tok).json()
         assert got["state"]["ch1"] == "on" and got["state"]["speed"] == 60, got["state"]
 
-        # The v2 ack carries no bare ch1/ch2/ch3, and must not be read as if it
-        # did: defaulting them to "off" would switch the relay row off behind the
-        # device's back. The channel keys it *does* report are mirrored across.
-        relays = {r["channel_number"]: r["is_on"]
-                  for r in c.get("/api/relays", headers=tok).json()["relays"]
-                  if r["device_id"] == "esp32-fan"}
-        assert relays.get(1) is True, relays
+        # §4.1: a protocol-2 device is given no relay rows at all — claiming
+        # creates the device record and nothing else, and only the protocol-1
+        # shim synthesises channels. So this device's state lives in the
+        # capability tables alone, which the assertion above already read.
+        relays = [r for r in c.get("/api/relays", headers=tok).json()["relays"]
+                  if r["device_id"] == "esp32-fan"]
+        assert relays == [], relays
 
         # An error ack must resolve the waiting command, not leave the caller in
         # the 5-second timeout for an answer that already arrived.

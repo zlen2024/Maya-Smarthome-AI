@@ -51,10 +51,12 @@ a tight, auditable surface.
 - **Auth** (3) — register, login, me. Both register and login carry abuse limits
   (`ratelimit.py`); the full table is in
   [security-notes](security-notes.md#abuse-limits-in-one-place).
-- **Capabilities** (2, added 2026-10-10) — `GET /api/devices/{id}/capabilities`
-  and `POST /api/devices/{id}/capability`, the protocol-2 descriptor read and the
-  generic `set`. The v1 `POST /command` stays until step 2 moves the app over;
-  see [device protocol](device-protocol.md).
+- **Capabilities** (5, added 2026-10-10) — `GET /api/devices/{id}/capabilities`,
+  `POST /api/devices/{id}/capability` (the generic `set`),
+  `PUT /api/devices/{id}/capabilities/{key}` (rename, §5.11) and
+  `GET`/`PUT /api/children/{id}/grants` (§5.10). The v1 `POST /command` and
+  `/api/permissions` both stay: the latter is now a translating facade over the
+  grant store, not a second store. See [device protocol](device-protocol.md).
 - **Houses** (12) — CRUD, join-by-PIN, switch, members, per-member device
   permission, kick, reset-pin, and API-key create/list/revoke.
 - **Open API v1** (3) — `X-API-Key`, `tags=["Open API v1"]` so they render as

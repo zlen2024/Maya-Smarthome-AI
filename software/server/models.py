@@ -80,7 +80,8 @@ class Child(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     house = relationship("House", back_populates="children")
-    permissions = relationship("Permission", back_populates="child", cascade="all, delete-orphan")
+    capability_grants = relationship("CapabilityGrant", back_populates="child",
+                                     cascade="all, delete-orphan")
     homework = relationship("Homework", back_populates="child", cascade="all, delete-orphan")
 
 
@@ -197,6 +198,60 @@ class CapabilityState(Base):
     device = relationship("Device", back_populates="capability_states")
 
 
+class CapabilityGrant(Base):
+    """What a child may write, keyed on the capability key (PROTOCOL.md §5.10).
+
+    Replaces `Permission`, which keyed on `relay_id` and so could only ever
+    express "may use channel 2 of a 3-channel extension". The key is the unit
+    because it is the only identifier a device promises never to renumber, and
+    because "may use the fan" is not the same as "may press the fan's reset
+    button".
+
+    Three rules live in the code that writes this table, not in the schema:
+    a capability the server has not seen before is denied to every child, so a
+    firmware update can never widen a child's reach; a grant is deleted when its
+    capability leaves the descriptor; and the grant governs *writing* only —
+    reading state is house-wide.
+    """
+    __tablename__ = "capability_grants"
+    __table_args__ = (
+        UniqueConstraint("child_id", "device_id", "key", name="_child_capability_uc"),
+    )
+
+    grant_id = Column(Integer, primary_key=True, index=True)
+    child_id = Column(Integer, ForeignKey("children.child_id"), nullable=False, index=True)
+    device_id = Column(String, ForeignKey("devices.device_id"), nullable=False, index=True)
+    key = Column(String(24), nullable=False)
+    is_allowed = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    child = relationship("Child", back_populates="capability_grants")
+
+
+class CapabilityLabel(Base):
+    """A name a house member gave a capability (PROTOCOL.md §5.11).
+
+    Kept out of `device_capabilities` on purpose: that table is rewritten
+    wholesale on every identify, and §5.11 makes it a MUST that a firmware update
+    never overwrites a name a person chose. Separate rows survive the rewrite
+    without any preserve-this-column special case.
+
+    Precedence, resolved in `capability_store.descriptor_payload`: this label,
+    else the firmware's, else the key. Clearing the row *is* the reset — there is
+    no third state.
+    """
+    __tablename__ = "capability_labels"
+    __table_args__ = (
+        UniqueConstraint("device_id", "key", name="_device_capability_label_uc"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(String, ForeignKey("devices.device_id"), nullable=False, index=True)
+    key = Column(String(24), nullable=False)
+    label = Column(String, nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 class Relay(Base):
     __tablename__ = "relays"
     __table_args__ = (
@@ -210,22 +265,6 @@ class Relay(Base):
     is_on = Column(Boolean, default=False)
 
     extension = relationship("SmartExtension", back_populates="relays")
-    permissions = relationship("Permission", back_populates="relay", cascade="all, delete-orphan")
-
-
-class Permission(Base):
-    __tablename__ = "permissions"
-    __table_args__ = (
-        UniqueConstraint('child_id', 'relay_id', name='_child_relay_uc'),
-    )
-
-    permission_id = Column(Integer, primary_key=True, index=True)
-    child_id = Column(Integer, ForeignKey("children.child_id"), nullable=False)
-    relay_id = Column(Integer, ForeignKey("relays.relay_id"), nullable=False)
-    is_allowed = Column(Boolean, default=True)
-
-    child = relationship("Child", back_populates="permissions")
-    relay = relationship("Relay", back_populates="permissions")
 
 
 class MsgHistory(Base):

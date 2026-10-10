@@ -51,13 +51,20 @@ pointing at another backend, but the schema is hand-migrated for SQLite
 - **`ScreenTime` is the automation trigger** — see
   [Maya AI agent](maya-ai-agent.md#automation-the-screen-limit-alert).
 
-Protocol 2 added two tables (2026-10-10): `device_capabilities`, one row per
-capability a device declared about itself, and `capability_state`, one row per
-capability's current value with `value` as JSON text — a typed capability value
-cannot fit `Relay.is_on`, which is a `Boolean`. Both are keyed `(device_id, key)`.
-`Relay` still carries today's three channels in parallel; see
-[device protocol](device-protocol.md). `Device` also gained `proto`, `model`,
-`fw` and `report_every`.
+Protocol 2 added four tables (2026-10-10) and removed one:
+
+| Table | Holds |
+|---|---|
+| `device_capabilities` | One row per capability a device declared about itself |
+| `capability_state` | One row per capability's current value, `value` as JSON text — a typed value cannot fit `Relay.is_on`, which is a `Boolean` |
+| `capability_grants` | What a child may **write**, per `(child, device, key)` — replaces `permissions`, which keyed on `relay_id` |
+| `capability_labels` | A name a house member gave a capability; kept out of `device_capabilities` because that table is rewritten on every identify |
+
+`permissions` was migrated onto `capability_grants` and **dropped**; `Relay.name`
+values moved into `capability_labels`. `Relay` itself remains as the protocol-1
+shim's backing store, created when a v1 device identifies rather than when it is
+claimed (§4.1). `Device` also gained `proto`, `model`, `fw` and `report_every`.
+See [device protocol](device-protocol.md).
 
 Security-relevant columns (`join_pin`, `devices.pin`, `key_hash`) are discussed in
 [security notes](security-notes.md).

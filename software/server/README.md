@@ -101,6 +101,7 @@ Two scripts, no test runner — run them directly:
 uv run python test_screen_limit.py   # screen-time alert fires once per day
 uv run python test_security.py       # abuse limits, PIN rules, the join -> child-location chain
 uv run python test_descriptor.py     # protocol 2: descriptors stored, protocol 1 shimmed
+uv run python test_grants.py         # protocol 2 step 2: claiming, capability grants, labels
 ```
 
 `test_security.py` and `test_descriptor.py` boot the app against a throwaway

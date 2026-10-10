@@ -14,10 +14,10 @@ from sqlalchemy.orm import Session
 from database import engine, Base, get_db, SessionLocal
 from models import (
     Account, AccountRole, House, Child, Device, SmartExtension,
-    Relay, Permission, MsgHistory, Heartbeat, AccountHouse, Homework, ScreenTime, Order
+    Relay, MsgHistory, Heartbeat, AccountHouse, Homework, ScreenTime, Order
 )
 from models import ApiKey, ActivityLog, Mention
-from models import DeviceCapability, CapabilityState
+from models import DeviceCapability, CapabilityState, CapabilityGrant, CapabilityLabel
 from auth import (
     hash_password, verify_password, create_access_token, get_current_user,
     get_current_user_or_child, get_api_key_house, hash_api_key,
@@ -103,10 +103,76 @@ def run_migrations():
 
         # The capability tables themselves. create_all() at import already makes
         # them on a fresh database; this covers an existing one.
-        for table in ('device_capabilities', 'capability_state'):
+        for table, model in (('device_capabilities', DeviceCapability),
+                             ('capability_state', CapabilityState),
+                             ('capability_grants', CapabilityGrant),
+                             ('capability_labels', CapabilityLabel)):
             if table not in inspector.get_table_names():
-                {'device_capabilities': DeviceCapability,
-                 'capability_state': CapabilityState}[table].__table__.create(bind=engine)
+                model.__table__.create(bind=engine)
+
+        # Protocol 2 step 2 (§5.10, §5.11): convert the per-relay permission
+        # table and the relay names onto capability keys, then drop the old
+        # table. §10 is explicit that these convert in the same change rather
+        # than sit beside the new ones — two sources of truth for who may switch
+        # a child's heater is how one of them goes stale.
+        if 'permissions' in inspector.get_table_names():
+            moved = 0
+            rows = db.execute(text(
+                "SELECT p.child_id, p.is_allowed, r.channel_number, e.device_id "
+                "FROM permissions p "
+                "JOIN relays r ON r.relay_id = p.relay_id "
+                "JOIN smart_extensions e ON e.se_id = r.se_id")).fetchall()
+            for child_id, is_allowed, channel, device_id in rows:
+                if channel not in (1, 2, 3) or not device_id:
+                    continue
+                key = f"ch{channel}"
+                exists = db.execute(text(
+                    "SELECT 1 FROM capability_grants WHERE child_id=:c AND "
+                    "device_id=:d AND key=:k"),
+                    {"c": child_id, "d": device_id, "k": key}).first()
+                if exists:
+                    continue
+                db.execute(text(
+                    "INSERT INTO capability_grants (child_id, device_id, key, is_allowed) "
+                    "VALUES (:c, :d, :k, :a)"),
+                    {"c": child_id, "d": device_id, "k": key, "a": 1 if is_allowed else 0})
+                moved += 1
+            db.commit()
+            # Drop only once every row has a home. A failure here leaves both
+            # tables in place with nothing reading the old one, which is
+            # recoverable; dropping first would not be.
+            remaining = db.execute(text("SELECT COUNT(*) FROM permissions")).scalar() or 0
+            landed = db.execute(text("SELECT COUNT(*) FROM capability_grants")).scalar() or 0
+            if landed >= remaining:
+                db.execute(text("DROP TABLE permissions"))
+                db.commit()
+                print(f"Migrated {moved} relay permission(s) to capability grants; "
+                      "dropped the permissions table.")
+            else:
+                print(f"NOT dropping permissions: {remaining} rows, only {landed} grants. "
+                      "Nothing reads the old table; investigate before the next deploy.")
+
+        # Relay names become capability labels. A name that is still the default
+        # carries no intent, so it is left out and the firmware's label applies.
+        if 'capability_labels' in inspector.get_table_names():
+            named = db.execute(text(
+                "SELECT r.channel_number, r.name, e.device_id FROM relays r "
+                "JOIN smart_extensions e ON e.se_id = r.se_id")).fetchall()
+            for channel, name, device_id in named:
+                if channel not in (1, 2, 3) or not device_id or not name:
+                    continue
+                if name.strip() in ("", f"Channel {channel}", "Relay"):
+                    continue
+                key = f"ch{channel}"
+                exists = db.execute(text(
+                    "SELECT 1 FROM capability_labels WHERE device_id=:d AND key=:k"),
+                    {"d": device_id, "k": key}).first()
+                if not exists:
+                    db.execute(text(
+                        "INSERT INTO capability_labels (device_id, key, label) "
+                        "VALUES (:d, :k, :l)"),
+                        {"d": device_id, "k": key, "l": name.strip()})
+            db.commit()
 
         # Add location/screen-limit columns to children if missing
         child_cols = [c['name'] for c in inspector.get_columns('children')]
@@ -1280,27 +1346,41 @@ async def register_device(payload: dict, db: Session = Depends(get_db),
         db.add(device)
     db.flush()
     
-    existing_ext = db.query(SmartExtension).filter(SmartExtension.device_id == device_id).first()
-    if existing_ext:
-        ext = existing_ext
-        ext.name = f"{name} Extension"
-        for ch in range(1, 4):
-            relay = db.query(Relay).filter(Relay.se_id == ext.se_id, Relay.channel_number == ch).first()
-            if not relay:
-                relay = Relay(se_id=ext.se_id, name=f"Channel {ch}", channel_number=ch, is_on=False)
-                db.add(relay)
-            else:
-                relay.name = f"Channel {ch}"
-    else:
-        ext = SmartExtension(device_id=device_id, name=f"{name} Extension")
-        db.add(ext)
-        db.flush()
-        for ch in range(1, 4):
-            relay = Relay(se_id=ext.se_id, name=f"Channel {ch}", channel_number=ch, is_on=False)
-            db.add(relay)
+    # §4.1: claiming stops here. At this moment the server knows a device id, a
+    # PIN and a name the owner typed — nothing about the hardware — so creating
+    # an extension and three relay channels would be a guess, and it is the wrong
+    # guess for every device that is not a 3-channel extension. Structure comes
+    # from the descriptor at identify; a protocol-1 device gets the shim's
+    # backing rows there, in `_ensure_v1_backing_rows`.
+    #
+    # What this also stops doing: the block that used to live here reset every
+    # relay name back to "Channel N" on a re-claim, silently wiping a name a
+    # member had chosen. §5.11 forbids that outright.
     db.commit()
     return {"device_id": device.device_id, "name": device.name, "status": device.status,
             "house_id": device.house_id, "created": existing is None}
+
+
+def _ensure_v1_backing_rows(db: Session, device_id: str, name: str) -> None:
+    """Create the shim's `SmartExtension` + three `Relay` rows, once.
+
+    Called when a protocol-1 device identifies (§4, §4.1) — the first moment
+    "this device has three channels" is a known fact rather than an assumption.
+    Idempotent, because a device identifies on every reconnect, and it never
+    renames an existing channel: that name belongs to the household (§5.11).
+    A protocol-2 device never gets these rows.
+    """
+    ext = db.query(SmartExtension).filter(SmartExtension.device_id == device_id).first()
+    if ext is None:
+        ext = SmartExtension(device_id=device_id, name=f"{name} Extension")
+        db.add(ext)
+        db.flush()
+    for channel in (1, 2, 3):
+        relay = db.query(Relay).filter(Relay.se_id == ext.se_id,
+                                       Relay.channel_number == channel).first()
+        if relay is None:
+            db.add(Relay(se_id=ext.se_id, name=f"Channel {channel}",
+                         channel_number=channel, is_on=False))
 
 
 @app.delete("/api/devices/{device_id}")
@@ -1322,9 +1402,15 @@ async def delete_device(device_id: str, db: Session = Depends(get_db),
         await manager.send_personal_message(
             json.dumps({"id": device_id, "cmd": "factory_reset"}), device_id)
 
-    # ORM cascade removes SmartExtension -> Relays -> Permissions
+    # ORM cascade removes SmartExtension -> Relays, and the capability rows the
+    # Device owns. Grants and labels hang off (device_id, key) rather than off
+    # the Device row, so they are cleared here — a grant naming a device that no
+    # longer exists would be invisible and would come back to life if the same
+    # device id were ever claimed again.
     db.delete(device)
     db.query(Heartbeat).filter(Heartbeat.device_id == device_id).delete()
+    db.query(CapabilityGrant).filter(CapabilityGrant.device_id == device_id).delete()
+    db.query(CapabilityLabel).filter(CapabilityLabel.device_id == device_id).delete()
     db.commit()
     manager.device_info.pop(device_id, None)
     return {"status": "deleted", "device_id": device_id, "device_reset": device_was_online}
@@ -1434,24 +1520,6 @@ async def get_device_status(device_id: str, db: Session = Depends(get_db), curre
     }
 
 
-def _capability_label_overrides(db: Session, device: Device) -> dict[str, str]:
-    """The house's own names for the three channels.
-
-    §5.1 gives the app's label precedence over the firmware's. Today a member
-    renames a channel through `Relay.name`, so those names are mapped onto the
-    `ch1`/`ch2`/`ch3` capability keys here. When step 2 lets a member rename any
-    capability, this is the function that grows a second source.
-    """
-    ext = db.query(SmartExtension).filter(SmartExtension.device_id == device.device_id).first()
-    if not ext:
-        return {}
-    out = {}
-    for relay in db.query(Relay).filter(Relay.se_id == ext.se_id).all():
-        if relay.name and relay.channel_number in (1, 2, 3):
-            out[f"ch{relay.channel_number}"] = relay.name
-    return out
-
-
 def _device_in_house_or_404(db: Session, device_id: str, house_id) -> Device:
     device = db.query(Device).filter(Device.device_id == device_id).first()
     if not device:
@@ -1471,8 +1539,9 @@ async def get_device_capabilities(device_id: str, db: Session = Depends(get_db),
     which protocol the firmware speaks.
     """
     device = _device_in_house_or_404(db, device_id, current_auth["house_id"])
-    payload = capability_store.descriptor_payload(
-        db, device, label_overrides=_capability_label_overrides(db, device))
+    child_id = (current_auth["child"].child_id
+                if current_auth["type"] == "child" else None)
+    payload = capability_store.descriptor_payload(db, device, child_id=child_id)
     return {"device_id": device_id, "name": device.name,
             "blocked": bool(device.blocked), "status": device.status, **payload}
 
@@ -1497,20 +1566,13 @@ async def set_device_capability(device_id: str, payload: dict,
         raise HTTPException(status_code=400, detail="values object required")
 
     if current_auth["role"] == "child":
-        # Permissions are per relay channel today, so a child is held to exactly
-        # the rights they already have: the three channel keys go through the
-        # same check as a manual tap, and anything else is refused outright
-        # rather than silently allowed. Per-capability permissions need the
-        # `Permission` table to key on a capability instead of a relay — a
-        # schema change that belongs with the app work in step 2.
+        # §5.10: every key is checked against this child's grants, and an
+        # ungranted capability is denied whether or not anyone has thought about
+        # it — which is the point, since the alternative is a firmware update
+        # widening what a child can reach.
         for key in values:
-            if key not in ("ch1", "ch2", "ch3"):
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"Children cannot set {key} yet — only the relay channels")
-            channel = int(key[-1])
-            denial = _child_command_denial(db, current_auth["child"].child_id,
-                                           device_id, "on", channel)
+            denial = _child_capability_denial(db, current_auth["child"].child_id,
+                                              device_id, key)
             if denial:
                 raise HTTPException(status_code=403, detail=denial)
 
@@ -1525,9 +1587,8 @@ async def set_device_capability(device_id: str, payload: dict,
             actor_type, actor_id, actor_name = ("parent", current_auth["user"].acc_id,
                                                 current_auth["user"].name)
         labels = {c.key: c.label for c in capability_store.load_capabilities(db, device_id)}
-        overrides = _capability_label_overrides(db, device)
-        described = ", ".join(
-            f'"{overrides.get(k, labels.get(k, k))}" to {v}' for k, v in values.items())
+        labels.update(capability_store.house_labels(db, device_id))
+        described = ", ".join(f'"{labels.get(k, k)}" to {v}' for k, v in values.items())
         log_activity(db, device.house_id, actor_type, actor_id, actor_name,
                      "device_switch", f"{actor_name} set {described} on {device.name}")
         db.commit()
@@ -1581,33 +1642,47 @@ async def send_device_command(device_id: str, payload: dict,
     return result
 
 
-def _child_command_denial(db: Session, child_id: int, device_id: str, cmd: str, channel: int) -> str | None:
-    """Return a human-readable reason a child may NOT run this command, or None
-    if allowed. Shared by the JWT command endpoint and the Maya AI path so the
-    permission rule lives in exactly one place."""
-    ext = db.query(SmartExtension).filter(SmartExtension.device_id == device_id).first()
-    if not ext:
-        return "Smart extension not found for device"
-    if cmd in ("all_on", "all_off"):
-        relays = db.query(Relay).filter(Relay.se_id == ext.se_id).all()
-        for r in relays:
-            perm = db.query(Permission).filter(
-                Permission.child_id == child_id,
-                Permission.relay_id == r.relay_id
-            ).first()
-            if not perm or not perm.is_allowed:
-                return f"Permission denied for channel {r.channel_number}"
-        return None
-    relay = db.query(Relay).filter(Relay.se_id == ext.se_id, Relay.channel_number == channel).first()
-    if not relay:
-        return "Relay channel not found"
-    perm = db.query(Permission).filter(
-        Permission.child_id == child_id,
-        Permission.relay_id == relay.relay_id
-    ).first()
-    if not perm or not perm.is_allowed:
-        return "You do not have permission to control this channel"
+def _child_capability_denial(db: Session, child_id: int, device_id: str,
+                             key: str) -> str | None:
+    """Return a reason a child may NOT write this capability, or None if allowed.
+
+    §5.10: the grant is keyed on the capability key, and absent means denied.
+    This is the one place the rule lives — the v1 command path, the capability
+    endpoint and Maya all arrive here, so a check cannot be dropped from one of
+    them without being dropped from all three.
+    """
+    caps = {c.key: c for c in capability_store.load_capabilities(db, device_id)}
+    cap = caps.get(key)
+    if cap is None:
+        return f"This device has no {key}"
+    if not cap.writable:
+        return f"{cap.label} cannot be changed"
+    if not capability_store.child_may_write(db, child_id, device_id, key):
+        label = capability_store.house_labels(db, device_id).get(key, cap.label)
+        return f"You do not have permission to control {label}"
     return None
+
+
+def _child_command_denial(db: Session, child_id: int, device_id: str, cmd: str,
+                          channel: int) -> str | None:
+    """The v1 command path's permission check, now answered from capability
+    grants (§5.10) so there is a single store behind both paths.
+
+    `all_on`/`all_off` still means "every channel this device exposes", which
+    after step 2 is every writable `ch*` capability it declared rather than every
+    relay row it happens to have.
+    """
+    keys = [c.key for c in capability_store.load_capabilities(db, device_id)
+            if c.key in ("ch1", "ch2", "ch3") and c.writable]
+    if not keys:
+        return "This device has no switchable channels"
+    if cmd in ("all_on", "all_off"):
+        for key in keys:
+            denial = _child_capability_denial(db, child_id, device_id, key)
+            if denial:
+                return denial
+        return None
+    return _child_capability_denial(db, child_id, device_id, f"ch{channel}")
 
 
 # The firmware only understands output_on/output_off (see smartextension.ino);
@@ -2120,105 +2195,244 @@ async def list_orders(db: Session = Depends(get_db),
     } for o in orders]}
 
 
-# ─── Permission Endpoints ─────────────────────────────────────
+# ─── Capability Grants (PROTOCOL.md §5.10) ───────────────────
+# A grant is a row per (child, device, capability key) and it governs writing.
+# `/api/permissions` is kept as a translating facade over the same store so the
+# shipped app keeps working: a relay id resolves to (device_id, "ch<n>") and
+# back. It is a second *spelling*, never a second source of truth — which is the
+# distinction §10 draws when it says the old table converts in the same change.
 
-@app.post("/api/permissions")
-async def create_permission(payload: dict, db: Session = Depends(get_db),
-                            current_user: Account = Depends(get_current_user)):
-    if current_user.role not in (AccountRole.parent, AccountRole.admin):
-        raise HTTPException(status_code=403, detail="Only parents/admins can set permissions")
-    child_id = payload.get("child_id")
-    relay_id = payload.get("relay_id")
-    is_allowed = payload.get("is_allowed", True)
-    if not child_id or not relay_id:
-        raise HTTPException(status_code=400, detail="child_id and relay_id required")
-        
-    child = db.query(Child).filter(Child.child_id == child_id).first()
-    if not child:
-        raise HTTPException(status_code=404, detail="Child not found")
-    if current_user.role != AccountRole.admin and child.house_id != current_user.house_id:
-        raise HTTPException(status_code=403, detail="Child does not belong to your house")
-        
+
+def _relay_to_capability(db: Session, relay_id: int) -> tuple[str, str]:
+    """A relay id as (device_id, capability key). Facade plumbing only."""
     relay = db.query(Relay).filter(Relay.relay_id == relay_id).first()
     if not relay:
         raise HTTPException(status_code=404, detail="Relay not found")
     ext = db.query(SmartExtension).filter(SmartExtension.se_id == relay.se_id).first()
     if not ext:
         raise HTTPException(status_code=404, detail="Smart extension not found")
-    device = db.query(Device).filter(Device.device_id == ext.device_id).first()
-    if not device:
-        raise HTTPException(status_code=404, detail="Device not found")
-    if current_user.role != AccountRole.admin and device.house_id != current_user.house_id:
-        raise HTTPException(status_code=403, detail="Device does not belong to your house")
-        
-    perm = Permission(child_id=child_id, relay_id=relay_id, is_allowed=is_allowed)
-    db.add(perm)
+    return ext.device_id, f"ch{relay.channel_number}"
+
+
+def _capability_to_relay(db: Session, device_id: str, key: str) -> int | None:
+    """The reverse, for answering the facade. None when the key is not a channel
+    — a capability a 3-channel vocabulary cannot express."""
+    if key not in ("ch1", "ch2", "ch3"):
+        return None
+    ext = db.query(SmartExtension).filter(SmartExtension.device_id == device_id).first()
+    if not ext:
+        return None
+    relay = db.query(Relay).filter(Relay.se_id == ext.se_id,
+                                   Relay.channel_number == int(key[-1])).first()
+    return relay.relay_id if relay else None
+
+
+def _grant_dict(db: Session, row: CapabilityGrant) -> dict:
+    return {"grant_id": row.grant_id, "permission_id": row.grant_id,
+            "child_id": row.child_id, "device_id": row.device_id, "key": row.key,
+            "relay_id": _capability_to_relay(db, row.device_id, row.key),
+            "is_allowed": bool(row.is_allowed)}
+
+
+@app.get("/api/children/{child_id}/grants")
+async def list_child_grants(child_id: int, db: Session = Depends(get_db),
+                            current_auth: dict = Depends(get_current_user_or_child)):
+    """What this child may write, per device and capability key.
+
+    Every writable capability of every device in the house is listed, granted or
+    not, because a parent setting permissions needs to see the ones that are shut
+    — a list of only the grants looks identical to a list of nothing at all.
+    """
+    if current_auth["type"] == "child":
+        if current_auth["child"].child_id != child_id:
+            raise HTTPException(status_code=403, detail="Children may only read their own")
+        house_id = current_auth["child"].house_id
+    else:
+        child = _get_house_child_or_403(db, current_auth["user"], child_id)
+        house_id = child.house_id
+
+    granted = capability_store.child_grants(db, child_id)
+    out = []
+    for device in db.query(Device).filter(Device.house_id == house_id).all():
+        labels = capability_store.house_labels(db, device.device_id)
+        for cap in capability_store.load_capabilities(db, device.device_id):
+            if not cap.writable:
+                continue
+            out.append({
+                "device_id": device.device_id,
+                "device_name": device.name,
+                "key": cap.key,
+                "kind": cap.kind,
+                "label": labels.get(cap.key, cap.label),
+                "relay_id": _capability_to_relay(db, device.device_id, cap.key),
+                "is_allowed": bool(granted.get((device.device_id, cap.key))),
+            })
+    return {"child_id": child_id, "grants": out}
+
+
+@app.put("/api/children/{child_id}/grants")
+async def set_child_grants(child_id: int, payload: dict, db: Session = Depends(get_db),
+                           current_user: Account = Depends(get_current_user)):
+    """Grant or deny capabilities: {"grants": [{"device_id", "key", "is_allowed"}]}."""
+    if current_user.role not in (AccountRole.parent, AccountRole.admin):
+        raise HTTPException(status_code=403, detail="Only parents/admins can set permissions")
+    child = _get_house_child_or_403(db, current_user, child_id)
+    items = payload.get("grants")
+    if not isinstance(items, list) or not items:
+        raise HTTPException(status_code=400, detail="grants list required")
+
+    written = []
+    for item in items:
+        device_id = (item or {}).get("device_id")
+        key = (item or {}).get("key")
+        if not device_id or not key:
+            raise HTTPException(status_code=400, detail="each grant needs device_id and key")
+        device = db.query(Device).filter(Device.device_id == device_id).first()
+        if not device or device.house_id != child.house_id:
+            raise HTTPException(status_code=404,
+                                detail=f"{device_id} is not a device in this house")
+        caps = {c.key: c for c in capability_store.load_capabilities(db, device_id)}
+        cap = caps.get(key)
+        if cap is None:
+            # A grant for a capability the device has not declared would be a
+            # permission for something that does not exist, and §5.10 requires a
+            # key that appears later to appear denied.
+            raise HTTPException(status_code=404,
+                                detail=f"{device_id} does not declare {key}")
+        if not cap.writable:
+            raise HTTPException(status_code=400,
+                                detail=f"{cap.label} is read-only; reading is house-wide")
+        row = capability_store.set_grant(db, child_id, device_id, key,
+                                         bool(item.get("is_allowed", True)))
+        db.flush()
+        written.append(row)
+    log_activity(db, child.house_id, "parent", current_user.acc_id, current_user.name,
+                 "permissions_changed",
+                 f"{current_user.name} changed what {child.name} may control")
     db.commit()
-    return {"permission_id": perm.permission_id, "child_id": child_id, "relay_id": relay_id, "is_allowed": is_allowed}
+    return {"child_id": child_id, "grants": [_grant_dict(db, r) for r in written]}
+
+
+@app.post("/api/permissions")
+async def create_permission(payload: dict, db: Session = Depends(get_db),
+                            current_user: Account = Depends(get_current_user)):
+    """Facade (§5.10): sets a grant, addressed by relay id."""
+    if current_user.role not in (AccountRole.parent, AccountRole.admin):
+        raise HTTPException(status_code=403, detail="Only parents/admins can set permissions")
+    child_id = payload.get("child_id")
+    relay_id = payload.get("relay_id")
+    if not child_id or not relay_id:
+        raise HTTPException(status_code=400, detail="child_id and relay_id required")
+    child = _get_house_child_or_403(db, current_user, child_id)
+    device_id, key = _relay_to_capability(db, relay_id)
+    device = db.query(Device).filter(Device.device_id == device_id).first()
+    if not device or (current_user.role != AccountRole.admin
+                      and device.house_id != child.house_id):
+        raise HTTPException(status_code=403, detail="Device does not belong to your house")
+    row = capability_store.set_grant(db, child_id, device_id, key,
+                                     bool(payload.get("is_allowed", True)))
+    db.commit()
+    return _grant_dict(db, row)
 
 
 @app.get("/api/permissions")
 async def list_permissions(child_id: int | None = None, db: Session = Depends(get_db),
                            current_auth: dict = Depends(get_current_user_or_child)):
+    """Facade (§5.10): the house's grants, spelled as relay permissions.
+
+    Grants for capabilities that are not channels have no relay id to report, so
+    they are listed with `relay_id: null` rather than hidden — a caller that
+    cannot use them should at least not be told they do not exist.
+    """
     if current_auth["type"] == "child":
-        # Children can only ever see their own permissions.
-        perms = db.query(Permission).filter(
-            Permission.child_id == current_auth["child"].child_id).all()
-        return {"permissions": [
-            {"permission_id": p.permission_id, "child_id": p.child_id, "relay_id": p.relay_id, "is_allowed": p.is_allowed}
-            for p in perms
-        ]}
+        rows = db.query(CapabilityGrant).filter(
+            CapabilityGrant.child_id == current_auth["child"].child_id).all()
+        return {"permissions": [_grant_dict(db, r) for r in rows]}
+
     current_user = current_auth["user"]
     if current_user.role == AccountRole.admin:
-        q = db.query(Permission)
+        q = db.query(CapabilityGrant)
         if child_id:
-            q = q.filter(Permission.child_id == child_id)
-        perms = q.all()
+            q = q.filter(CapabilityGrant.child_id == child_id)
+        rows = q.all()
+    elif child_id:
+        _get_house_child_or_403(db, current_user, child_id)
+        rows = db.query(CapabilityGrant).filter(CapabilityGrant.child_id == child_id).all()
     else:
-        if child_id:
-            child = db.query(Child).filter(Child.child_id == child_id).first()
-            if not child or child.house_id != current_user.house_id:
-                raise HTTPException(status_code=403, detail="Child not found or access denied")
-            perms = db.query(Permission).filter(Permission.child_id == child_id).all()
-        else:
-            children_ids = [c.child_id for c in db.query(Child).filter(Child.house_id == current_user.house_id).all()]
-            perms = db.query(Permission).filter(Permission.child_id.in_(children_ids)).all()
-            
-    return {"permissions": [
-        {"permission_id": p.permission_id, "child_id": p.child_id, "relay_id": p.relay_id, "is_allowed": p.is_allowed}
-        for p in perms
-    ]}
+        ids = [c.child_id for c in db.query(Child).filter(
+            Child.house_id == current_user.house_id).all()]
+        rows = db.query(CapabilityGrant).filter(
+            CapabilityGrant.child_id.in_(ids)).all() if ids else []
+    return {"permissions": [_grant_dict(db, r) for r in rows]}
 
 
 @app.put("/api/permissions/{permission_id}")
 async def update_permission(permission_id: int, payload: dict, db: Session = Depends(get_db),
                             current_user: Account = Depends(get_current_user)):
-    perm = db.query(Permission).filter(Permission.permission_id == permission_id).first()
-    if not perm:
+    """Facade (§5.10): `permission_id` is the grant id."""
+    row = db.query(CapabilityGrant).filter(CapabilityGrant.grant_id == permission_id).first()
+    if not row:
         raise HTTPException(status_code=404, detail="Permission not found")
     if current_user.role != AccountRole.admin:
-        child = db.query(Child).filter(Child.child_id == perm.child_id).first()
-        if not child or child.house_id != current_user.house_id:
-            raise HTTPException(status_code=403, detail="Access denied")
+        _get_house_child_or_403(db, current_user, row.child_id)
     if "is_allowed" in payload:
-        perm.is_allowed = payload["is_allowed"]
+        row.is_allowed = bool(payload["is_allowed"])
     db.commit()
-    return {"permission_id": perm.permission_id, "is_allowed": perm.is_allowed}
+    return _grant_dict(db, row)
 
 
 @app.delete("/api/permissions/{permission_id}")
 async def delete_permission(permission_id: int, db: Session = Depends(get_db),
                             current_user: Account = Depends(get_current_user)):
-    perm = db.query(Permission).filter(Permission.permission_id == permission_id).first()
-    if not perm:
+    """Facade (§5.10). Deleting a grant denies the capability, since absent
+    means denied — there is no difference between removing a grant and setting
+    it to false."""
+    row = db.query(CapabilityGrant).filter(CapabilityGrant.grant_id == permission_id).first()
+    if not row:
         raise HTTPException(status_code=404, detail="Permission not found")
     if current_user.role != AccountRole.admin:
-        child = db.query(Child).filter(Child.child_id == perm.child_id).first()
-        if not child or child.house_id != current_user.house_id:
-            raise HTTPException(status_code=403, detail="Access denied")
-    db.delete(perm)
+        _get_house_child_or_403(db, current_user, row.child_id)
+    db.delete(row)
     db.commit()
     return {"status": "deleted"}
+
+
+@app.put("/api/devices/{device_id}/capabilities/{key}")
+async def rename_capability(device_id: str, key: str, payload: dict,
+                            db: Session = Depends(get_db),
+                            current_user: Account = Depends(get_current_user)):
+    """Name a capability, or clear the name (§5.11).
+
+    `{"label": "Television"}` sets it; `{"label": null}` or an empty string
+    clears it, after which the firmware's own label applies again. A firmware
+    update never overwrites what is set here.
+    """
+    if not _user_can_manage_devices(db, current_user):
+        raise HTTPException(status_code=403,
+                            detail="Only the house owner (or members they've authorized) can rename")
+    device = _device_in_house_or_404(db, device_id, current_user.house_id)
+    caps = {c.key: c for c in capability_store.load_capabilities(db, device_id)}
+    if key not in caps:
+        raise HTTPException(status_code=404, detail=f"{device_id} does not declare {key}")
+    if "label" not in payload:
+        raise HTTPException(status_code=400, detail="label required (null to clear)")
+
+    label = payload["label"]
+    if label is not None and not isinstance(label, str):
+        raise HTTPException(status_code=400, detail="label must be a string or null")
+    capability_store.set_house_label(db, device_id, key, label)
+    # The v1 read path still answers from `Relay.name`, so a channel rename
+    # writes both until step 2's app work takes that path out of use.
+    relay_id = _capability_to_relay(db, device_id, key)
+    if relay_id is not None:
+        relay = db.query(Relay).filter(Relay.relay_id == relay_id).first()
+        if relay:
+            relay.name = (label or "").strip() or f"Channel {key[-1]}"
+    db.commit()
+    effective = capability_store.house_labels(db, device_id).get(key) or caps[key].label
+    return {"device_id": device_id, "key": key, "label": effective,
+            "custom": label is not None and bool(str(label).strip())}
+
 
 
 @app.put("/api/relays/{relay_id}")
@@ -2226,7 +2440,13 @@ async def rename_relay(relay_id: int, payload: dict, db: Session = Depends(get_d
                        current_user: Account = Depends(get_current_user)):
     """Rename a relay channel (e.g. 'Television'). Device-managers only. The name
     is a server-side label — the firmware still addresses channels by number, and
-    Maya maps the name to a channel from the house context."""
+    Maya maps the name to a channel from the house context.
+
+    Facade for `PUT /api/devices/{id}/capabilities/{key}` (§5.11): the name is
+    written to the capability label, which is the store, and mirrored into
+    `Relay.name`, which the v1 read path still answers from. Renaming through
+    either route produces the same result.
+    """
     if not _user_can_manage_devices(db, current_user):
         raise HTTPException(status_code=403, detail="Only the house owner (or authorized members) can rename channels")
     relay = db.query(Relay).filter(Relay.relay_id == relay_id).first()
@@ -2240,6 +2460,8 @@ async def rename_relay(relay_id: int, payload: dict, db: Session = Depends(get_d
     if not name:
         raise HTTPException(status_code=400, detail="name required")
     relay.name = name[:40]
+    capability_store.set_house_label(db, device.device_id,
+                                     f"ch{relay.channel_number}", relay.name)
     db.commit()
     return {"relay_id": relay.relay_id, "name": relay.name, "channel_number": relay.channel_number}
 
@@ -2536,6 +2758,11 @@ async def _handle_websocket(websocket: WebSocket):
                         await websocket.close(code=1009)
                         return
                     capability_store.store_descriptor(db, device_db, desc)
+                    if desc.shimmed:
+                        # §4.1: this identify is the first moment "three
+                        # channels" is a fact rather than a guess, so the v1
+                        # read path's rows are created here instead of at claim.
+                        _ensure_v1_backing_rows(db, device_id, device_db.name)
                     db.commit()
                     for note in desc.warnings:
                         print(f"Device {device_id} descriptor: {note}")

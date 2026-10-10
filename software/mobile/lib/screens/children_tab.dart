@@ -17,9 +17,9 @@ class ChildrenTab extends StatefulWidget {
 class _ChildrenTabState extends State<ChildrenTab>
     with AutomaticKeepAliveClientMixin {
   List<dynamic> _children = [];
-  List<dynamic> _devices = [];
-  List<dynamic> _relays = [];
-  List<dynamic> _permissions = [];
+  // The permission sheet fetches its own grants now (PROTOCOL.md §5.10), which
+  // took the device, relay and permission lists this screen used to carry
+  // purely to hand to it.
   bool _loading = true;
   StreamSubscription? _broadcastSub;
 
@@ -51,18 +51,10 @@ class _ChildrenTabState extends State<ChildrenTab>
 
   Future<void> _fetchAll() async {
     try {
-      final results = await Future.wait([
-        ApiService.getChildren(),
-        ApiService.getDevices(),
-        ApiService.getRelays(),
-        ApiService.getPermissions(),
-      ]);
+      final children = await ApiService.getChildren();
       if (mounted) {
         setState(() {
-          _children = results[0];
-          _devices = results[1];
-          _relays = results[2];
-          _permissions = results[3];
+          _children = children;
           _loading = false;
         });
       }
@@ -156,9 +148,6 @@ class _ChildrenTabState extends State<ChildrenTab>
         return _PermissionsSheet(
           childId: childId,
           childName: childName,
-          devices: _devices,
-          relays: _relays,
-          permissions: _permissions,
           onChanged: () => _fetchAll(),
         );
       },
@@ -611,20 +600,20 @@ class _HomeworkSheetState extends State<_HomeworkSheet> {
 }
 
 // ── Permissions Sheet ────────────────────────────────────────────
+/// Grants, keyed on capabilities rather than relay channels (PROTOCOL.md §5.10).
+///
+/// The list comes from the server and includes every writable capability in the
+/// house, granted or not — a list of only the grants looks identical to a list
+/// of nothing at all. Read-only capabilities are absent on purpose: reading
+/// state is house-wide, so there is nothing to grant.
 class _PermissionsSheet extends StatefulWidget {
   final int childId;
   final String childName;
-  final List<dynamic> devices;
-  final List<dynamic> relays;
-  final List<dynamic> permissions;
   final VoidCallback onChanged;
 
   const _PermissionsSheet({
     required this.childId,
     required this.childName,
-    required this.devices,
-    required this.relays,
-    required this.permissions,
     required this.onChanged,
   });
 
@@ -633,48 +622,87 @@ class _PermissionsSheet extends StatefulWidget {
 }
 
 class _PermissionsSheetState extends State<_PermissionsSheet> {
-  late List<dynamic> _perms;
+  List<dynamic> _grants = [];
+  bool _loading = true;
   bool _saving = false;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
-    _perms = List.from(widget.permissions);
+    _load();
   }
 
-  Future<void> _togglePerm(dynamic relay, bool allowed) async {
-    setState(() => _saving = true);
+  Future<void> _load() async {
     try {
-      final existing = _perms.firstWhere(
-        (p) =>
-            p['child_id'] == widget.childId &&
-            p['relay_id'] == relay['relay_id'],
-        orElse: () => null,
-      );
+      final grants = await ApiService.getChildGrants(widget.childId);
+      if (!mounted) return;
+      setState(() {
+        _grants = grants;
+        _loading = false;
+        _error = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = e.toString().replaceFirst('Exception: ', '');
+      });
+    }
+  }
 
-      if (existing != null) {
-        await ApiService.updatePermission(
-            existing['permission_id'] as int, allowed);
-        existing['is_allowed'] = allowed;
-      } else {
-        await ApiService.createPermission(
-            widget.childId, relay['relay_id'] as int, allowed);
-      }
-
-      // Re-fetch permissions
-      final freshPerms = await ApiService.getPermissions();
-      setState(() => _perms = freshPerms);
+  Future<void> _toggle(Map<String, dynamic> grant, bool allowed) async {
+    setState(() {
+      _saving = true;
+      grant['is_allowed'] = allowed; // optimistic
+    });
+    try {
+      await ApiService.setChildGrants(widget.childId, [
+        {
+          'device_id': grant['device_id'],
+          'key': grant['key'],
+          'is_allowed': allowed,
+        }
+      ]);
       widget.onChanged();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-              content:
-                  Text(e.toString().replaceFirst('Exception: ', ''))),
-        );
+        setState(() => grant['is_allowed'] = !allowed);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(e.toString().replaceFirst('Exception: ', '')),
+        ));
       }
     } finally {
       if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  /// One icon per kind, so a slider and a switch are not presented as the same
+  /// kind of permission.
+  IconData _iconFor(String kind) {
+    switch (kind) {
+      case 'switch':
+        return Icons.toggle_on_outlined;
+      case 'range':
+        return Icons.tune_rounded;
+      case 'number':
+        return Icons.pin_outlined;
+      case 'text':
+        return Icons.text_fields_rounded;
+      case 'enum':
+        return Icons.list_rounded;
+      case 'button':
+        return Icons.touch_app_outlined;
+      case 'color':
+        return Icons.palette_outlined;
+      case 'time':
+        return Icons.schedule_rounded;
+      case 'duration':
+        return Icons.timelapse_rounded;
+      case 'location':
+        return Icons.place_outlined;
+      default:
+        return Icons.device_unknown_rounded;
     }
   }
 
@@ -694,7 +722,6 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
         expand: false,
         builder: (ctx, scrollCtrl) => Column(
           children: [
-            // Handle bar
             Container(
               width: 36,
               height: 5,
@@ -725,67 +752,99 @@ class _PermissionsSheetState extends State<_PermissionsSheet> {
                 ],
               ),
             ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Anything off stays off, including controls a device adds '
+                  'later. Seeing a device is always allowed.',
+                  style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+                ),
+              ),
+            ),
             const SizedBox(height: 8),
             const Divider(),
-            Expanded(
-              child: widget.relays.isEmpty
-                  ? Center(
-                      child: Text('No channels available',
-                          style: tt.bodyMedium
-                              ?.copyWith(color: cs.onSurfaceVariant)),
-                    )
-                  : ListView.builder(
-                      controller: scrollCtrl,
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 16, vertical: 8),
-                      itemCount: widget.relays.length,
-                      itemBuilder: (ctx, i) {
-                        final relay = widget.relays[i];
-                        final device = widget.devices.firstWhere(
-                          (d) => d['device_id'] == relay['device_id'],
-                          orElse: () =>
-                              {'name': 'Unknown', 'device_id': '?'},
-                        );
-
-                        final perm = _perms.firstWhere(
-                          (p) =>
-                              p['child_id'] == widget.childId &&
-                              p['relay_id'] == relay['relay_id'],
-                          orElse: () => null,
-                        );
-                        final allowed =
-                            perm != null && perm['is_allowed'] == true;
-
-                        return Card(
-                          color: cs.surfaceContainerLow,
-                          margin: const EdgeInsets.only(bottom: 8),
-                          child: ListTile(
-                            leading: Icon(
-                              Icons.electrical_services_rounded,
-                              color: allowed ? cs.primary : cs.onSurfaceVariant,
-                            ),
-                            title: Text(
-                              '${relay['name']} (CH${relay['channel_number']})',
-                              style: const TextStyle(
-                                  fontWeight: FontWeight.w600),
-                            ),
-                            subtitle: Text(device['name'],
-                                style: tt.labelSmall
-                                    ?.copyWith(color: cs.onSurfaceVariant)),
-                            trailing: Switch.adaptive(
-                              value: allowed,
-                              onChanged: _saving
-                                  ? null
-                                  : (v) => _togglePerm(relay, v),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-            ),
+            Expanded(child: _body(scrollCtrl, cs, tt)),
           ],
         ),
       ),
+    );
+  }
+
+  Widget _body(ScrollController scrollCtrl, ColorScheme cs, TextTheme tt) {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child:
+              Text(_error!, textAlign: TextAlign.center, style: tt.bodyMedium),
+        ),
+      );
+    }
+    if (_grants.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text(
+            'No controls to grant yet. A device lists what it can do when it '
+            'connects.',
+            textAlign: TextAlign.center,
+            style: tt.bodyMedium?.copyWith(color: cs.onSurfaceVariant),
+          ),
+        ),
+      );
+    }
+
+    return ListView.builder(
+      controller: scrollCtrl,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      itemCount: _grants.length,
+      itemBuilder: (ctx, i) {
+        final grant = _grants[i] as Map<String, dynamic>;
+        final allowed = grant['is_allowed'] == true;
+        final kind = (grant['kind'] ?? '') as String;
+        // A header whenever the device changes, so a house with several devices
+        // does not read as one long list.
+        final isFirstOfDevice =
+            i == 0 || _grants[i - 1]['device_id'] != grant['device_id'];
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (isFirstOfDevice)
+              Padding(
+                padding: const EdgeInsets.only(left: 4, top: 8, bottom: 4),
+                child: Text(
+                  (grant['device_name'] ?? grant['device_id']).toString(),
+                  style: tt.labelMedium?.copyWith(
+                      fontWeight: FontWeight.w700, color: cs.onSurfaceVariant),
+                ),
+              ),
+            Card(
+              color: cs.surfaceContainerLow,
+              margin: const EdgeInsets.only(bottom: 8),
+              child: ListTile(
+                leading: Icon(_iconFor(kind),
+                    color: allowed ? cs.primary : cs.onSurfaceVariant),
+                title: Text(
+                  (grant['label'] ?? grant['key']).toString(),
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                subtitle: Text(kind,
+                    style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant)),
+                trailing: Switch.adaptive(
+                  value: allowed,
+                  onChanged: _saving ? null : (v) => _toggle(grant, v),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 }

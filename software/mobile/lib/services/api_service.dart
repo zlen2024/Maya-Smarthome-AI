@@ -583,4 +583,71 @@ class ApiService {
       throw Exception(data['detail'] ?? 'Failed to update permission');
     }
   }
+
+  // ── Capabilities (device protocol v2) ───────────────────────────
+  // What a device says it can do, instead of three channels this app assumes it
+  // has. See PROTOCOL.md §5; every device has an answer here, because the server
+  // synthesises a descriptor for firmware that declares nothing.
+
+  /// Descriptor + current state for one device.
+  /// `capabilities` is a list of {key, kind, label, access, ...} and `state` maps
+  /// key -> typed value. For a child, each capability also carries `may_write`.
+  static Future<Map<String, dynamic>> getCapabilities(String deviceId) async {
+    final res = await get('/api/devices/$deviceId/capabilities');
+    if (res.statusCode != 200) {
+      throw Exception('Failed to fetch capabilities');
+    }
+    return Map<String, dynamic>.from(jsonDecode(res.body) as Map);
+  }
+
+  /// Set one or more capabilities by key (§6.2).
+  ///
+  /// [confirmed] is the evidence a human just said yes, for a capability
+  /// declared `confirm: true`; the server refuses those without it, so pass it
+  /// only after the user has actually confirmed.
+  static Future<Map<String, dynamic>> setCapability(
+      String deviceId, Map<String, dynamic> values,
+      {bool confirmed = false}) async {
+    final body = <String, dynamic>{'values': values};
+    if (confirmed) body['confirmed'] = true;
+    final res = await post('/api/devices/$deviceId/capability', body);
+    final data = jsonDecode(res.body);
+    if (res.statusCode != 200) {
+      throw Exception(data['detail'] ?? 'Failed to set capability');
+    }
+    return Map<String, dynamic>.from(data as Map);
+  }
+
+  /// Name a capability, or pass null to clear it and fall back to the
+  /// firmware's own label (§5.11).
+  static Future<String> renameCapability(
+      String deviceId, String key, String? label) async {
+    final res = await put(
+        '/api/devices/$deviceId/capabilities/$key', {'label': label});
+    final data = jsonDecode(res.body);
+    if (res.statusCode != 200) {
+      throw Exception(data['detail'] ?? 'Failed to rename');
+    }
+    return (data['label'] ?? key) as String;
+  }
+
+  /// Every writable capability in the house with whether this child may use it
+  /// (§5.10). Ungranted ones are included — a list of only the grants looks
+  /// identical to a list of nothing at all.
+  static Future<List<dynamic>> getChildGrants(int childId) async {
+    final res = await get('/api/children/$childId/grants');
+    if (res.statusCode != 200) throw Exception('Failed to fetch permissions');
+    return jsonDecode(res.body)['grants'] ?? [];
+  }
+
+  /// Grant or deny capabilities for a child. Each entry needs device_id, key
+  /// and is_allowed.
+  static Future<void> setChildGrants(
+      int childId, List<Map<String, dynamic>> grants) async {
+    final res = await put('/api/children/$childId/grants', {'grants': grants});
+    if (res.statusCode != 200) {
+      final data = jsonDecode(res.body);
+      throw Exception(data['detail'] ?? 'Failed to set permissions');
+    }
+  }
 }

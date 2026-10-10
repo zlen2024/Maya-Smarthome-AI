@@ -113,9 +113,34 @@ descriptors; shims protocol 1. Nothing else changes." Status and reasoning:
 - [x] Reconciled step-1 code with the new sections where leaving it would have
   created the gap at once: `confirm:true` enforced in `_dispatch_set` (never in
   the clients), `failed` passed through to the caller, `_report_every` accepted.
-- [ ] **Step 2** — app renders from the descriptor. Needs per-capability permissions
-  (`Permission` keys on `relay_id` today) and capability renaming to replace the
-  `Relay.name` override.
+- [x] **Step 2, server half (2026-10-10)** — the three conversions §10 bundles
+  together, because they touch the same tables:
+  - **§4.1** `register_device` creates the device record and nothing else; the
+    shim's extension + three relays are created when a protocol-1 device
+    *identifies*. A sensor-only device no longer gets three phantom relays.
+    Fixed a bug the same block caused: re-claiming a device used to reset every
+    channel name back to "Channel N", wiping a member's "Television".
+  - **§5.10** `capability_grants` replaces `permissions`; one enforcement path
+    (`_child_capability_denial`) serves the v1 command endpoint, the capability
+    endpoint and Maya. Data migrated onto `(device_id, "ch<n>")`, counted, and the
+    old table **dropped**. `/api/permissions` stays as a translating facade over
+    the same store so the shipped app keeps working.
+  - **§5.11** `capability_labels` replaces `Relay.name` as the store; renaming
+    via either route writes the same row, and a firmware re-declare cannot
+    overwrite it.
+  - Self-check `test_grants.py` (5 checks) plus a migration verified against a
+    database still carrying the old table.
+- [x] **Step 2, app** — written but **NOT COMPILED** (no Flutter SDK on this
+  machine; run `flutter analyze` before building):
+  `lib/widgets/capability_control.dart` (new) renders all ten kinds plus a
+  read-only fallback for an unknown one, asks before anything `confirm: true`,
+  and shows reserved `_` keys as chrome; `devices_tab.dart` renders from the
+  descriptor instead of three toggles; the permission sheet in `children_tab.dart`
+  grants any writable capability, not just channels.
+- [ ] **Step 2, remaining app surfaces:** `home_tab.dart` (channel summary +
+  rename) and `device_management_tab.dart` still read the v1 shapes. They keep
+  working through the shim and the facade, but show nothing for a non-channel
+  capability.
 - [ ] **Step 3** — Maya's six tools become one `set_capability`, honouring `confirm`.
 - [ ] **Step 4** — extract the Arduino library. **Step 5** — peering (§7).
   **Step 6** — device to Maya (§8).

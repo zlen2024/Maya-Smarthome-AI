@@ -10,14 +10,14 @@ The goal the protocol exists for: a contributor builds new hardware, drops it in
 firmware to app — `ch1`/`ch2`/`ch3` appeared 76 times across 6 files when the
 migration was planned.
 
-## Status: step 1 of 6 built, spec complete at revision 2.1 (2026-10-10)
+## Status: step 1 done, step 2 server-complete, spec at revision 2.1 (2026-10-10)
 
 §10 defines a six-step migration order. Only the first is implemented.
 
 | Step | State |
 |---|---|
 | 1. Server accepts and stores descriptors; shims protocol 1 | **done** |
-| 2. App renders from the descriptor instead of three hardcoded toggles | not started |
+| 2. App renders from the descriptor instead of three hardcoded toggles | server done; app partly — see below |
 | 3. Maya swaps her six fixed tools for a generic `set_capability` | not started |
 | 4. Extract the Arduino library | not started |
 | 5. Peering: grants, local link, audit (§7) | not started |
@@ -141,21 +141,57 @@ have created the gap immediately:
 - A failing ack's `failed` key is passed through to the caller.
 - `_report_every` is accepted as a reserved key.
 
-**§4.1 is deliberately not implemented yet.** `register_device` still creates a
-`SmartExtension` and three `Relay` rows for every device, so a salt jar is still
-born with three relays it does not have. §10 assigns the fix to step 2, with the
-permission and label conversions, because all three touch the same tables and
-splitting them would mean converting twice.
+**§4.1 was implemented in step 2**, with the permission and label conversions,
+because all three touch the same tables and splitting them would have meant
+converting twice.
+
+## Step 2 (2026-10-10): the three conversions, and the app
+
+§10 bundles three conversions into step 2 because they touch the same tables.
+All three are done on the server:
+
+| Section | What changed |
+|---|---|
+| §4.1 | `register_device` creates the device record and nothing else. The shim's `SmartExtension` + three `Relay` rows are created when a **protocol-1 device identifies** (`_ensure_v1_backing_rows`), which is the first moment three channels are a fact. A protocol-2 device never gets them. |
+| §5.10 | `capability_grants` replaces `permissions`. Enforcement for every path — the v1 command endpoint, the capability endpoint and Maya — runs through `_child_capability_denial`. |
+| §5.11 | `capability_labels` replaces `Relay.name` as the store. Renaming through either route writes the same row. |
+
+**The data was converted, not duplicated.** The migration copies each per-relay
+permission onto `(device_id, "ch<n>")`, verifies the count, then **drops the
+`permissions` table**; relay names that still read "Channel N" carry no intent
+and are left out, so the firmware's own label applies. `/api/permissions`
+survives as a *translating facade* over the grant store — a second spelling, not
+a second source of truth, which is the distinction §10 draws. Verified against a
+database carrying the old table: three permissions became three grants with their
+allow/deny values intact, two real names became labels, the table went.
+
+**One bug fell out of §5.11.** Re-claiming a device used to reset every channel
+name back to "Channel N" — a member's "Television" was silently wiped on every
+re-provision. The block that did it was the same block §4.1 required removing.
+
+**The app** — written, **not compiled**: there is no Flutter SDK on this machine,
+so every Dart change here is reviewed rather than built, and `flutter analyze`
+is the next step before any APK.
+
+- `lib/widgets/capability_control.dart` (new) renders one capability by `kind`:
+  all ten, plus a read-only fallback for a `kind` this build has never heard of
+  (§11). It asks before setting anything declared `confirm: true` and only then
+  claims the confirmation (§5.4). `CapabilityChrome` renders the reserved `_`
+  keys as device chrome (§5.3) — except `_report_every`, which is a setting.
+- `devices_tab.dart` renders each device from `GET .../capabilities` instead of
+  three hardcoded toggles, merges both v1 channel keys and v2 `state` from the
+  broadcast stream, and translates ack statuses (§9) into sentences.
+- The permission sheet in `children_tab.dart` lists every writable capability in
+  the house from `/api/children/{id}/grants`, so a parent can grant a fan's
+  speed, not only a relay channel.
+- **Still on the v1 shapes:** `home_tab.dart`'s channel summary and rename, and
+  `device_management_tab.dart`. Both keep working through the shim and the
+  facade; neither shows a non-channel capability.
 
 ## What a reader will not find
 
-Specified, not built — each now has a section to build against:
+Specified, not built — each has a section to build against:
 
-- **Per-capability permissions** (§5.10). `Permission` still keys on `relay_id`,
-  so a child may set `ch1`/`ch2`/`ch3` through the new endpoint under exactly the
-  rights they already had, and anything else is refused outright.
-- **Capability labels** (§5.11). Only `ch1`-`ch3` have house names, read through
-  from `Relay.name`.
 - **`report_every` doing anything** (§5.8). It is stored and nothing reads it, so
   `status` is still "a socket is open" — the vocabulary exists on paper only. The
   three call sites are `ConnectionManager`, the device list endpoint and Maya's
@@ -163,6 +199,9 @@ Specified, not built — each now has a section to build against:
 - **History** (§5.12). The flag is stored per capability; no series is retained.
 - **The public API's v2 surface** (§12). `/api/open/v1/*` is unchanged and still
   speaks three channels through the shim.
+- **Maya's generic tool** (step 3). Her six fixed tools still address channels,
+  and `descriptor_payload(for_agent=True)` — which filters `agent:"deny"` — is
+  tested but not yet called by anything.
 - **Any of §7 or §8** — peering, the local ESP-NOW link, the audit plane, or
   device-to-Maya. Steps 5 and 6.
 

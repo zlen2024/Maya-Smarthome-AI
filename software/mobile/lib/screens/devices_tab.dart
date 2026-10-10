@@ -1,9 +1,18 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../widgets/capability_control.dart';
 
-/// Main device dashboard showing all devices with inline channel toggles.
-/// For child users, only permitted channels are interactive.
+/// Main device dashboard, rendered from each device's own descriptor.
+///
+/// This is protocol 2 step 2 (PROTOCOL.md §10): the UI is chosen by capability
+/// `kind`, never by device model, so new hardware appears here without this file
+/// changing. Every device has a descriptor — the server synthesises one for
+/// firmware that declares nothing — so there is no second code path for the
+/// three-channel extensions that shipped first.
+///
+/// What a child may change comes from `may_write` on each capability (§5.10);
+/// reading is house-wide, so a locked control is shown rather than hidden.
 class DevicesTab extends StatefulWidget {
   const DevicesTab({super.key});
 
@@ -14,8 +23,10 @@ class DevicesTab extends StatefulWidget {
 class _DevicesTabState extends State<DevicesTab>
     with AutomaticKeepAliveClientMixin {
   List<dynamic> _devices = [];
-  List<dynamic> _relays = [];
-  List<dynamic> _permissions = [];
+
+  /// device_id -> the descriptor payload: capabilities, state, proto, model.
+  final Map<String, Map<String, dynamic>> _caps = {};
+
   bool _loading = true;
   String? _error;
   StreamSubscription? _broadcastSub;
@@ -28,11 +39,7 @@ class _DevicesTabState extends State<DevicesTab>
   void initState() {
     super.initState();
     _fetchAll();
-
-    // Listen for real-time WebSocket updates
     _broadcastSub = ApiService.broadcasts.listen(_handleBroadcast);
-
-    // Periodic polling as backup (every 10s)
     _pollTimer = Timer.periodic(const Duration(seconds: 10), (_) => _fetchAll());
   }
 
@@ -43,163 +50,203 @@ class _DevicesTabState extends State<DevicesTab>
     super.dispose();
   }
 
-  // ── Data Fetching ──────────────────────────────────────────────
+  // ── Data ───────────────────────────────────────────────────────
   Future<void> _fetchAll() async {
     try {
       final devices = await ApiService.getDevices();
-
-      // Fetch relays + permissions for child filtering
-      List<dynamic> relays = [];
-      List<dynamic> perms = [];
-      try {
-        relays = await ApiService.getRelays();
-      } catch (_) {}
-
-      if (ApiService.isChild) {
+      // One descriptor read per device. A household has a handful, and each
+      // answer carries the capabilities, their current values and — for a child
+      // — what they are allowed to change.
+      final caps = <String, Map<String, dynamic>>{};
+      for (final d in devices) {
+        final id = d['device_id'] as String?;
+        if (id == null) continue;
         try {
-          perms = await ApiService.getPermissions(childId: ApiService.accId);
-        } catch (_) {}
-      } else {
-        try {
-          perms = await ApiService.getPermissions();
-        } catch (_) {}
+          caps[id] = await ApiService.getCapabilities(id);
+        } catch (_) {
+          // A device that cannot be read still belongs on the list; it just
+          // shows no controls.
+        }
       }
-
-      if (mounted) {
-        setState(() {
-          _devices = devices;
-          _relays = relays;
-          _permissions = perms;
-          _loading = false;
-          _error = null;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _devices = devices;
+        _caps
+          ..clear()
+          ..addAll(caps);
+        _loading = false;
+        _error = null;
+      });
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _loading = false;
-          _error = e.toString().replaceFirst('Exception: ', '');
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = e.toString().replaceFirst('Exception: ', '');
+      });
     }
   }
 
-  // ── WebSocket Broadcast Handler ────────────────────────────────
   void _handleBroadcast(Map<String, dynamic> data) {
     final type = data['type'];
-    final deviceId = data['device_id'];
+    final deviceId = data['device_id'] as String?;
     if (deviceId == null) return;
 
     setState(() {
       final idx = _devices.indexWhere((d) => d['device_id'] == deviceId);
-      if (idx == -1) return;
+      if (idx != -1) {
+        if (type == 'device_update') _devices[idx]['online'] = true;
+        if (type == 'device_offline') _devices[idx]['online'] = false;
+      }
+      if (type != 'device_update') return;
 
-      if (type == 'device_update') {
-        _devices[idx]['ch1'] = data['ch1'];
-        _devices[idx]['ch2'] = data['ch2'];
-        _devices[idx]['ch3'] = data['ch3'];
-        _devices[idx]['online'] = true;
-      } else if (type == 'device_offline') {
-        _devices[idx]['online'] = false;
+      final state = _stateOf(deviceId);
+      // A v2 device sends `state`; a protocol-1 one sends bare channel keys.
+      // Both are merged into the same map, because the descriptor is the only
+      // shape this screen knows.
+      final reported = data['state'];
+      if (reported is Map) {
+        reported.forEach((k, v) => state[k.toString()] = v);
+      }
+      for (final key in const ['ch1', 'ch2', 'ch3']) {
+        if (data[key] != null) state[key] = data[key];
       }
     });
   }
 
-  // ── Channel name / relay lookup ────────────────────────────────
-  Map<String, dynamic>? _relayFor(String deviceId, int channelNum) {
-    for (final r in _relays) {
-      if (r['device_id'] == deviceId && r['channel_number'] == channelNum) {
-        return Map<String, dynamic>.from(r as Map);
+  Map<String, dynamic> _stateOf(String deviceId) {
+    final entry = _caps.putIfAbsent(deviceId, () => {'capabilities': [], 'state': {}});
+    final state = entry['state'];
+    if (state is Map<String, dynamic>) return state;
+    final fresh = <String, dynamic>{};
+    if (state is Map) state.forEach((k, v) => fresh[k.toString()] = v);
+    entry['state'] = fresh;
+    return fresh;
+  }
+
+  List<Map<String, dynamic>> _capsOf(String deviceId) {
+    final raw = _caps[deviceId]?['capabilities'];
+    if (raw is! List) return const [];
+    return raw
+        .whereType<Map>()
+        .map((m) => Map<String, dynamic>.from(m))
+        .toList();
+  }
+
+  // ── Actions ────────────────────────────────────────────────────
+  /// [confirmed] is only true for a capability declared `confirm: true`, and
+  /// only reaches here after `CapabilityControl` has actually asked — the flag
+  /// is evidence of a human's yes (§5.4), not a formality to tick.
+  Future<void> _set(String deviceId, String key, dynamic value,
+      {bool confirmed = false}) async {
+    final state = _stateOf(deviceId);
+    final previous = state[key];
+    setState(() => state[key] = value);
+    try {
+      final result = await ApiService.setCapability(deviceId, {key: value},
+          confirmed: confirmed);
+      final status = result['status'];
+      if (status != 'ok') {
+        setState(() => state[key] = previous);
+        _snack(_explain(status, result));
+        return;
       }
+      // Believe the device's own echo over what we asked for (§6.2).
+      final echoed = result['state'];
+      if (echoed is Map && echoed.isNotEmpty) {
+        setState(() => echoed.forEach((k, v) => state[k.toString()] = v));
+      }
+    } catch (e) {
+      setState(() => state[key] = previous);
+      _snack(e.toString().replaceFirst('Exception: ', ''));
     }
-    return null;
   }
 
-  String _channelName(String deviceId, int channelNum) {
-    final r = _relayFor(deviceId, channelNum);
-    final name = r?['name'] as String?;
-    return (name == null || name.isEmpty) ? 'Channel $channelNum' : name;
+  /// Ack statuses are protocol words (§9); say them in a person's words.
+  String _explain(dynamic status, Map<String, dynamic> result) {
+    final failed = result['failed'];
+    final detail = result['detail'];
+    switch (status) {
+      case 'not_connected':
+        return 'That device is offline right now.';
+      case 'timeout':
+        return "The device didn't respond — try again.";
+      case 'blocked':
+        return 'That device is blocked.';
+      case 'bad_value':
+        return detail?.toString() ?? 'The device refused that value.';
+      case 'not_permitted':
+        return detail?.toString() ?? 'Not allowed.';
+      case 'busy':
+        return failed == null
+            ? 'The device is busy — try again.'
+            : 'The device was busy and did not change $failed.';
+      case 'unknown_capability':
+        return 'This device no longer has that control.';
+      default:
+        return detail?.toString() ?? 'That did not work ($status).';
+    }
   }
 
-  Future<void> _renameChannel(String deviceId, int channelNum) async {
-    final relay = _relayFor(deviceId, channelNum);
-    if (relay == null) return;
-    final ctrl = TextEditingController(text: _channelName(deviceId, channelNum));
-    final newName = await showDialog<String>(
+  Future<void> _rename(String deviceId, Map<String, dynamic> cap) async {
+    final key = cap['key'] as String;
+    final ctrl = TextEditingController(text: (cap['label'] ?? key) as String);
+    final result = await showDialog<_RenameResult>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('Rename channel $channelNum'),
+        title: const Text('Rename'),
         content: TextField(
           controller: ctrl,
           autofocus: true,
           maxLength: 40,
-          textCapitalization: TextCapitalization.words,
           decoration: const InputDecoration(
-            labelText: 'Channel name',
-            hintText: 'e.g. Television',
-            counterText: '',
+            labelText: 'Name',
+            helperText: "Clearing it restores the device's own name",
           ),
         ),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          // §5.11: clearing *is* the reset — there is no third state.
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, const _RenameResult(null)),
+              child: const Text('Reset')),
           FilledButton(
-            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-            child: const Text('Save'),
-          ),
+              onPressed: () =>
+                  Navigator.pop(ctx, _RenameResult(ctrl.text.trim())),
+              child: const Text('Save')),
         ],
       ),
     );
-    if (newName == null || newName.isEmpty) return;
+    if (result == null) return;
     try {
-      await ApiService.renameRelay(relay['relay_id'] as int, newName);
-      await _fetchAll();
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(e.toString().replaceFirst('Exception: ', '')),
-          behavior: SnackBarBehavior.floating,
-        ));
+      final label = await ApiService.renameCapability(deviceId, key, result.label);
+      setState(() => cap['label'] = label);
+      // The list held by _caps is a copy, so write the new name back into it.
+      final list = _caps[deviceId]?['capabilities'];
+      if (list is List) {
+        for (final item in list) {
+          if (item is Map && item['key'] == key) item['label'] = label;
+        }
       }
+    } catch (e) {
+      _snack(e.toString().replaceFirst('Exception: ', ''));
     }
   }
 
-  // ── Channel Permission Check ───────────────────────────────────
-  bool _isChannelAllowed(String deviceId, int channelNum) {
-    if (!ApiService.isChild) return true;
-
-    final relay = _relays.firstWhere(
-      (r) => r['device_id'] == deviceId && r['channel_number'] == channelNum,
-      orElse: () => null,
-    );
-    if (relay == null) return false;
-
-    final perm = _permissions.firstWhere(
-      (p) => p['relay_id'] == relay['relay_id'],
-      orElse: () => null,
-    );
-    return perm != null && perm['is_allowed'] == true;
-  }
-
-  // ── Remove Device ──────────────────────────────────────────────
   Future<void> _removeDevice(String deviceId, String name) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Remove device?'),
         content: Text(
-            '"$name" will be removed from this house and the device itself '
-            'will be wiped back to setup mode. You can re-register it later '
-            'via Bluetooth provisioning.'),
+            '$name will be wiped back to setup mode and removed from this house.'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel')),
           FilledButton(
             style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(ctx).colorScheme.error,
-            ),
+                backgroundColor: Theme.of(ctx).colorScheme.error),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Remove'),
           ),
@@ -207,58 +254,21 @@ class _DevicesTabState extends State<DevicesTab>
       ),
     );
     if (confirmed != true) return;
-
     try {
       await ApiService.deleteDevice(deviceId);
-      setState(() {
-        _devices.removeWhere((d) => d['device_id'] == deviceId);
-      });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Device removed — it has been reset to setup mode'),
-          behavior: SnackBarBehavior.floating,
-        ));
-      }
+      await _fetchAll();
+      _snack('$name removed');
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(e.toString().replaceFirst('Exception: ', '')),
-          behavior: SnackBarBehavior.floating,
-        ));
-      }
+      _snack(e.toString().replaceFirst('Exception: ', ''));
     }
   }
 
-  // ── Toggle Channel ─────────────────────────────────────────────
-  Future<void> _toggleChannel(
-      String deviceId, int channel, bool newState) async {
-    final cmd = newState ? 'output_on' : 'output_off';
-
-    // Optimistic update
-    setState(() {
-      final idx = _devices.indexWhere((d) => d['device_id'] == deviceId);
-      if (idx != -1) {
-        _devices[idx]['ch$channel'] = newState ? 'on' : 'off';
-      }
-    });
-
-    try {
-      await ApiService.sendCommand(deviceId, cmd, channel: channel);
-    } catch (e) {
-      // Revert on failure
-      setState(() {
-        final idx = _devices.indexWhere((d) => d['device_id'] == deviceId);
-        if (idx != -1) {
-          _devices[idx]['ch$channel'] = newState ? 'off' : 'on';
-        }
-      });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(e.toString().replaceFirst('Exception: ', '')),
-          behavior: SnackBarBehavior.floating,
-        ));
-      }
-    }
+  void _snack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(message),
+      behavior: SnackBarBehavior.floating,
+    ));
   }
 
   // ── Build ──────────────────────────────────────────────────────
@@ -268,17 +278,14 @@ class _DevicesTabState extends State<DevicesTab>
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
 
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
+    if (_loading) return const Center(child: CircularProgressIndicator());
 
     if (_error != null) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.error_outline_rounded, size: 48,
-                color: cs.error),
+            Icon(Icons.error_outline_rounded, size: 48, color: cs.error),
             const SizedBox(height: 12),
             Text(_error!, style: tt.bodyMedium),
             const SizedBox(height: 16),
@@ -299,12 +306,11 @@ class _DevicesTabState extends State<DevicesTab>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.sensors_off_rounded, size: 56,
-                color: cs.onSurfaceVariant.withOpacity(0.35)),
+            Icon(Icons.sensors_off_rounded,
+                size: 56, color: cs.onSurfaceVariant.withOpacity(0.35)),
             const SizedBox(height: 12),
             Text('No devices connected',
-                style: tt.titleMedium?.copyWith(
-                    color: cs.onSurfaceVariant)),
+                style: tt.titleMedium?.copyWith(color: cs.onSurfaceVariant)),
             const SizedBox(height: 4),
             Text(
               ApiService.isChild
@@ -328,18 +334,34 @@ class _DevicesTabState extends State<DevicesTab>
     );
   }
 
-  // ── Device Card ────────────────────────────────────────────────
-  Widget _deviceCard(
-      dynamic device, ColorScheme cs, TextTheme tt) {
+  /// Colours cycle so neighbouring controls stay distinguishable. They are
+  /// decoration only — nothing reads meaning into the order, because the
+  /// descriptor decides what is in the list.
+  static const _accents = [
+    Color(0xFFEF4444),
+    Color(0xFF10B981),
+    Color(0xFF3B82F6),
+    Color(0xFFF59E0B),
+    Color(0xFF8B5CF6),
+  ];
+
+  Widget _deviceCard(dynamic device, ColorScheme cs, TextTheme tt) {
     final deviceId = device['device_id'] as String;
     final name = device['name'] ?? deviceId;
     final online = device['online'] == true;
+    final all = _capsOf(deviceId);
+    final state = _stateOf(deviceId);
 
-    const channelColors = [
-      Color(0xFFEF4444), // CH1 red
-      Color(0xFF10B981), // CH2 green
-      Color(0xFF3B82F6), // CH3 blue
-    ];
+    // §5.3: reserved keys are device chrome, not controls — except
+    // `_report_every`, which is a setting and belongs with the rest.
+    final chrome = all
+        .where((c) => (c['key'] as String).startsWith('_') &&
+            c['key'] != '_report_every')
+        .toList();
+    final controls = all
+        .where((c) => !(c['key'] as String).startsWith('_') ||
+            c['key'] == '_report_every')
+        .toList();
 
     return Card(
       margin: const EdgeInsets.only(bottom: 14),
@@ -349,7 +371,6 @@ class _DevicesTabState extends State<DevicesTab>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header row
             Row(
               children: [
                 Icon(Icons.electrical_services_rounded,
@@ -369,42 +390,7 @@ class _DevicesTabState extends State<DevicesTab>
                     ],
                   ),
                 ),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: online
-                        ? Colors.green.withOpacity(0.12)
-                        : cs.error.withOpacity(0.12),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: online
-                          ? Colors.green.withOpacity(0.3)
-                          : cs.error.withOpacity(0.3),
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 7,
-                        height: 7,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: online ? Colors.green : cs.error,
-                        ),
-                      ),
-                      const SizedBox(width: 5),
-                      Text(
-                        online ? 'Online' : 'Offline',
-                        style: tt.labelSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          color: online ? Colors.green : cs.error,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                _statusPill(online, cs, tt),
                 if (ApiService.canManageDevices)
                   PopupMenuButton<String>(
                     icon: Icon(Icons.more_vert_rounded,
@@ -429,83 +415,90 @@ class _DevicesTabState extends State<DevicesTab>
                   ),
               ],
             ),
-            const SizedBox(height: 16),
-
-            // Channel toggles
-            for (int ch = 1; ch <= 3; ch++)
-              _channelRow(device, ch, channelColors[ch - 1], cs, tt, online),
+            CapabilityChrome(capabilities: chrome, state: state),
+            const SizedBox(height: 12),
+            if (controls.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                child: Text(
+                  online
+                      ? 'This device reports no controls.'
+                      : "Waiting for this device to say what it can do.",
+                  style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                ),
+              )
+            else
+              for (int i = 0; i < controls.length; i++)
+                _control(deviceId, controls[i], _accents[i % _accents.length],
+                    online),
           ],
         ),
       ),
     );
   }
 
-  Widget _channelRow(dynamic device, int ch, Color color, ColorScheme cs,
-      TextTheme tt, bool online) {
-    final deviceId = device['device_id'] as String;
-    final state = device['ch$ch'];
-    final isOn = state == 'on';
-    final allowed = _isChannelAllowed(deviceId, ch);
-    final enabled = online && allowed;
+  Widget _control(String deviceId, Map<String, dynamic> cap, Color accent,
+      bool online) {
+    final key = cap['key'] as String;
+    final access = (cap['access'] ?? 'rw') as String;
+    final readOnly = access == 'r';
+    // A child's grant decides writability; for an adult, `may_write` is absent
+    // and the capability's own access is the only limit (§5.10).
+    final granted = cap.containsKey('may_write') ? cap['may_write'] == true : true;
+    return CapabilityControl(
+      key: ValueKey('$deviceId/$key'),
+      capability: cap,
+      value: _stateOf(deviceId)[key],
+      enabled: online && !readOnly && granted,
+      accent: accent,
+      onSet: (value) =>
+          _set(deviceId, key, value, confirmed: cap['confirm'] == true),
+      onRename: ApiService.canManageDevices ? () => _rename(deviceId, cap) : null,
+    );
+  }
 
+  Widget _statusPill(bool online, ColorScheme cs, TextTheme tt) {
     return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: cs.surfaceContainerHighest.withOpacity(0.5),
-        borderRadius: BorderRadius.circular(14),
+        color: online
+            ? Colors.green.withOpacity(0.12)
+            : cs.error.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: online
+              ? Colors.green.withOpacity(0.3)
+              : cs.error.withOpacity(0.3),
+        ),
       ),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 10,
-            height: 10,
+            width: 7,
+            height: 7,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: isOn ? color : cs.onSurfaceVariant.withOpacity(0.25),
-              boxShadow: isOn
-                  ? [BoxShadow(color: color.withOpacity(0.5), blurRadius: 8)]
-                  : null,
+              color: online ? Colors.green : cs.error,
             ),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: GestureDetector(
-              onTap: ApiService.canManageDevices
-                  ? () => _renameChannel(deviceId, ch)
-                  : null,
-              child: Row(
-                children: [
-                  Flexible(
-                    child: Text(_channelName(deviceId, ch),
-                        style: tt.bodyMedium
-                            ?.copyWith(fontWeight: FontWeight.w600),
-                        overflow: TextOverflow.ellipsis),
-                  ),
-                  if (ApiService.canManageDevices) ...[
-                    const SizedBox(width: 6),
-                    Icon(Icons.edit_outlined,
-                        size: 13, color: cs.onSurfaceVariant.withOpacity(0.5)),
-                  ],
-                ],
-              ),
+          const SizedBox(width: 5),
+          Text(
+            online ? 'Online' : 'Offline',
+            style: tt.labelSmall?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: online ? Colors.green : cs.error,
             ),
-          ),
-          if (!allowed && ApiService.isChild)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: Icon(Icons.lock_outline_rounded,
-                  size: 16, color: cs.onSurfaceVariant.withOpacity(0.4)),
-            ),
-          Switch.adaptive(
-            value: isOn,
-            onChanged: enabled
-                ? (v) => _toggleChannel(deviceId, ch, v)
-                : null,
-            activeColor: color,
           ),
         ],
       ),
     );
   }
+}
+
+/// Distinguishes "cleared the name" from "cancelled the dialog", which `null`
+/// alone cannot.
+class _RenameResult {
+  const _RenameResult(this.label);
+  final String? label;
 }

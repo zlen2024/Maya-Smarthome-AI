@@ -20,7 +20,8 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from models import CapabilityState, Device, DeviceCapability
+from models import (CapabilityGrant, CapabilityLabel, CapabilityState, Device,
+                    DeviceCapability)
 from descriptor import KINDS, Capability, Descriptor, coerce_state
 
 
@@ -62,12 +63,15 @@ def store_descriptor(db: Session, device: Device, desc: Descriptor) -> None:
     for key, row in existing.items():
         if key not in declared:
             db.delete(row)
-    # State for a capability that no longer exists would be unreadable — nothing
-    # knows its kind any more — so it goes with it.
-    for row in db.query(CapabilityState).filter(
-            CapabilityState.device_id == device.device_id).all():
-        if row.key not in declared:
-            db.delete(row)
+    # Everything keyed on a capability that no longer exists goes with it. State
+    # would be unreadable — nothing knows its kind any more. A grant would be a
+    # permission for something that does not exist, and if the key ever returns
+    # §5.10 requires it to return denied, which only holds if the old row is
+    # gone. A label would name a capability nobody can see.
+    for model in (CapabilityState, CapabilityGrant, CapabilityLabel):
+        for row in db.query(model).filter(model.device_id == device.device_id).all():
+            if row.key not in declared:
+                db.delete(row)
 
     for position, cap in enumerate(desc.capabilities):
         row = existing.get(cap.key)
@@ -147,9 +151,72 @@ def load_state(db: Session, device_id: str) -> dict:
         CapabilityState.device_id == device_id).all()}
 
 
+def house_labels(db: Session, device_id: str) -> dict[str, str]:
+    """The names house members gave this device's capabilities (§5.11)."""
+    return {row.key: row.label for row in db.query(CapabilityLabel).filter(
+        CapabilityLabel.device_id == device_id).all()}
+
+
+def set_house_label(db: Session, device_id: str, key: str, label: str | None) -> None:
+    """Name a capability, or clear the name.
+
+    Clearing *is* the reset (§5.11): with no row, the firmware's own label
+    applies again, and there is no third state to represent.
+    """
+    row = db.query(CapabilityLabel).filter(
+        CapabilityLabel.device_id == device_id, CapabilityLabel.key == key).first()
+    if label is None or not label.strip():
+        if row:
+            db.delete(row)
+        return
+    if row is None:
+        row = CapabilityLabel(device_id=device_id, key=key)
+        db.add(row)
+    row.label = label.strip()
+    row.updated_at = datetime.now(timezone.utc)
+
+
+def child_grants(db: Session, child_id: int,
+                 device_id: str | None = None) -> dict[tuple[str, str], bool]:
+    """Every grant for this child, keyed `(device_id, capability key)`."""
+    q = db.query(CapabilityGrant).filter(CapabilityGrant.child_id == child_id)
+    if device_id is not None:
+        q = q.filter(CapabilityGrant.device_id == device_id)
+    return {(row.device_id, row.key): bool(row.is_allowed) for row in q.all()}
+
+
+def child_may_write(db: Session, child_id: int, device_id: str, key: str) -> bool:
+    """§5.10: absent means denied.
+
+    The default is the whole point — a capability nobody has granted is one a
+    firmware update just introduced, and it must not become reachable because it
+    appeared.
+    """
+    row = db.query(CapabilityGrant).filter(
+        CapabilityGrant.child_id == child_id,
+        CapabilityGrant.device_id == device_id,
+        CapabilityGrant.key == key).first()
+    return bool(row and row.is_allowed)
+
+
+def set_grant(db: Session, child_id: int, device_id: str, key: str,
+              is_allowed: bool) -> CapabilityGrant:
+    """Grant or deny one capability to one child. Caller commits."""
+    row = db.query(CapabilityGrant).filter(
+        CapabilityGrant.child_id == child_id,
+        CapabilityGrant.device_id == device_id,
+        CapabilityGrant.key == key).first()
+    if row is None:
+        row = CapabilityGrant(child_id=child_id, device_id=device_id, key=key)
+        db.add(row)
+    row.is_allowed = bool(is_allowed)
+    return row
+
+
 def descriptor_payload(db: Session, device: Device, *,
                        for_agent: bool = False,
-                       label_overrides: dict[str, str] | None = None) -> dict:
+                       label_overrides: dict[str, str] | None = None,
+                       child_id: int | None = None) -> dict:
     """The device's descriptor and state, in the shape the app and Maya read.
 
     `for_agent=True` applies §5.4: capabilities marked `agent:"deny"` are removed
@@ -161,13 +228,23 @@ def descriptor_payload(db: Session, device: Device, *,
     if for_agent:
         caps = [c for c in caps if c.agent == "allow"]
     state = load_state(db, device.device_id)
-    overrides = label_overrides or {}
+    # §5.11 precedence: the house's name, else the firmware's, else the key.
+    # `label_overrides` is the caller's last word on top of that, which is how
+    # the v1 relay names were read through before they were migrated.
+    overrides = dict(house_labels(db, device.device_id))
+    overrides.update(label_overrides or {})
+    grants = child_grants(db, child_id, device.device_id) if child_id is not None else None
 
     out = []
     for cap in caps:
         item = cap.to_dict()
-        if cap.key in overrides and overrides[cap.key]:
+        if overrides.get(cap.key):
             item["label"] = overrides[cap.key]
+        if grants is not None:
+            # A child is told what they may write, so the app can render a
+            # control they cannot use as visibly locked rather than letting them
+            # tap it and collect a 403. Reading is house-wide either way (§5.10).
+            item["may_write"] = bool(cap.writable and grants.get((device.device_id, cap.key)))
         out.append(item)
     return {
         "proto": device.proto or 1,
