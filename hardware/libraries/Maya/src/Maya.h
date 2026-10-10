@@ -36,6 +36,15 @@ class Maya : public mayalib::Core {
   // whatever the sketch changed with setSwitch()/setNumber()/....
   void loop();
 
+  // The local link (PROTOCOL.md 7). A grant arrives from the server when a person
+  // pairs two devices in the app; from then on, with a `send` grant:
+  //   maya.peerSetNumber("esp32-9f83b1c1", "fan", 60);
+  // returns false if there is no grant, it has expired, the key is outside its
+  // scope, or the frame will not fit in 250 bytes. A `recv` device needs nothing:
+  // a peer's `set` goes through the same handlers as one from the app, restricted
+  // to the grant's scope. onPeerMessage()/onPeerAck() deliver events and answers.
+  // The library reports what the link did to the server on its own.
+
   const char* id() const;
   bool connected() const;
 

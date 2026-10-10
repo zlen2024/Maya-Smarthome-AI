@@ -1129,6 +1129,16 @@ Rules a device MUST follow:
 3. Persist grants across reboot; drop them on `factory_reset`.
 4. Treat an expired grant as absent.
 
+   **Expiry needs a clock, and a device may not have one.** `expires` is an
+   absolute time, so a device can only apply rule 4 if it knows the time of day —
+   typically from SNTP while it is on WiFi. A device that has no trustworthy time
+   MUST NOT guess: it treats expiry as *not evaluable* and keeps honouring the
+   grant, relying on revocation and `peer_sync` (§7.1, §7.4) to end it. This is a
+   stated weakness rather than a hidden one: for a device that never learns the
+   time, the 30-day limit is enforced by the server's refusal to re-issue it, not
+   by the device. A hub, which is mains-powered and on WiFi, SHOULD always have
+   the time.
+
 #### Who may pair, and what may be granted
 
 Added in revision 2.2; the first draft of this section said what a device does
@@ -1229,9 +1239,20 @@ A local frame is a JSON object followed by a dot and a MAC:
   replay **one** frame per receiver reboot. This is bounded by `expires`, by
   revocation, and by the capture needing to be within radio range; devices whose
   `set` is not idempotent should say so in their own design.
-- `kind` is `set`, `event`, or `msg` (free payload for device-defined chatter).
+- `kind` is `set`, `event`, or `msg` (free payload for device-defined chatter,
+  carried as an object in `data`).
   A `set` applies the same value rules as §6.2 and is answered with a local
-  `kind:"ack"` frame carrying `status` as in §9. There is **no timestamp**: a
+  `kind:"ack"` frame carrying `re` (the `seq` it answers), `status` as in §9, and
+  `failed`/`state` as in §6.2. **Which side may send which kind follows the
+  grant's role:** a `send` end sends `set`, `event` and `msg` and accepts only
+  `ack`; a `recv` end accepts the first three and sends only `ack`. A frame of
+  the wrong kind for the receiving role is dropped. `scope` constrains `set`,
+  because that is the only kind that names a capability; `event` and `msg` carry
+  no key to check and are allowed by any valid grant.
+  **Defence in depth:** a receiver MUST refuse to `set` a capability that is
+  `confirm:true`, `agent:"deny"`, reserved or read-only *whatever its scope
+  says*, because the server's refusal to put one there (§7.1) is only as good as
+  the server. There is **no timestamp**: a
   battery device has no clock worth trusting, and ordering is `(ep, seq)`.
 - Frames MUST be authenticated. An unauthenticated frame is dropped, not
   processed — and not answered, so a probe learns nothing.
@@ -1251,6 +1272,14 @@ Local activity is reported to the server **batched, best-effort, and bounded**.
 - `dir` is `out` (this device sent) or `in` (this device received). `seq` is the
   **highest** sequence number the entry covers and `count` how many frames it
   stands for (default 1), so an aggregated entry says "frames 200-262, 63 of them".
+- **The sender logs when it sends, the receiver when it decides.** A sender's
+  `out` entry says "sent" and never changes — a later refusal arrives as a local
+  `ack` the sender's own code sees, but is not logged a second time, because a
+  second entry for the same frame would make `logged` exceed `claimed` and blur
+  the gap the audit exists to show. The receiver's `in` entry carries the result
+  that matters (`ok`, `not_permitted`, `bad_value`, …). A frame that fails the MAC
+  check is **not logged at all**: anyone within radio range could otherwise fill
+  the ring buffer with noise and push real entries out.
 - **Buffer when offline.** A bounded ring buffer (RECOMMENDED at least 64
   entries) that flushes on reconnect. Without this, visibility disappears exactly
   when the network is broken — which is when it matters most.
@@ -1399,9 +1428,9 @@ on its own and none of them breaks what is already deployed:
 5. Peering: grants, local link, audit.
    — **spec done 2026-10-10** (revision 2.2, §7). **5a, the server half, done
    the same day** (`peering.py`, `/api/peerings`, `peer_sync`, `peer_log`
-   ingest; `test_peering.py`). **5b, the library's side of the link, and the
-   ESP-NOW radio itself, are not built**, and the radio cannot be tested
-   without two boards.
+   ingest; `test_peering.py`). **5b, the library's side, done the same day** (`MayaPeer.cpp`,
+   `MayaCrypto.cpp`; `test_peer_link.py`). The ESP-NOW radio glue in
+   `Maya.cpp` compiles but has never run: it cannot be tested without two boards.
 6. Device to Maya.
 
 Two pieces of this document sit outside that order because they depend on it

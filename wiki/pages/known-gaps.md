@@ -113,10 +113,11 @@ mobile. Firmware pages are written from source reading, not graph queries.
   (`/workspace`, `c:/dev/fyp/...`). Superseded by this wiki; see
   [decisions](decisions.md#2026-09-08--replaced-the-single-file-code_wikimd).
 
-## Peering: the server half exists, the device half does not (2026-10-10)
+## Peering: everything is tested except the radio (2026-10-10)
 
-`/api/peerings` and the `peer_*` frames work and are tested, but no device speaks
-them yet: the Maya library does not send `mac` (so the server refuses to pair it)
-and has no grant store, frame check or audit buffer. The ESP-NOW radio and the
-hub relay cannot be tested without two boards. See
-[device-protocol §Step 5a](device-protocol.md#step-5a-2026-10-10-peering-the-servers-half).
+The server (`/api/peerings`, `peer_*` frames) and the library's decisions (grants,
+HMAC, replay, scope, audit) are tested, including two library devices paired
+through the real server. **No frame has ever crossed an actual ESP-NOW link**: the
+radio glue in `Maya.cpp` compiles and is otherwise unverified, and the tests carry
+frames through Python. The hub relay and the app's pairing UI are not started. See
+[device-protocol §Step 5b](device-protocol.md#step-5b-2026-10-10-the-librarys-half-of-the-local-link).

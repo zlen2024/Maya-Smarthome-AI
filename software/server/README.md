@@ -104,6 +104,7 @@ uv run python test_descriptor.py     # protocol 2: descriptors stored, protocol 
 uv run python test_grants.py         # protocol 2 step 2: claiming, capability grants, labels
 uv run python test_maya.py           # protocol 2 step 3: Maya's set_capability, deny + confirm gates
 uv run python test_peering.py        # protocol 2 step 5a: device pairing grants and the audit
+uv run python ../../hardware/libraries/Maya/extras/test/test_peer_link.py   # protocol 2 step 5b: the library's side of the local link
 uv run python ../../hardware/libraries/Maya/extras/test/test_library.py   # protocol 2 step 4: the Arduino library vs this server (needs a C++ compiler)
 ```
 

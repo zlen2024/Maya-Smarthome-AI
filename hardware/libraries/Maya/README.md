@@ -74,6 +74,32 @@ device card. Report `_batt` yourself with `maya.addReserved("_batt")` and
 `setNumber("_batt", pct)`. Nothing else starting with `_` is allowed; that
 namespace belongs to the protocol.
 
+## Talking to another device (the local link)
+
+A person pairs two devices in the app — "this one may address that one, and only
+these controls" — and the server pushes a key to both. From then on the sender can
+act on the receiver directly over ESP-NOW, with no round trip through the server:
+
+```cpp
+maya.peerSetNumber("esp32-9f83b1c1", "fan", 60);   // false: no grant, expired, outside scope, or too big
+maya.onPeerAck([](const char* peer, const char* status, const char* failed) { ... });
+```
+
+The receiving side needs no code: a peer's `set` goes through the same handlers
+as one from the app, limited to the grant's scope. `examples/PeerButton` is a
+button that drives a fan this way.
+
+What the library does for you: checks every frame's HMAC before reading it,
+refuses replays, enforces the scope — and refuses anything `confirm()`,
+`agentDeny()`, reserved or read-only *even if a scope names it* — and reports what
+the link did to the server, so the app can show where the two ends disagree. A
+forged frame is dropped without a reply and without a log line.
+
+Things to know: frames are limited to 250 bytes and are never fragmented; the
+device must hear the time from SNTP for a grant to expire, and without it a grant
+lasts until it is revoked; a frame can only reach a peer on the same WiFi channel,
+which a device in station mode on the same router is.
+
 ## Reporting
 
 `setSwitch`, `setNumber`, `setText`, `setLocation` tell the library what the
@@ -103,7 +129,8 @@ unknown key or the wrong kind rather than guessing.
 **real server**:
 
 ```
-python extras/test/test_library.py
+python extras/test/test_library.py      # the protocol core against the real server
+python extras/test/test_peer_link.py    # the local link
 ```
 
 It declares a 16-capability device, runs it through the server's own
@@ -121,5 +148,15 @@ could not build the driver, which is **not** a pass.
   (`Maya.cpp`) is the original firmware's code moved, but it has only been
   compiled, not run.
 - The protocol half (`MayaCore.*`) is tested for real, by the script above.
-- Not implemented yet: peering (`PROTOCOL.md` §7), device→Maya (§8), and sleeping
-  devices (`report_every`, §5.8).
+- The local link's **decisions** are tested for real by `extras/test/test_peer_link.py`
+  (11 checks): an independent peer written in Python signs frames with its own
+  `hmac`, and the device must accept, refuse and answer correctly; then two library
+  devices pair through the real server and the audit lines up. Three deliberate bugs
+  (accept any MAC, no replay check, trust the scope blindly) each failed the run.
+- **The ESP-NOW radio has not run.** `Maya.cpp`'s radio glue compiles for ESP32 but
+  was never put on the air; frames in the tests travel through Python. Two boards
+  are the first real test.
+- Not implemented yet: device→Maya (§8), the hub relay (§5.9), and sleeping devices
+  (`report_every`, §5.8).
+- Cost: the local link adds ~18 KB of RAM (grant tables, the 64-entry audit buffer,
+  the receive queue) and ~25 KB of flash.

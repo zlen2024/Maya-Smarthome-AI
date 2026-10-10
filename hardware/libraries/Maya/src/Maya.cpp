@@ -7,6 +7,8 @@
 #include <BLEUtils.h>
 #include <BLE2902.h>
 #include <WebSocketsClient.h>
+#include <esp_now.h>
+#include <time.h>
 
 // Provisioning, WiFi and the WebSocket link, moved out of the sketch they used
 // to live in (hardware/smartextension) without changing how they behave: the
@@ -20,6 +22,97 @@ WebSocketsClient webSocket;
 Maya* self = nullptr;
 
 String DEVICE_ID;
+
+// ─── The local link (PROTOCOL.md section 7) ──────────────────────────────────
+// Everything that *decides* lives in MayaPeer.cpp and is tested on a laptop. What
+// is here is the part that touches hardware, and it has been compiled but never
+// run on two boards: the radio is the one thing the test harness cannot stand in for.
+
+// NVS, under the same namespace the rest of the device's settings use, so a
+// factory reset (prefs.clear()) takes the grants and the epoch with everything else.
+class PrefsStorage : public mayalib::Storage {
+ public:
+  bool read(const char* name, uint8_t* buf, size_t cap, size_t& len) override {
+    Preferences p;
+    p.begin("iotdata", true);
+    size_t have = p.getBytesLength(name);
+    bool ok = have > 0 && have <= cap;
+    if (ok) { p.getBytes(name, buf, have); len = have; }
+    p.end();
+    return ok;
+  }
+  bool write(const char* name, const uint8_t* buf, size_t len) override {
+    Preferences p;
+    p.begin("iotdata", false);
+    bool ok = p.putBytes(name, buf, len) == len;
+    p.end();
+    return ok;
+  }
+};
+PrefsStorage peerStorage;
+
+// A tiny single-producer single-consumer queue: the radio callback runs in the
+// WiFi task and must not parse JSON or touch the sketch's hardware, so it copies
+// the frame here and loop() does the work.
+struct RxSlot { uint8_t mac[6]; uint8_t len; uint8_t data[MAYA_LOCAL_FRAME_MAX]; };
+const int RX_SLOTS = 4;
+RxSlot rxq[RX_SLOTS];
+volatile uint8_t rxHead = 0, rxTail = 0;
+
+void queueFrame(const uint8_t* mac, const uint8_t* data, int len) {
+  if (len <= 0 || len > MAYA_LOCAL_FRAME_MAX) return;
+  uint8_t next = (rxHead + 1) % RX_SLOTS;
+  if (next == rxTail) return;   // full: drop. A peer retries; a stuck queue helps nobody.
+  memcpy(rxq[rxHead].mac, mac, 6);
+  memcpy(rxq[rxHead].data, data, len);
+  rxq[rxHead].len = (uint8_t)len;
+  rxHead = next;
+}
+
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+// Arduino-ESP32 3.x passes an info struct. Written from the API, not compiled.
+void onEspNowRecv(const esp_now_recv_info_t* info, const uint8_t* data, int len) {
+  queueFrame(info->src_addr, data, len);
+}
+#else
+void onEspNowRecv(const uint8_t* mac, const uint8_t* data, int len) { queueFrame(mac, data, len); }
+#endif
+
+bool espNowUp = false;
+uint8_t espNowPeers[MAYA_MAX_PEERS][6];
+size_t espNowPeerCount = 0;
+uint32_t espNowPeersSeen = 0xFFFFFFFF;
+
+bool startEspNow() {
+  if (espNowUp) return true;
+  // ESP-NOW needs the radio on the access point's channel, which station mode
+  // gives it (7: "a device MUST NOT change WiFi channel to reach a peer").
+  if (esp_now_init() != ESP_OK) {
+    Serial.println("[Maya] ESP-NOW init failed; the local link is off");
+    return false;
+  }
+  esp_now_register_recv_cb(onEspNowRecv);
+  espNowUp = true;
+  return true;
+}
+
+// Keep the radio's peer list equal to the grants held: every peer in a grant, and
+// no one else.
+void syncEspNowPeers(Maya& m) {
+  if (!espNowUp || m.peersVersion() == espNowPeersSeen) return;
+  for (size_t i = 0; i < espNowPeerCount; i++) esp_now_del_peer(espNowPeers[i]);
+  espNowPeerCount = 0;
+  uint8_t mac[6];
+  for (size_t i = 0; m.peerMacAt(i, mac) && espNowPeerCount < MAYA_MAX_PEERS; i++) {
+    esp_now_peer_info_t info;
+    memset(&info, 0, sizeof info);
+    memcpy(info.peer_addr, mac, 6);
+    info.channel = 0;        // the current channel
+    info.encrypt = false;    // authentication is the frame MAC, not ESP-NOW's own (5.9)
+    if (esp_now_add_peer(&info) == ESP_OK) memcpy(espNowPeers[espNowPeerCount++], mac, 6);
+  }
+  espNowPeersSeen = m.peersVersion();
+}
 
 // BLE UUIDs - the app is written against these.
 #define SERVICE_UUID  "12345678-1234-1234-1234-123456789000"
@@ -331,7 +424,8 @@ void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
       // The PIN is verified by the server here, and the descriptor is the first
       // moment it learns what this device is (PROTOCOL.md 4.1, 5).
       if (!self->sendIdentify(DEVICE_ID.c_str(), ble_pin.c_str(),
-                              WiFi.localIP().toString().c_str(), sendFrame)) {
+                              WiFi.localIP().toString().c_str(),
+                              WiFi.macAddress().c_str(), sendFrame)) {
         Serial.printf("[Maya] Identify not sent: %s\n", self->problem() ? self->problem() : "descriptor unusable");
       }
       break;
@@ -438,6 +532,18 @@ void Maya::begin() {
   resetPrefsIfNewFirmware();
   loadSettings();
 
+  // The local link (7): grants and the epoch come back from flash, and the core is
+  // told how to read the clock, send a radio frame and find the time.
+  setMillis([]() { return (uint32_t)millis(); });
+  setClock([]() -> uint32_t {
+    time_t t = time(nullptr);
+    return t > 1700000000 ? (uint32_t)t : 0;   // 0 = SNTP has not answered: expiry is then not evaluable (7.1)
+  });
+  setPeerTransport([](const uint8_t* mac, const uint8_t* data, size_t len) {
+    return espNowUp && esp_now_send(mac, data, len) == ESP_OK;
+  });
+  beginPeering(&peerStorage, DEVICE_ID.c_str());
+
   if (wifi_ssid.length() == 0) {
     Serial.println("No WiFi config. Entering BLE provisioning.");
     startBLEProvisioning();
@@ -451,6 +557,10 @@ void Maya::begin() {
     connectToWiFiOnce();
   } else {
     startWebSocket();
+  }
+  if (WiFi.status() == WL_CONNECTED) {
+    configTime(0, 0, "pool.ntp.org", "time.google.com");   // for grant expiry; harmless if it never answers
+    startEspNow();
   }
   refreshHealth();
 }
@@ -480,6 +590,14 @@ void Maya::loop() {
 
   webSocket.loop();
 
+  // The local link: frames the radio callback queued, then the peer list.
+  while (rxTail != rxHead) {
+    RxSlot& slot = rxq[rxTail];
+    onLocalFrame(slot.data, slot.len, slot.mac);
+    rxTail = (rxTail + 1) % RX_SLOTS;
+  }
+  syncEspNowPeers(*this);
+
   // Zombie-link watchdog: with pings every 15s the server should never be silent
   // for long while "connected". If it is, force a disconnect so the reconnect
   // timer takes over. Deliberately NOT ESP.restart(): that would drop every
@@ -502,6 +620,8 @@ void Maya::loop() {
       lastFlush_ = millis();
       flush(DEVICE_ID.c_str(), (uint32_t)millis(), sendFrame);
     }
+    // The audit of what the local link did (7.3). Buffered while offline, sent when due.
+    flushPeerLog(DEVICE_ID.c_str(), sendFrame);
     // A full report every 30s doubles as the keep-alive the server's
     // last-heartbeat time comes from.
     if (millis() - lastFull_ > 30000) {

@@ -361,7 +361,7 @@ bool Core::sendDoc(DynamicJsonDocument& doc, Send send) const {
   return true;
 }
 
-bool Core::sendIdentify(const char* id, const char* pin, const char* ip, Send send) {
+bool Core::sendIdentify(const char* id, const char* pin, const char* ip, const char* mac, Send send) {
   if (problem_) return false;   // a refused declaration means the firmware is not what it meant to be
   DynamicJsonDocument doc(MAYA_TX_BYTES);
   doc["id"] = id;
@@ -369,6 +369,7 @@ bool Core::sendIdentify(const char* id, const char* pin, const char* ip, Send se
   doc["status"] = "online";
   doc["pin"] = pin;
   if (ip && *ip) doc["ip"] = ip;
+  if (mac && *mac) doc["mac"] = mac;   // 7.1: a device that can be paired says where it is on the air
   if (model_) doc["model"] = model_;
   if (fw_) doc["fw"] = fw_;
 
@@ -483,6 +484,32 @@ void Core::sendLegacyAck(const char* myId, const char* status, Send send) {
 // receiving
 // ---------------------------------------------------------------------------
 
+// The one place a set of values is validated and applied, for the server's `set`
+// and for a peer's. `scope` is null for the server; for a peer it is the grant,
+// and every key must be inside it *and* pass the checks the server was supposed to
+// have applied when it issued the scope (7.2, defence in depth).
+const char* Core::applyValues(JsonObjectConst values, const PeerRec* scope, const char** failed,
+                              Cap** applied, size_t& nApplied) {
+  // 6.2: apply in order, stop at the first failure, and say exactly how far it
+  // got. There is no rollback - a device cannot generally un-ring a bell.
+  for (JsonPairConst kv : values) {
+    const char* key = kv.key().c_str();
+    *failed = key;
+    if (scope && !inScope(*scope, key)) return "not_permitted";   // before anything about the key is revealed
+    Cap* c = find(key);
+    if (!c) return "unknown_capability";
+    if (!c->writable()) return "not_permitted";
+    if (scope && (c->confirm_ || c->agentDeny_ || key[0] == '_')) return "not_permitted";
+    Value v;
+    if (!parseValue(*c, kv.value(), v)) return "bad_value";
+    if (c->onWrite_ && !c->onWrite_(v)) return "bad_value";
+    if (c->kind_ != BUTTON) commit(*c, v);
+    applied[nApplied++] = c;
+  }
+  *failed = nullptr;
+  return "ok";
+}
+
 void Core::handleSet(JsonObjectConst root, const char* myId, Send send) {
   const char* req = root["req"] | (const char*)nullptr;
   JsonObjectConst values = root["values"].as<JsonObjectConst>();
@@ -490,21 +517,9 @@ void Core::handleSet(JsonObjectConst root, const char* myId, Send send) {
 
   Cap* applied[MAYA_MAX_CAPS];
   size_t nApplied = 0;
-
-  // 6.2: apply in order, stop at the first failure, and say exactly how far it
-  // got. There is no rollback - a device cannot generally un-ring a bell.
-  for (JsonPairConst kv : values) {
-    const char* key = kv.key().c_str();
-    Cap* c = find(key);
-    if (!c) { sendAck(myId, req, "unknown_capability", key, applied, nApplied, send); return; }
-    if (!c->writable()) { sendAck(myId, req, "not_permitted", key, applied, nApplied, send); return; }
-    Value v;
-    if (!parseValue(*c, kv.value(), v)) { sendAck(myId, req, "bad_value", key, applied, nApplied, send); return; }
-    if (c->onWrite_ && !c->onWrite_(v)) { sendAck(myId, req, "bad_value", key, applied, nApplied, send); return; }
-    if (c->kind_ != BUTTON) commit(*c, v);
-    applied[nApplied++] = c;
-  }
-  sendAck(myId, req, "ok", nullptr, applied, nApplied, send);
+  const char* failed = nullptr;
+  const char* status = applyValues(values, nullptr, &failed, applied, nApplied);
+  sendAck(myId, req, status, failed, applied, nApplied, send);
 }
 
 // A v2 device MUST still answer the legacy command names (4), so that it works
@@ -579,6 +594,7 @@ Action Core::onFrame(const char* data, size_t len, const char* myId, uint32_t up
       if (req) sendSimpleAck(myId, req, "ok", send);
       return NONE;
     }
+    if (!strncmp(type, "peer_", 5)) { handlePeerControl(root, type); return NONE; }
     if (!strcmp(type, "reboot"))        { sendSimpleAck(myId, req, "ok", send); return REBOOT; }
     if (!strcmp(type, "factory_reset")) { sendSimpleAck(myId, req, "ok", send); return FACTORY_RESET; }
     return NONE;   // welcome, error, and anything newer than this library: not ours to act on

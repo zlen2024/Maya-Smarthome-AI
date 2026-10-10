@@ -1,6 +1,9 @@
 // Drives MayaCore on a laptop so the real server can judge what it says.
 //
-//   host_driver <profile>      reads commands on stdin, writes frames on stdout
+//   host_driver <profile> [state-dir]   reads commands on stdin, writes frames on stdout
+//
+//   With a state-dir the device keeps its grants and epoch there, so a second
+//   run against the same directory is a reboot.
 //
 // stdin commands (one per line)
 //   identify                   send the identify frame
@@ -11,6 +14,12 @@
 //   flush                      send a partial state report
 //   full                       send a full state report
 //   problem                    print the declaration problem, if any
+//   local <srcmac> <text>      a radio frame arrives from that MAC (12 hex digits)
+//   psw|pnum|ptxt <peer> <key> <v>   send a `set` to a peer; ppress <peer> <key>
+//   pmsg <peer> <kind>         send an event/msg with a small payload
+//   plog                       flush the audit buffer if it is due
+//   ms <n> / clock <n>         set the device's millis() / wall clock (0 = unknown)
+//   peers                      list held grants
 //   sync                       print SYNC, so the caller knows the lines above are complete
 //
 // stdout
@@ -21,12 +30,62 @@
 //
 // Profiles are declarations, the same calls a sketch makes in setup().
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <string>
 #include <iostream>
+#include <fstream>
+#include <map>
 #include "MayaCore.h"
 
 using namespace mayalib;
+
+static uint32_t g_ms = 0, g_clock = 0;
+
+// A directory standing in for NVS: one file per key.
+class FileStorage : public Storage {
+ public:
+  explicit FileStorage(std::string dir) : dir_(dir) {}
+  bool read(const char* name, uint8_t* buf, size_t cap, size_t& len) override {
+    std::ifstream f(dir_ + "/" + name, std::ios::binary);
+    if (!f) return false;
+    f.read((char*)buf, cap);
+    len = (size_t)f.gcount();
+    return true;
+  }
+  bool write(const char* name, const uint8_t* buf, size_t len) override {
+    std::ofstream f(dir_ + "/" + name, std::ios::binary | std::ios::trunc);
+    if (!f) return false;
+    f.write((const char*)buf, len);
+    return true;
+  }
+ private:
+  std::string dir_;
+};
+
+// Memory-only, for runs that do not care about a reboot.
+class MemStorage : public Storage {
+ public:
+  bool read(const char* name, uint8_t* buf, size_t cap, size_t& len) override {
+    auto it = m_.find(name);
+    if (it == m_.end()) return false;
+    len = it->second.size() < cap ? it->second.size() : cap;
+    memcpy(buf, it->second.data(), len);
+    return true;
+  }
+  bool write(const char* name, const uint8_t* buf, size_t len) override {
+    m_[name] = std::string((const char*)buf, len);
+    return true;
+  }
+ private:
+  std::map<std::string, std::string> m_;
+};
+
+static bool macFromHex(const char* hex, uint8_t out[6]) {
+  if (strlen(hex) != 12) return false;
+  for (int i = 0; i < 6; i++) { unsigned v; if (sscanf(hex + i * 2, "%2x", &v) != 1) return false; out[i] = (uint8_t)v; }
+  return true;
+}
 
 static void tx(const char* json, size_t len) { printf("TX %.*s\n", (int)len, json); }
 
@@ -93,15 +152,38 @@ int main(int argc, char** argv) {
   else if (!strcmp(profile, "toobig")) profileTooBig(m);
   else { fprintf(stderr, "unknown profile %s\n", profile); return 2; }
 
-  const char* ID = "esp32-test";
+  // MAYA_ID / MAYA_MAC let two drivers be two different boards at once.
+  const char* ID = getenv("MAYA_ID") ? getenv("MAYA_ID") : "esp32-test";
   uint32_t uptime = 1000;
+  const char* ID_MAC = getenv("MAYA_MAC") ? getenv("MAYA_MAC") : "24:6F:28:AA:BB:01";
+
+  FileStorage fileStore(argc > 2 ? argv[2] : ".");
+  MemStorage memStore;
+  Storage* store = argc > 2 ? (Storage*)&fileStore : (Storage*)&memStore;
+  m.setMillis([]() { return g_ms; });
+  m.setClock([]() { return g_clock; });
+  m.setPeerTransport([](const uint8_t* mac, const uint8_t* data, size_t len) {
+    printf("LTX ");
+    for (int i = 0; i < 6; i++) printf("%02X", mac[i]);
+    printf(" %.*s\n", (int)len, (const char*)data);
+    return true;
+  });
+  m.onPeerAck([](const char* peer, const char* status, const char* failed) {
+    printf("PACK %s %s %s\n", peer, status, failed ? failed : "-");
+  });
+  m.onPeerMessage([](const char* peer, const char* kind, JsonObjectConst payload) {
+    char out[200];
+    serializeJson(payload, out, sizeof out);
+    printf("PMSG %s %s %s\n", peer, kind, out);
+  });
+  m.beginPeering(store, ID);
   std::string line;
   setvbuf(stdout, nullptr, _IOLBF, 0);
 
   while (std::getline(std::cin, line)) {
     if (!line.empty() && line.back() == '\r') line.pop_back();
     if (line == "identify") {
-      bool ok = m.sendIdentify(ID, "4821", "192.168.0.42", tx);
+      bool ok = m.sendIdentify(ID, "4821", "192.168.0.42", ID_MAC, tx);
       if (!ok) printf("IDENTIFY_REFUSED %s\n", m.problem() ? m.problem() : "?");
     } else if (line.rfind("frame ", 0) == 0) {
       std::string f = line.substr(6);
@@ -122,6 +204,37 @@ int main(int argc, char** argv) {
       m.sendFullState(ID, uptime, tx);
     } else if (line == "problem") {
       printf("PROBLEM %s\n", m.problem() ? m.problem() : "none");
+    } else if (line.rfind("local ", 0) == 0) {
+      size_t sp = line.find(' ', 6);
+      uint8_t src[6];
+      if (sp == std::string::npos || !macFromHex(line.substr(6, sp - 6).c_str(), src)) { printf("BADCMD\n"); }
+      else {
+        std::string f = line.substr(sp + 1);
+        m.onLocalFrame((const uint8_t*)f.data(), f.size(), src);
+      }
+    } else if (line.rfind("psw ", 0) == 0) {
+      char peer[40], k[40]; int v; sscanf(line.c_str() + 4, "%39s %39s %d", peer, k, &v);
+      printf("PSEND %d\n", m.peerSetSwitch(peer, k, v != 0));
+    } else if (line.rfind("pnum ", 0) == 0) {
+      char peer[40], k[40]; double v; sscanf(line.c_str() + 5, "%39s %39s %lf", peer, k, &v);
+      printf("PSEND %d\n", m.peerSetNumber(peer, k, v));
+    } else if (line.rfind("ptxt ", 0) == 0) {
+      char peer[40], k[40], v[200]; sscanf(line.c_str() + 5, "%39s %39s %199[^\n]", peer, k, v);
+      printf("PSEND %d\n", m.peerSetText(peer, k, v));
+    } else if (line.rfind("ppress ", 0) == 0) {
+      char peer[40], k[40]; sscanf(line.c_str() + 7, "%39s %39s", peer, k);
+      printf("PSEND %d\n", m.peerPress(peer, k));
+    } else if (line.rfind("pmsg ", 0) == 0) {
+      char peer[40], kind[10]; sscanf(line.c_str() + 5, "%39s %9s", peer, kind);
+      printf("PSEND %d\n", m.peerMessage(peer, kind, [](JsonObject o) { o["hello"] = "world"; }));
+    } else if (line == "plog") {
+      printf("PLOG %d\n", m.flushPeerLog(ID, tx));
+    } else if (line.rfind("ms ", 0) == 0) {
+      g_ms = (uint32_t)strtoul(line.c_str() + 3, nullptr, 10);
+    } else if (line.rfind("clock ", 0) == 0) {
+      g_clock = (uint32_t)strtoul(line.c_str() + 6, nullptr, 10);
+    } else if (line == "peers") {
+      printf("PEERS %d epoch=%u pending=%d\n", (int)m.peerCount(), (unsigned)m.epoch(), (int)m.peerLogPending());
     } else if (line == "sync") {
       printf("SYNC\n");   // the caller reads until this, so it knows the command is done
     }

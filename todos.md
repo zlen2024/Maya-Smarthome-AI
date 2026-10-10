@@ -165,11 +165,17 @@ descriptors; shims protocol 1. Nothing else changes." Status and reasoning:
   grants with an explicit finite scope, a server-generated key never returned to an
   app, `peer_grant` / `peer_revoke` / `peer_sync` pushed to devices, `peer_log`
   ingest with a two-ended cross-check. `test_peering.py` (6 checks).
-- [ ] **Step 5b — peering, library half**: send `mac` in identify, grant store in
-  flash, HMAC-SHA256 frame check, `(ep, seq)` replay ordering, scope enforcement,
-  audit ring buffer. The logic belongs in `MayaCore` and can be host-tested; the
-  ESP-NOW radio cannot be tested without two boards. Until then no device can be
-  paired (the server refuses a device with no MAC).
+- [x] **Step 5b — peering, library half** (2026-10-10): `mac` in identify, grant
+  store in NVS, HMAC-SHA256 frame check, `(ep, seq)` replay ordering, scope
+  enforcement with defence in depth, audit ring buffer, SNTP for expiry, ESP-NOW
+  glue, `PeerButton` example. `test_peer_link.py` (11 checks, 3 deliberate bugs
+  confirmed to fail it). **The ESP-NOW radio has never run**: needs two boards.
+- [ ] Put two boards on a bench: flash `SmartExtension3ch` and `PeerButton`, pair
+  them from the app, and watch a frame cross. That is the first test of anything
+  radio-shaped.
+- [ ] A device with no time source never expires a grant (7.1 says so). A hub
+  always has one; a sleepy sensor may not. Decide whether a sleepy device should
+  get relative expiry instead.
 - [ ] Peering UI in the app (pair, list, revoke, audit view) — needs the Flutter SDK.
 - [ ] Hub relay (§5.9) is a *user* of peering and is not started.
 - [ ] **Step 6** — device to Maya (§8).

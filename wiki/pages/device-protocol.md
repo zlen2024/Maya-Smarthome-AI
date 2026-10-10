@@ -10,7 +10,7 @@ The goal the protocol exists for: a contributor builds new hardware, drops it in
 firmware to app — `ch1`/`ch2`/`ch3` appeared 76 times across 6 files when the
 migration was planned.
 
-## Status: steps 1, 3, 4 and 5a done, step 2 server-complete, spec at revision 2.2 (2026-10-10)
+## Status: steps 1, 3, 4 and 5 done, step 2 server-complete, spec at revision 2.2 (2026-10-10)
 
 §10 defines a six-step migration order. Only the first is implemented.
 
@@ -20,7 +20,7 @@ migration was planned.
 | 2. App renders from the descriptor instead of three hardcoded toggles | server done; app partly — see below |
 | 3. Maya swaps her relay tool for a generic `set_capability` | **done** |
 | 4. Extract the Arduino library | **done** (compiles for ESP32; not yet flashed) |
-| 5. Peering: grants, local link, audit (§7) | spec done (2.2); **5a server done**; 5b library and the radio not started |
+| 5. Peering: grants, local link, audit (§7) | spec done (2.2); **5a server done; 5b library done**; the ESP-NOW radio has never run |
 | 6. Device to Maya (§8) | not started |
 
 **Steps 1–3 needed no firmware change.** The shipped ESP32 still speaks protocol 1 and
@@ -353,3 +353,49 @@ frame" now read past it.
 device can be paired**: the server refuses one with no MAC), the ESP-NOW radio,
 the app UI, and the hub relay of §5.9. One security finding was recorded and not
 fixed — see [security notes](security-notes.md#8-any-house-can-re-claim-a-device-id-another-house-owns--open).
+
+## Step 5b (2026-10-10): the library's half of the local link
+
+`MayaPeer.cpp` and `MayaCrypto.cpp`, platform-free like `MayaCore`, so the
+decisions are tested on a laptop. What is in them: a grant table persisted to NVS,
+a new **epoch** every boot, the frame check, replay ordering, scope enforcement,
+the audit ring buffer, and sending. SHA-256, HMAC, base64 and the ISO-date parser
+are written out rather than borrowed, so one implementation is checked from both
+sides — and checked against Python's `hmac`, not against itself.
+
+**How it is tested.** `test_peer_link.py` is the other end: it signs frames with
+Python's `hmac`/`hashlib`, plays the server's `peer_grant` frames, and judges the
+device. Then two library devices are paired through the **real server**, a `set`
+is carried across by the script, the ack carried back, and both audit lines are
+compared by the server's cross-check. Three deliberate bugs — accept any MAC, no
+replay check, trust the scope blindly — each failed the run.
+
+**Spec gaps 5b closed** (all in 2.2, written before the code that needed them):
+a device has no clock, so `expires` could not be evaluated — now it is *not
+evaluable* without SNTP and the grant is honoured until revoked, a stated weakness;
+which kinds each role may send; the sender logs once and never again, because a
+second line for one frame would make `logged` exceed `claimed`; and a frame that
+fails the MAC is **not logged**, so anyone in radio range cannot push real entries
+out of the buffer.
+
+**Found by running it, not by reading it:**
+
+1. *`parseIsoUtc` overflowed on any expiry after 2038.* `long` is 32 bits on the
+   ESP32 as well as on Windows, and `days * 86400` passes 2³¹ then. Zig's
+   undefined-behaviour check caught it on the first grant with a 2099 expiry; on a
+   board it would have wrapped silently and made every grant look expired or
+   immortal depending on the sign. Now 64-bit.
+2. *A re-sent grant must not reopen the replay window.* The server re-sends every
+   active grant at each identify, so a naive "store the grant" would reset the
+   counters on every reconnect. The counters now carry over while the key is
+   unchanged, and reset when it changes.
+3. *An unknown key outside the scope must look like a real one.* Otherwise a peer
+   could probe which capabilities exist. Scope is checked before the key is looked up.
+
+**What is deliberately not here:** the ESP-NOW radio has never carried a frame.
+`Maya.cpp` has the glue — init, a receive queue so the WiFi task never parses JSON,
+peer list kept equal to the grants held, SNTP — and it compiles, but the test
+harness cannot stand in for a radio. The next real test is two boards. The hub relay
+(§5.9) is a *user* of this link and is not started; neither is device→Maya (§8).
+
+**Cost** on the ESP32: about 18 KB of RAM and 25 KB of flash for the local link.

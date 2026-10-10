@@ -307,3 +307,17 @@ Updated: `pages/device-protocol.md` (Step 5a), `pages/data-model.md`,
 
 **Found, not fixed:** any house can re-claim a device id another house owns
 (security-notes §8). **Not verified:** anything involving a radio.
+
+## [2026-10-10] ingest | Protocol v2 step 5b: peering, the library's half
+
+Added `MayaPeer.cpp`, `MayaCrypto.cpp`, the radio glue in `Maya.cpp`, the
+`PeerButton` example and `test_peer_link.py` (11 checks). Spec 2.2 gained four
+clarifications first (clock/expiry, kinds by role, who logs what, MAC failures are
+not logged). Updated: `PROTOCOL.md`, library README, `pages/device-protocol.md`
+(Step 5b), `pages/known-gaps.md`, `todos.md`, `software/server/README.md`.
+
+All server self-checks, `test_library.py` and `test_peer_link.py` pass; three
+deliberate bugs were confirmed to fail the new test; all four examples compile for
+ESP32. No graph rebuild: the library is outside both graph roots.
+**Found:** `parseIsoUtc` overflowed for dates after 2038 (`long` is 32-bit on the
+ESP32). **Not verified:** any radio.

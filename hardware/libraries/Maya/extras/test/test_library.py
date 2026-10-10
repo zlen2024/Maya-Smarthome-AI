@@ -79,7 +79,8 @@ def build_driver():
         sys.exit(3)
     out = Path(tempfile.mkdtemp()) / ("driver.exe" if os.name == "nt" else "driver")
     cmd = cxx + ["-std=c++17", "-w", f"-I{LIB / 'src'}", f"-I{aj}",
-                 str(HERE / "host_driver.cpp"), str(LIB / "src" / "MayaCore.cpp"), "-o", str(out)]
+                 str(HERE / "host_driver.cpp"), str(LIB / "src" / "MayaCore.cpp"),
+                 str(LIB / "src" / "MayaPeer.cpp"), str(LIB / "src" / "MayaCrypto.cpp"), "-o", str(out)]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         print(r.stdout, r.stderr)
@@ -90,9 +91,15 @@ def build_driver():
 class Driver:
     """One board, as a process: commands in, frames out."""
 
-    def __init__(self, exe, profile):
-        self.p = subprocess.Popen([exe, profile], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                  text=True, bufsize=1)
+    def __init__(self, exe, profile, state_dir=None, device_id=None, mac=None):
+        env = dict(os.environ)
+        if device_id:
+            env["MAYA_ID"] = device_id
+        if mac:
+            env["MAYA_MAC"] = mac
+        args = [exe, profile] + ([state_dir] if state_dir else [])
+        self.p = subprocess.Popen(args, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                  text=True, bufsize=1, env=env)
 
     def run(self, command):
         """Send one command; return (frames sent, hardware log, other lines)."""
@@ -141,6 +148,7 @@ def test_identify_is_what_the_server_accepts(exe):
 
     assert frame["proto"] == 2 and frame["status"] == "online" and frame["pin"] == PIN
     assert frame["id"] == ID and frame["model"] == "host_test" and frame["fw"] == "9.9.9"
+    assert frame["mac"] == "24:6F:28:AA:BB:01", "7.1: a device that can be paired says where it is on the air"
 
     desc = descriptor.parse_identify(frame)
     assert desc.proto == 2 and not desc.shimmed, "a v2 device must not be shimmed"
