@@ -51,5 +51,13 @@ pointing at another backend, but the schema is hand-migrated for SQLite
 - **`ScreenTime` is the automation trigger** — see
   [Maya AI agent](maya-ai-agent.md#automation-the-screen-limit-alert).
 
+Protocol 2 added two tables (2026-10-10): `device_capabilities`, one row per
+capability a device declared about itself, and `capability_state`, one row per
+capability's current value with `value` as JSON text — a typed capability value
+cannot fit `Relay.is_on`, which is a `Boolean`. Both are keyed `(device_id, key)`.
+`Relay` still carries today's three channels in parallel; see
+[device protocol](device-protocol.md). `Device` also gained `proto`, `model`,
+`fw` and `report_every`.
+
 Security-relevant columns (`join_pin`, `devices.pin`, `key_hash`) are discussed in
 [security notes](security-notes.md).

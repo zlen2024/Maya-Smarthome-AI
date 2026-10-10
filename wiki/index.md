@@ -22,7 +22,8 @@ operations.
 | [Mobile app](pages/mobile-app.md) | Flutter: startup and routing, the all-static `ApiService` boundary, the three-part voice stack |
 | [ESP32 firmware](pages/firmware-esp32.md) | GPIO 2/4/5 relays, BLE provisioning UUIDs, connection lifecycle and BLE fallback |
 | [Maya AI agent](pages/maya-ai-agent.md) | The `ai.py` / `main.py` split, the bounded tool loop, the six tools and where permissions actually live |
-| [Data model](pages/data-model.md) | 14 SQLAlchemy models, the multi-house join table, sentinel and denormalised columns |
+| [Data model](pages/data-model.md) | 16 SQLAlchemy models, the multi-house join table, sentinel and denormalised columns |
+| [Device protocol v2](pages/device-protocol.md) | What of `PROTOCOL.md` is actually built: step 1 of 6, the capability tables, and what still only exists on paper |
 
 ## Cross-cutting
 

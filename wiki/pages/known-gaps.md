@@ -82,10 +82,17 @@ mobile. Firmware pages are written from source reading, not graph queries.
   `inspect()` guards. There is no migration tool (no Alembic), no down-migration,
   and no version table — column adds only. This is the mechanism protocol v2's
   capability/state table will have to arrive through (`PROTOCOL.md` Appendix B).
-- **`main.py` is 2,541 lines** (2026-10-10) and holds routes, WS handlers, the
-  Maya agent loop, the automation alerts, the abuse limits and the migrations. It
-  is the single largest file by a wide margin (next is `settings_tab.dart` at
-  1,109). Protocol v2 steps 1 and 3 both land in this file.
+- **`main.py` is 2,887 lines** (2026-10-10, after protocol step 1) and holds
+  routes, WS handlers, the Maya agent loop, the automation alerts, the abuse
+  limits and the migrations. It is the single largest file by a wide margin (next
+  is `settings_tab.dart` at 1,109). Protocol step 1 deliberately put its logic in
+  `descriptor.py` and `capability_store.py` instead of growing this file further;
+  step 3 still lands here.
+- **Two representations of channel state run in parallel.** `Relay.is_on` and
+  `capability_state` are both written on every device report, by design, until
+  step 2 moves the app onto the descriptor — see
+  [device protocol](device-protocol.md). Until then a change to one write path
+  that misses the other will silently desynchronise them.
 - **Two test files, no test runner.** `software/server/test_screen_limit.py`
   (55 lines) and `software/server/test_security.py` (274 lines, added 2026-10-10 —
   abuse limits, PIN rules, the join→child-location chain, and device identify over

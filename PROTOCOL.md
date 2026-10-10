@@ -1,6 +1,11 @@
 # Maya Device Protocol
 
-**Version 2 (draft)** · Status: proposed, not yet implemented
+**Version 2 (draft)** · Status: §10 step 1 implemented 2026-10-10; steps 2-6
+proposed. The server stores descriptors and shims protocol 1; the app, Maya and
+the firmware are untouched and still speak protocol 1. See
+`wiki/pages/device-protocol.md` for what exists versus what is still on paper —
+this file stays the contract either way, and describes the finished protocol, not
+the current build.
 Contract between Maya firmware (`hardware/*`, and the Arduino library repo) and
 the Maya backend (`software/server`) + app (`software/mobile`).
 
@@ -936,6 +941,9 @@ Migration order matters. Build it in this sequence, because each step is useful
 on its own and none of them breaks what is already deployed:
 
 1. Server accepts and stores descriptors; shims protocol 1. Nothing else changes.
+   — **done 2026-10-10** (`descriptor.py`, `capability_store.py`, the
+   `device_capabilities` + `capability_state` tables, and two endpoints;
+   `test_descriptor.py` plays both a v1 and a v2 device against the real app).
 2. App renders from the descriptor instead of three hardcoded toggles.
 3. Maya swaps its six fixed tools for a generic `set_capability`, driven by the
    descriptors already in its house context — filtering `agent:"deny"` and
@@ -997,3 +1005,9 @@ in migration step 1-2:
 `Relay.is_on` being a `Boolean` is the single most load-bearing assumption: a
 typed capability value cannot be stored in it at all. Step 1 should introduce a
 capability/state table rather than widen `Relay`.
+
+**What step 1 actually did (2026-10-10):** took that advice — `capability_state`
+holds typed values as JSON text and `Relay` was left alone. None of the 76
+`ch1`/`ch2`/`ch3` sites were removed; every device report now writes *both*
+representations, which is what let the server move without the app, the firmware
+or Maya changing in the same commit. Removing the duplication is step 2's work.

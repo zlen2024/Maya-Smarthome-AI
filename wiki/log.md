@@ -96,3 +96,51 @@ mostly the two new modules plus `main.py` growth), mobile 559/4566. Reconciled
 `security-notes.md` (rewritten, 2 new findings), `known-gaps.md` (test census,
 `main.py` now 2,541 lines, rate-limit scope), `data-model.md`, `server-backend.md`.
 One anchor broke when finding 2 was retitled; the linter caught it.
+
+## [2026-10-10] ingest | Protocol v2 step 1: devices describe themselves
+
+`PROTOCOL.md` had been a 999-line draft since 2026-09-08 with "not yet
+implemented" in its header. Step 1 of the §10 migration order is now built, and
+only step 1: the server accepts and stores what a device declares, and
+synthesises a descriptor for devices that declare nothing. New page:
+[device protocol](pages/device-protocol.md), which records what exists against
+what is still on paper.
+
+**Two new modules rather than more of `main.py`.** `descriptor.py` (427 lines) is
+§4-§6 as validation logic with no database or socket in it; `capability_store.py`
+(179) is the storage half. `main.py` still grew to 2,887 lines, but the rules
+live somewhere testable.
+
+**The shape of the data.** `device_capabilities` (one row per declaration) and
+`capability_state` (one row per value, `value` as JSON text). Appendix B had
+already named `Relay.is_on`'s `Boolean` type as the most load-bearing assumption
+in the codebase, and recommended a new table over widening it — that advice was
+taken. Both representations are now written on every device report, deliberately,
+so the server could move without the app, the firmware or Maya changing in the
+same commit. That duplication is step 2's to remove and is recorded in
+[known-gaps](pages/known-gaps.md#codebase-gaps) so it is not mistaken for an
+accident.
+
+**Verification went beyond asserting the happy path.** `test_descriptor.py` (550
+lines, 11 checks) plays two devices against the real app over a WebSocket: a
+protocol-1 board that declares nothing, and the salt jar from §5.7 — the
+descriptor straight out of the document, which parses exactly as written. The
+`set` round trip is real: a thread drives the HTTP request while the test answers
+the `set` frame with an ack. The migration was checked against a database built
+before the new columns existed, by dropping them and booting (existing rows get
+`proto=1`, which is correct — they predate the protocol).
+
+**Three pre-existing bugs surfaced in the command path**, all now fixed and
+covered: a v2 ack switched relays off because `ch1` was read with a default of
+`"off"`; an error ack (`invalid_channel`, `bad_value`) matched no branch at all,
+so the caller waited the full 5-second timeout for an answer that had already
+arrived; and `wait_for_ack` registered its future *after* the send, so an ack
+from a device on the same LAN could be dropped. The first two were found by
+writing the test, not by reading the code.
+
+No firmware change was needed — the ESP32 still speaks protocol 1 and is shimmed,
+which is the whole point of the migration order and is what the test checks.
+
+Graph: server 289/3727 (was 224/2797), mobile unchanged at 559/4566. Reconciled
+`index.md`, `data-model.md`, `server-backend.md`, `known-gaps.md`, and marked
+step 1 done in `PROTOCOL.md` §10 and Appendix B.

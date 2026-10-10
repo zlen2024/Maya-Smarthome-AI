@@ -66,6 +66,43 @@ never built. Full reasoning in `wiki/pages/security-notes.md`; the self-check is
   its PIN in cleartext on every connect, and the master's own join PIN is displayed
   on purpose.
 
+### Iteration 4 — device protocol v2, step 1 of 6 (DONE — 2026-10-10)
+`PROTOCOL.md` §10 defines the migration order; step 1 is "server accepts and stores
+descriptors; shims protocol 1. Nothing else changes." Status and reasoning:
+`wiki/pages/device-protocol.md`. Self-check: `python test_descriptor.py` (11 checks).
+- [x] **Devices describe themselves.** `descriptor.py` implements §4-§6: version
+  negotiation, the capability descriptor, the ten kinds, reserved `_` keys, the two
+  §5.5 limits, and value coercion per kind. `capability_store.py` stores it.
+- [x] **Two new tables** — `device_capabilities` and `capability_state`. `value` is
+  JSON text because a typed value cannot fit `Relay.is_on`, which is a `Boolean`
+  (Appendix B named that the most load-bearing assumption in the codebase).
+  `Device` gained `proto`/`model`/`fw`/`report_every`. Migration verified against a
+  database created before the columns existed.
+- [x] **Protocol-1 shim** — a device that sends no `proto` gets a 3-switch
+  descriptor synthesised for it, so the rest of the stack sees only v2 shapes.
+  **No firmware change was needed**; the ESP32 still speaks protocol 1.
+- [x] **Both representations written in parallel** (`Relay.is_on` *and*
+  `capability_state`) so the server could move without the app, Maya or the
+  firmware changing in the same commit. Step 2 removes the duplication.
+- [x] `GET /api/devices/{id}/capabilities` + `POST /api/devices/{id}/capability`
+  (§6.2 `set`, validated against the declaration before anything is sent).
+- [x] `agent:"deny"` filtering built into `descriptor_payload(for_agent=True)` now,
+  not left for step 3 — §5.4 warns it must land with the generic tool, not after.
+- [x] Fixed three pre-existing bugs the tests exposed in the command path: a v2 ack
+  switched relays off via `ch1` defaults; an error ack matched no branch so the
+  caller waited the full 5s timeout; `wait_for_ack` registered its future after the
+  send, so a fast device's ack could be dropped.
+- [ ] **Step 2** — app renders from the descriptor. Needs per-capability permissions
+  (`Permission` keys on `relay_id` today) and capability renaming to replace the
+  `Relay.name` override.
+- [ ] **Step 3** — Maya's six tools become one `set_capability`, honouring `confirm`.
+- [ ] **Step 4** — extract the Arduino library. **Step 5** — peering (§7).
+  **Step 6** — device to Maya (§8).
+- [ ] `report_every` is stored but unread: §5.8 redefines `status` as "reported
+  within its expected interval", which touches `ConnectionManager`, the device list
+  endpoint and Maya's house context.
+- [ ] `history:true` is stored; no time series is retained, so no sparkline yet.
+
 ### Child data collection (DONE — 2026-07-07)
 - [x] GPS location on the child device (foreground-only while app is open; `geolocator`, 3-min timer in `child_shell.dart`). Parent sees last-known location + "Open in Maps".
 - [x] Screen-time / app-usage tracking (Android UsageStats via `maya/usage` MethodChannel in `MainActivity.kt`; needs the special Usage Access grant in Settings). Daily totals upserted to `screen_time`.

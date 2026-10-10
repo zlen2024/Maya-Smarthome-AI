@@ -100,11 +100,13 @@ Two scripts, no test runner — run them directly:
 ```powershell
 uv run python test_screen_limit.py   # screen-time alert fires once per day
 uv run python test_security.py       # abuse limits, PIN rules, the join -> child-location chain
+uv run python test_descriptor.py     # protocol 2: descriptors stored, protocol 1 shimmed
 ```
 
-`test_security.py` boots the app against a throwaway SQLite file and replays the
-attack chain the limits exist to stop. It needs `httpx<0.28` (Starlette 0.36's
-TestClient is not compatible with newer httpx):
+`test_security.py` and `test_descriptor.py` boot the app against a throwaway
+SQLite file — one replays the attack chain the limits exist to stop, the other
+plays a protocol-1 and a protocol-2 device against the WebSocket. Both need
+`httpx<0.28` (Starlette 0.36's TestClient is not compatible with newer httpx):
 
 ```powershell
 uv pip install "httpx==0.27.2"

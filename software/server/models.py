@@ -99,9 +99,25 @@ class Device(Base):
     price = Column(Float, default=0.0)
     blocked = Column(Boolean, default=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    # ─ Protocol 2 (PROTOCOL.md §4-§5) ─
+    # What the device said about itself at identify. `proto` 1 means it said
+    # nothing and the server synthesised a 3-switch descriptor on its behalf, so
+    # every device has a descriptor whether or not its firmware knows the word.
+    proto = Column(Integer, default=1)
+    model = Column(String, nullable=True)       # e.g. "smart_extension_3ch"
+    fw = Column(String, nullable=True)          # firmware version string
+    # Seconds the device intends to wait between reports. Null for a device that
+    # holds a socket open; set by sleepy devices so the server can tell one that
+    # is napping on schedule from one that has died (§5.8).
+    report_every = Column(Integer, nullable=True)
 
     house = relationship("House", back_populates="devices")
     extensions = relationship("SmartExtension", back_populates="device", cascade="all, delete-orphan")
+    capabilities = relationship("DeviceCapability", back_populates="device",
+                                cascade="all, delete-orphan",
+                                order_by="DeviceCapability.position")
+    capability_states = relationship("CapabilityState", back_populates="device",
+                                     cascade="all, delete-orphan")
 
 
 class SmartExtension(Base):
@@ -114,6 +130,71 @@ class SmartExtension(Base):
 
     device = relationship("Device", back_populates="extensions")
     relays = relationship("Relay", back_populates="extension", cascade="all, delete-orphan")
+
+
+class DeviceCapability(Base):
+    """One capability a device declared about itself (PROTOCOL.md §5.1).
+
+    This table is what makes new hardware possible without a server change: the
+    server stores what arrives instead of knowing device types in advance. It
+    replaces nothing yet — `Relay` still drives today's three toggles — but a
+    protocol-1 device gets three shimmed rows here too, so there is one shape to
+    read for every device.
+
+    Rows are rewritten wholesale on each identify: the firmware is the authority
+    on what a device *can* do, and a capability that disappears from a new
+    firmware build must disappear here.
+    """
+    __tablename__ = "device_capabilities"
+    __table_args__ = (
+        UniqueConstraint("device_id", "key", name="_device_capability_uc"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(String, ForeignKey("devices.device_id"), nullable=False, index=True)
+    key = Column(String(24), nullable=False)        # §5.1 [a-z0-9_], the permission + history key
+    kind = Column(String, nullable=False)           # §5.2, closed set of ten
+    label = Column(String, nullable=False)
+    access = Column(String, default="rw")           # rw | r | w
+    unit = Column(String, nullable=True)            # display suffix only, never parsed
+    group = Column(String, nullable=True)
+    # JSON array for enum options. A child table for a dropdown's choices would
+    # be three joins to render one widget.
+    options = Column(String, nullable=True)
+    min = Column(Float, nullable=True)
+    max = Column(Float, nullable=True)
+    step = Column(Float, nullable=True)
+    history = Column(Boolean, default=False)
+    agent = Column(String, default="allow")         # §5.4 — allow | deny, unknown means deny
+    confirm = Column(Boolean, default=False)
+    position = Column(Integer, default=0)           # declaration order, which is display order
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    device = relationship("Device", back_populates="capabilities")
+
+
+class CapabilityState(Base):
+    """The current value of one capability.
+
+    Appendix B named `Relay.is_on` as the single most load-bearing assumption in
+    the codebase: it is a `Boolean`, so a number, a string or a colour cannot be
+    stored in it at all. Hence a separate table, and hence `value` being JSON
+    text rather than a typed column — one column holds `"on"`, `27.5`, `"#ff8800"`
+    or `{"lat":…,"lng":…}`, and `descriptor.coerce_value` has already guaranteed
+    the shape matches the capability's kind before it is written.
+    """
+    __tablename__ = "capability_state"
+    __table_args__ = (
+        UniqueConstraint("device_id", "key", name="_capability_state_uc"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    device_id = Column(String, ForeignKey("devices.device_id"), nullable=False, index=True)
+    key = Column(String(24), nullable=False)
+    value = Column(String, nullable=True)           # JSON-encoded, typed per kind
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    device = relationship("Device", back_populates="capability_states")
 
 
 class Relay(Base):

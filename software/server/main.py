@@ -17,6 +17,7 @@ from models import (
     Relay, Permission, MsgHistory, Heartbeat, AccountHouse, Homework, ScreenTime, Order
 )
 from models import ApiKey, ActivityLog, Mention
+from models import DeviceCapability, CapabilityState
 from auth import (
     hash_password, verify_password, create_access_token, get_current_user,
     get_current_user_or_child, get_api_key_house, hash_api_key,
@@ -26,6 +27,9 @@ import secrets
 
 import ai
 from ratelimit import RateLimit, FailureLock, client_ip
+import capability_store
+from descriptor import (PROTO_MAX, DescriptorError, coerce_value, parse_identify,
+                        v1_state)
 from validators import normalize_device_pin, normalize_child_pin
 
 import mimetypes
@@ -83,6 +87,26 @@ def run_migrations():
         if 'pin' not in device_cols:
             db.execute(text("ALTER TABLE devices ADD COLUMN pin TEXT DEFAULT '0000'"))
             db.commit()
+
+        # Protocol 2 (PROTOCOL.md §5): what the device said about itself. Existing
+        # rows get proto=1, which is exactly right — they predate the protocol
+        # and are served by the shim.
+        for col, ddl in (
+            ('proto', 'ALTER TABLE devices ADD COLUMN proto INTEGER DEFAULT 1'),
+            ('model', 'ALTER TABLE devices ADD COLUMN model TEXT'),
+            ('fw', 'ALTER TABLE devices ADD COLUMN fw TEXT'),
+            ('report_every', 'ALTER TABLE devices ADD COLUMN report_every INTEGER'),
+        ):
+            if col not in device_cols:
+                db.execute(text(ddl))
+                db.commit()
+
+        # The capability tables themselves. create_all() at import already makes
+        # them on a fresh database; this covers an existing one.
+        for table in ('device_capabilities', 'capability_state'):
+            if table not in inspector.get_table_names():
+                {'device_capabilities': DeviceCapability,
+                 'capability_state': CapabilityState}[table].__table__.create(bind=engine)
 
         # Add location/screen-limit columns to children if missing
         child_cols = [c['name'] for c in inspector.get_columns('children')]
@@ -229,9 +253,28 @@ class ConnectionManager:
             self.device_info[device_id] = {}
         self.device_info[device_id].update(kwargs)
 
-    async def wait_for_ack(self, device_id: str, timeout: float = 5.0) -> dict | None:
-        future = asyncio.Future()
+    def arm_ack(self, device_id: str) -> asyncio.Future:
+        """Register the ack slot BEFORE the command is sent.
+
+        A device on the same LAN can ack inside a millisecond — before the task
+        that sent the command is scheduled again. A future registered after the
+        send would miss that ack entirely, and the caller would then sit through
+        the whole 5-second timeout waiting for an answer that had already
+        arrived. Arming first removes the race rather than narrowing it.
+        """
+        future = asyncio.get_running_loop().create_future()
         self.pending_commands[device_id] = future
+        return future
+
+    def disarm_ack(self, device_id: str) -> None:
+        self.pending_commands.pop(device_id, None)
+
+    async def wait_for_ack(self, device_id: str, timeout: float = 5.0,
+                           future: asyncio.Future | None = None) -> dict | None:
+        if future is None:
+            # No slot was armed: keep the old behaviour for any caller that still
+            # sends first and asks afterwards.
+            future = self.pending_commands.get(device_id) or self.arm_ack(device_id)
         try:
             result = await asyncio.wait_for(future, timeout=timeout)
             return result
@@ -1391,6 +1434,103 @@ async def get_device_status(device_id: str, db: Session = Depends(get_db), curre
     }
 
 
+def _capability_label_overrides(db: Session, device: Device) -> dict[str, str]:
+    """The house's own names for the three channels.
+
+    §5.1 gives the app's label precedence over the firmware's. Today a member
+    renames a channel through `Relay.name`, so those names are mapped onto the
+    `ch1`/`ch2`/`ch3` capability keys here. When step 2 lets a member rename any
+    capability, this is the function that grows a second source.
+    """
+    ext = db.query(SmartExtension).filter(SmartExtension.device_id == device.device_id).first()
+    if not ext:
+        return {}
+    out = {}
+    for relay in db.query(Relay).filter(Relay.se_id == ext.se_id).all():
+        if relay.name and relay.channel_number in (1, 2, 3):
+            out[f"ch{relay.channel_number}"] = relay.name
+    return out
+
+
+def _device_in_house_or_404(db: Session, device_id: str, house_id) -> Device:
+    device = db.query(Device).filter(Device.device_id == device_id).first()
+    if not device:
+        raise HTTPException(status_code=404, detail="Device not found")
+    if device.house_id != house_id:
+        raise HTTPException(status_code=403, detail="Device does not belong to your house")
+    return device
+
+
+@app.get("/api/devices/{device_id}/capabilities")
+async def get_device_capabilities(device_id: str, db: Session = Depends(get_db),
+                                  current_auth: dict = Depends(get_current_user_or_child)):
+    """What this device says it can do, and its current values (PROTOCOL.md §5).
+
+    Every device has an answer here: one that declared nothing is served the
+    three switches the server synthesised for it, so a caller never has to know
+    which protocol the firmware speaks.
+    """
+    device = _device_in_house_or_404(db, device_id, current_auth["house_id"])
+    payload = capability_store.descriptor_payload(
+        db, device, label_overrides=_capability_label_overrides(db, device))
+    return {"device_id": device_id, "name": device.name,
+            "blocked": bool(device.blocked), "status": device.status, **payload}
+
+
+@app.post("/api/devices/{device_id}/capability")
+async def set_device_capability(device_id: str, payload: dict,
+                                db: Session = Depends(get_db),
+                                current_auth: dict = Depends(get_current_user_or_child)):
+    """Set capabilities by key: {"values": {"ch1": "on", "speed": 60}} (§6.2).
+
+    The generic replacement for `POST /command`, which stays for the app, the
+    Open API and Maya until steps 2 and 3 move them over.
+    """
+    device = _device_in_house_or_404(db, device_id, current_auth["house_id"])
+    if device.blocked:
+        return {"status": "blocked", "device_id": device_id}
+
+    values = payload.get("values")
+    if not isinstance(values, dict) or not values:
+        raise HTTPException(status_code=400, detail="values object required")
+
+    if current_auth["role"] == "child":
+        # Permissions are per relay channel today, so a child is held to exactly
+        # the rights they already have: the three channel keys go through the
+        # same check as a manual tap, and anything else is refused outright
+        # rather than silently allowed. Per-capability permissions need the
+        # `Permission` table to key on a capability instead of a relay — a
+        # schema change that belongs with the app work in step 2.
+        for key in values:
+            if key not in ("ch1", "ch2", "ch3"):
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Children cannot set {key} yet — only the relay channels")
+            channel = int(key[-1])
+            denial = _child_command_denial(db, current_auth["child"].child_id,
+                                           device_id, "on", channel)
+            if denial:
+                raise HTTPException(status_code=403, detail=denial)
+
+    result = await _dispatch_set(db, device_id, values)
+    if result.get("status") == "ok":
+        db.commit()          # _dispatch_set merged nothing, but the ack handler may have
+        if current_auth["type"] == "child":
+            actor_type, actor_id, actor_name = ("child", current_auth["child"].child_id,
+                                                current_auth["child"].name)
+        else:
+            actor_type, actor_id, actor_name = ("parent", current_auth["user"].acc_id,
+                                                current_auth["user"].name)
+        labels = {c.key: c.label for c in capability_store.load_capabilities(db, device_id)}
+        overrides = _capability_label_overrides(db, device)
+        described = ", ".join(
+            f'"{overrides.get(k, labels.get(k, k))}" to {v}' for k, v in values.items())
+        log_activity(db, device.house_id, actor_type, actor_id, actor_name,
+                     "device_switch", f"{actor_name} set {described} on {device.name}")
+        db.commit()
+    return result
+
+
 @app.post("/api/devices/{device_id}/block")
 async def block_device(device_id: str, payload: dict, db: Session = Depends(get_db),
                        current_user: Account = Depends(get_current_user)):
@@ -1473,15 +1613,76 @@ def _child_command_denial(db: Session, child_id: int, device_id: str, cmd: str, 
 _FIRMWARE_CMD = {"on": "output_on", "off": "output_off"}
 
 
+_req_counter = 0
+
+
+def _next_req() -> str:
+    """Correlation id for a v2 command (§6.2). Acks are still matched per device
+    by `ConnectionManager.pending_commands` — one outstanding command each — so
+    `req` is a cross-check that the ack belongs to the command we are waiting on,
+    not the keying mechanism."""
+    global _req_counter
+    _req_counter += 1
+    return f"c-{_req_counter}"
+
+
+async def _dispatch_set(db: Session, device_id: str, values: dict) -> dict:
+    """Set one or more capabilities on a protocol-2 device (§6.2).
+
+    Values are validated against what the device declared at identify time
+    before anything is sent, so a bad value is a 400 from us rather than a
+    `bad_value` ack after a round trip. The reply carries the device's own state
+    echo, which is what the caller should believe over what it asked for.
+    """
+    caps = {c.key: c for c in capability_store.load_capabilities(db, device_id)}
+    if not caps:
+        return {"status": "unsupported", "device_id": device_id,
+                "detail": "device has no declared capabilities"}
+
+    resolved = {}
+    for key, raw in values.items():
+        cap = caps.get(key)
+        if cap is None:
+            return {"status": "unknown_capability", "device_id": device_id, "key": key}
+        if not cap.writable:
+            return {"status": "not_permitted", "device_id": device_id, "key": key,
+                    "detail": f"{key} is read-only"}
+        try:
+            resolved[key] = coerce_value(cap, raw)
+        except ValueError as e:
+            return {"status": "bad_value", "device_id": device_id, "key": key,
+                    "detail": str(e)}
+
+    req = _next_req()
+    payload = json.dumps({"id": device_id, "type": "set", "req": req, "values": resolved})
+    waiter = manager.arm_ack(device_id)
+    if not await manager.send_personal_message(payload, device_id):
+        manager.disarm_ack(device_id)
+        return {"status": "not_connected", "device_id": device_id}
+    ack = await manager.wait_for_ack(device_id, timeout=5.0, future=waiter)
+    if not ack:
+        return {"status": "timeout", "device_id": device_id}
+    if ack.get("req") and ack.get("req") != req:
+        # An ack for a command that is not this one. Treat it as a failure rather
+        # than reporting someone else's success.
+        return {"status": "busy", "device_id": device_id}
+    status = ack.get("status", "ok")
+    echoed = ack.get("state") if isinstance(ack.get("state"), dict) else {}
+    return {"status": status, "device_id": device_id,
+            "state": echoed or ({} if status != "ok" else resolved)}
+
+
 async def _dispatch_command(device_id: str, cmd: str, channel: int) -> dict:
     """Send a relay command to a connected device and wait for its ack.
     Shared by the JWT command endpoint, the Open API, and Maya."""
     cmd = _FIRMWARE_CMD.get(cmd, cmd)
     cmd_payload = json.dumps({"id": device_id, "cmd": cmd, "channel": channel})
+    waiter = manager.arm_ack(device_id)
     success = await manager.send_personal_message(cmd_payload, device_id)
     if not success:
+        manager.disarm_ack(device_id)
         return {"status": "not_connected", "device_id": device_id}
-    ack = await manager.wait_for_ack(device_id, timeout=5.0)
+    ack = await manager.wait_for_ack(device_id, timeout=5.0, future=waiter)
     if ack:
         return {"status": "ok", "device_id": device_id, **{k: ack.get(k) for k in ("ch1", "ch2", "ch3") if k in ack}}
     return {"status": "timeout", "device_id": device_id}
@@ -2220,6 +2421,38 @@ async def get_all_data(db: Session = Depends(get_db), current_user: Account = De
 
 # ─── WebSocket Handler ────────────────────────────────────────
 
+def _mirror_channels_to_relays(db: Session, device_id: str, state: dict) -> None:
+    """Keep `Relay.is_on` in step with the `ch1`/`ch2`/`ch3` capability values.
+
+    Step 1 deliberately runs both representations at once: `Relay` is what the
+    app and Maya read today, `capability_state` is what they will read after step
+    2. Writing both means neither side has to change in the same commit, which is
+    the whole point of the migration order in §10.
+    """
+    ext = db.query(SmartExtension).filter(SmartExtension.device_id == device_id).first()
+    if not ext:
+        return
+    for channel, key in enumerate(("ch1", "ch2", "ch3"), start=1):
+        if key not in state:
+            continue
+        relay = db.query(Relay).filter(Relay.se_id == ext.se_id,
+                                       Relay.channel_number == channel).first()
+        if relay:
+            relay.is_on = (state[key] == "on")
+
+
+def _record_v1_channels(db: Session, device_id: str, frame: dict) -> None:
+    """Mirror a protocol-1 frame's channels into `capability_state`.
+
+    Identify, heartbeat and ack all carry all three channels (Appendix A). Writing
+    them here is what makes a shimmed device indistinguishable from a v2 one as
+    far as the capability tables are concerned.
+    """
+    values = v1_state(frame)
+    if values:
+        capability_store.merge_state(db, device_id, values)
+
+
 async def _handle_websocket(websocket: WebSocket):
     await manager.connect(websocket)
     try:
@@ -2268,7 +2501,57 @@ async def _handle_websocket(websocket: WebSocket):
                         return
                     manager.identify(websocket, device_id)
 
-                if json_data.get("type") == "heartbeat":
+                    # ─ Protocol 2 (§4, §5) ─
+                    # Store what the device declares about itself, or synthesise
+                    # a 3-switch descriptor for a device that declares nothing,
+                    # so everything downstream sees one shape.
+                    try:
+                        desc = parse_identify(json_data)
+                    except DescriptorError as e:
+                        print(f"Device {device_id} descriptor rejected: {e}")
+                        await websocket.send_text(json.dumps({
+                            "id": device_id, "type": "error", "status": e.code,
+                            "detail": e.detail}))
+                        manager.disconnect(websocket)
+                        await websocket.close(code=1009)
+                        return
+                    capability_store.store_descriptor(db, device_db, desc)
+                    db.commit()
+                    for note in desc.warnings:
+                        print(f"Device {device_id} descriptor: {note}")
+                    await websocket.send_text(json.dumps({
+                        "id": device_id, "type": "welcome",
+                        "proto": desc.proto, "server_proto_max": PROTO_MAX}))
+
+                if json_data.get("type") == "state":
+                    # §6.1 — replaces the ch1/ch2/ch3 heartbeat for v2 devices.
+                    # Partial reports are allowed; the server merges.
+                    caps = capability_store.load_capabilities(db, device_id)
+                    written = capability_store.merge_state(
+                        db, device_id, json_data.get("state") or {}, capabilities=caps)
+                    uptime = json_data.get("uptime_ms", 0)
+                    manager.update_device_info(device_id, uptime_ms=uptime, **{
+                        k: v for k, v in written.items() if k in ("ch1", "ch2", "ch3")})
+                    device_db = db.query(Device).filter(Device.device_id == device_id).first()
+                    if device_db:
+                        device_db.status = "online"
+                    # The channel keys also feed the Relay rows the current app
+                    # reads, so a v2 device that happens to expose ch1..ch3 shows
+                    # up correctly before step 2 lands.
+                    _mirror_channels_to_relays(db, device_id, written)
+                    db.commit()
+                    print(f"State from {device_id}: {written}")
+                    if device_db and device_db.house_id:
+                        await manager.broadcast_to_house(device_db.house_id, {
+                            "type": "device_update",
+                            "device_id": device_id,
+                            "state": written,
+                            "online": True,
+                            "last_heartbeat": datetime.now(timezone.utc).isoformat(),
+                            **{k: v for k, v in written.items() if k in ("ch1", "ch2", "ch3")},
+                        })
+
+                elif json_data.get("type") == "heartbeat":
                     uptime = json_data.get("uptime_ms", 0)
                     ch1 = json_data.get("ch1", "off")
                     ch2 = json_data.get("ch2", "off")
@@ -2279,6 +2562,7 @@ async def _handle_websocket(websocket: WebSocket):
 
                     hb = Heartbeat(device_id=device_id, uptime_ms=uptime, ch1=ch1, ch2=ch2, ch3=ch3)
                     db.add(hb)
+                    _record_v1_channels(db, device_id, json_data)
                     
                     ext = db.query(SmartExtension).filter(SmartExtension.device_id == device_id).first()
                     if ext:
@@ -2312,6 +2596,7 @@ async def _handle_websocket(websocket: WebSocket):
 
                     hb = Heartbeat(device_id=device_id, ip_address=ip, ch1=ch1, ch2=ch2, ch3=ch3)
                     db.add(hb)
+                    _record_v1_channels(db, device_id, json_data)
 
                     device_db = db.query(Device).filter(Device.device_id == device_id).first()
                     if not device_db:
@@ -2358,41 +2643,74 @@ async def _handle_websocket(websocket: WebSocket):
                     else:
                         print(f"Command intended for self?: {json_data}")
 
-                elif json_data.get("status") == "ok":
+                elif json_data.get("type") == "ack" or "status" in json_data:
+                    # One branch for every ack shape (§6.1):
+                    #   v1 success — {"status":"ok","ch1","ch2","ch3"}
+                    #   v1 failure — {"status":"invalid_channel"}
+                    #   v2         — {"type":"ack","req","status","state"}
+                    # They are handled together because what differs is which
+                    # payload is attached, not what has to happen: resolve the
+                    # command someone is waiting on, then store whatever state
+                    # arrived. Resolving on a *failure* matters — before this, an
+                    # error ack matched no branch at all, so the caller sat
+                    # through the full 5-second timeout for an answer that had
+                    # already arrived.
                     print(f"Ack from {device_id}: {json_data}")
-                    ch1 = json_data.get("ch1", "off")
-                    ch2 = json_data.get("ch2", "off")
-                    ch3 = json_data.get("ch3", "off")
-
-                    manager.update_device_info(device_id, ch1=ch1, ch2=ch2, ch3=ch3)
                     manager.resolve_ack(device_id, json_data)
 
-                    hb = db.query(Heartbeat).filter(Heartbeat.device_id == device_id).order_by(Heartbeat.timestamp.desc()).first()
-                    if hb:
-                        hb.ch1 = ch1
-                        hb.ch2 = ch2
-                        hb.ch3 = ch3
-                    
-                    ext = db.query(SmartExtension).filter(SmartExtension.device_id == device_id).first()
-                    if ext:
-                        for ch_num, val in [(1, ch1), (2, ch2), (3, ch3)]:
-                            relay = db.query(Relay).filter(Relay.se_id == ext.se_id, Relay.channel_number == ch_num).first()
-                            if relay:
-                                relay.is_on = (val == "on")
-                    db.commit()
-                    print(f"Updated channel states: ch1={ch1} ch2={ch2} ch3={ch3}")
+                    broadcast = {"type": "device_update", "device_id": device_id,
+                                 "online": True}
 
-                    # Broadcast status update to all mobile clients in the same house
+                    if any(k in json_data for k in ("ch1", "ch2", "ch3")):
+                        # A v1 ack always carries all three channels, which is what
+                        # keeps the whole relay row in sync off a single-channel
+                        # command (Appendix A). Reading them with a default of
+                        # "off" is only safe *because* they are all present — a v2
+                        # ack carries none of them, and defaulting there would
+                        # switch the row off behind the device's back.
+                        ch1 = json_data.get("ch1", "off")
+                        ch2 = json_data.get("ch2", "off")
+                        ch3 = json_data.get("ch3", "off")
+                        manager.update_device_info(device_id, ch1=ch1, ch2=ch2, ch3=ch3)
+                        _record_v1_channels(db, device_id, json_data)
+
+                        hb = db.query(Heartbeat).filter(Heartbeat.device_id == device_id).order_by(Heartbeat.timestamp.desc()).first()
+                        if hb:
+                            hb.ch1 = ch1
+                            hb.ch2 = ch2
+                            hb.ch3 = ch3
+
+                        ext = db.query(SmartExtension).filter(SmartExtension.device_id == device_id).first()
+                        if ext:
+                            for ch_num, val in [(1, ch1), (2, ch2), (3, ch3)]:
+                                relay = db.query(Relay).filter(Relay.se_id == ext.se_id, Relay.channel_number == ch_num).first()
+                                if relay:
+                                    relay.is_on = (val == "on")
+                        print(f"Updated channel states: ch1={ch1} ch2={ch2} ch3={ch3}")
+                        broadcast.update({"ch1": ch1, "ch2": ch2, "ch3": ch3})
+
+                    if isinstance(json_data.get("state"), dict):
+                        # A v2 ack reports typed state for the keys it touched and
+                        # says nothing about the ones it did not (§6.1).
+                        written = capability_store.merge_state(
+                            db, device_id, json_data["state"],
+                            capabilities=capability_store.load_capabilities(db, device_id))
+                        _mirror_channels_to_relays(db, device_id, written)
+                        if written:
+                            broadcast["state"] = written
+                            broadcast.update({k: v for k, v in written.items()
+                                              if k in ("ch1", "ch2", "ch3")})
+                            print(f"Updated capability state: {written}")
+
+                    db.commit()
+
+                    # Broadcast status update to all mobile clients in the same
+                    # house — but only if the ack actually carried state. An error
+                    # ack changes nothing and must not be announced as an update.
                     device_db = db.query(Device).filter(Device.device_id == device_id).first()
-                    if device_db and device_db.house_id:
-                        await manager.broadcast_to_house(device_db.house_id, {
-                            "type": "device_update",
-                            "device_id": device_id,
-                            "ch1": ch1,
-                            "ch2": ch2,
-                            "ch3": ch3,
-                            "online": True,
-                        })
+                    if device_db and device_db.house_id and len(broadcast) > 3:
+                        await manager.broadcast_to_house(device_db.house_id, broadcast)
+
 
             except json.JSONDecodeError:
                 print(f"Failed to parse JSON: {data}")
