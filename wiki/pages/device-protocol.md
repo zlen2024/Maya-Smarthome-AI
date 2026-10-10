@@ -10,7 +10,7 @@ The goal the protocol exists for: a contributor builds new hardware, drops it in
 firmware to app — `ch1`/`ch2`/`ch3` appeared 76 times across 6 files when the
 migration was planned.
 
-## Status: step 1 of 6 (2026-10-10)
+## Status: step 1 of 6 built, spec complete at revision 2.1 (2026-10-10)
 
 §10 defines a six-step migration order. Only the first is implemented.
 
@@ -105,19 +105,64 @@ millisecond — before the sending task was scheduled again — would have its a
 dropped. `arm_ack` now reserves the slot before the send, for both the v1 and v2
 paths.
 
+## Document revision 2.1 — the holes step 1 found
+
+Implementing step 1 turned up eight questions the document did not answer, plus
+one place where it contradicted itself. All were written up on 2026-10-10 (spec
+revision 2.1, `proto` unchanged at 2), because a half-specified protocol is worse
+than an unimplemented one — the next person builds against the gap and the gap
+becomes the contract.
+
+| What was undefined | Now |
+|---|---|
+| What claiming creates, when the server does not yet know what the device is | §4.1 — the device record and nothing else |
+| What a permission *is*, though §5.1 calls `key` "the permission key" | §5.10 — a grant per (child, device, key), governing writes |
+| Where a member's capability name lives, though §5.1 says it wins | §5.11 — house name, else firmware label, else key |
+| What `history:true` promises | §5.12 — on-change sampling, the gap rule, 30 days, 5,000 points |
+| The `status` vocabulary for a sleeping device | §5.8 — `online` / `asleep` / `stale` / `offline`, derived |
+| How the Open API grows capabilities, and per-key scoping | §12 — v1 frozen, v2 is the capability surface |
+| Who enforces `confirm:true` | §5.4 — the server, on evidence from the client |
+| A button press on the wire, a partial `set` failure, an unknown `access` | §6.2, §9, §5.1 |
+
+**The contradiction:** §5.8 declares `_report_every` as the way a sleepy device
+says its interval is adjustable, but §5.3's reserved-key table never listed it —
+so `descriptor.py`, which implements §5.3 strictly, dropped the capability
+silently. The table now lists it, the code accepts it, and a test covers it. This
+is the failure mode the `_` namespace rule is supposed to prevent, arriving
+through the document rather than through a contributor.
+
+Three of the new rules were small enough to implement in the same pass, because
+they constrain code step 1 had just written and leaving them unimplemented would
+have created the gap immediately:
+
+- `confirm:true` is enforced in `_dispatch_set`, not in the clients. A set
+  touching such a capability without `"confirmed": true` is refused with
+  `not_permitted` and never reaches the device.
+- A failing ack's `failed` key is passed through to the caller.
+- `_report_every` is accepted as a reserved key.
+
+**§4.1 is deliberately not implemented yet.** `register_device` still creates a
+`SmartExtension` and three `Relay` rows for every device, so a salt jar is still
+born with three relays it does not have. §10 assigns the fix to step 2, with the
+permission and label conversions, because all three touch the same tables and
+splitting them would mean converting twice.
+
 ## What a reader will not find
 
-- **Per-capability permissions.** `Permission` still keys on `relay_id`, so a
-  child may set `ch1`/`ch2`/`ch3` through the new endpoint under exactly the
-  rights they already had, and anything else is refused outright. §5.1 calls the
-  capability key "the permission key"; making that true is a schema change that
-  belongs with step 2.
-- **`report_every` doing anything.** It is stored, and nothing reads it yet.
-  §5.8 redefines `status` as "reported within its expected interval" rather than
-  "a socket is open", which reaches `ConnectionManager`, the device list endpoint
-  and Maya's house context — three places, deliberately out of step 1.
-- **History.** `history:true` is stored per capability; no time series is
-  retained. The app's sparkline (§5.1) has nothing to draw yet.
+Specified, not built — each now has a section to build against:
+
+- **Per-capability permissions** (§5.10). `Permission` still keys on `relay_id`,
+  so a child may set `ch1`/`ch2`/`ch3` through the new endpoint under exactly the
+  rights they already had, and anything else is refused outright.
+- **Capability labels** (§5.11). Only `ch1`-`ch3` have house names, read through
+  from `Relay.name`.
+- **`report_every` doing anything** (§5.8). It is stored and nothing reads it, so
+  `status` is still "a socket is open" — the vocabulary exists on paper only. The
+  three call sites are `ConnectionManager`, the device list endpoint and Maya's
+  house context.
+- **History** (§5.12). The flag is stored per capability; no series is retained.
+- **The public API's v2 surface** (§12). `/api/open/v1/*` is unchanged and still
+  speaks three channels through the shim.
 - **Any of §7 or §8** — peering, the local ESP-NOW link, the audit plane, or
   device-to-Maya. Steps 5 and 6.
 

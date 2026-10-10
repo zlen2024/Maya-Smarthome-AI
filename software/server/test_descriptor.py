@@ -96,6 +96,12 @@ def test_descriptor_validation():
     # §5.3: the `_` namespace belongs to the document; others are dropped.
     assert one({"key": "_secret", "kind": "number"}).capabilities == []
     assert one({"key": "_rssi", "kind": "number"}).by_key["_rssi"].key == "_rssi"
+    # `_report_every` is reserved too, and writable — declaring it is how a sleepy
+    # device says its check-in interval is adjustable (§5.8). It was missing from
+    # the reserved set, so the capability was being dropped silently.
+    interval = one({"key": "_report_every", "kind": "duration", "label": "Check in every",
+                    "min": 900, "max": 86400}).by_key["_report_every"]
+    assert interval.writable and interval.min == 900 and interval.max == 86400
 
     # §5.1: keys are validated, not sanitised.
     for bad_key in ("Ch1", "ch-1", "ch 1", "", "x" * 25, 7):
@@ -339,8 +345,9 @@ def test_v2_set_round_trip():
                 {"key": "mode", "kind": "enum", "label": "Mode",
                  "options": ["eco", "normal", "boost"]},
                 {"key": "reset", "kind": "button", "label": "Reset", "agent": "deny"},
+                {"key": "lock", "kind": "switch", "label": "Child lock", "confirm": True},
             ],
-            "state": {"ch1": "off", "speed": 0, "mode": "eco"},
+            "state": {"ch1": "off", "speed": 0, "mode": "eco", "lock": "off"},
         })
         assert ws.receive_json()["proto"] == 2
 
@@ -418,6 +425,40 @@ def test_v2_set_round_trip():
                    json={"values": {"mode": "turbo"}}, headers=tok).json()
         assert r["status"] == "bad_value", r
 
+        # §5.4: a `confirm:true` capability is refused without the evidence that a
+        # human said yes, and the refusal never reaches the device.
+        r = c.post("/api/devices/esp32-fan/capability",
+                   json={"values": {"lock": "on"}}, headers=tok).json()
+        assert r["status"] == "not_permitted" and r.get("needs_confirmation"), r
+
+        # With the flag, the set goes out. Both values are legal by the
+        # declaration, so this exercises a failure the *device* decides on —
+        # §6.2's partial apply, which the server cannot predict.
+        def call_confirmed():
+            result["confirmed"] = c.post(
+                "/api/devices/esp32-fan/capability",
+                json={"values": {"lock": "on", "mode": "boost"}, "confirmed": True},
+                headers=tok)
+
+        caller = threading.Thread(target=call_confirmed)
+        caller.start()
+        try:
+            frame = ws.receive_json()
+            assert frame["values"] == {"lock": "on", "mode": "boost"}, frame
+            # The lock engaged, then the motor refused the mode change.
+            ws.send_json({"id": "esp32-fan", "type": "ack", "req": frame["req"],
+                          "status": "busy", "failed": "mode",
+                          "state": {"lock": "on"}})
+        finally:
+            caller.join(timeout=15)
+        body = result["confirmed"].json()
+        assert body["status"] == "busy" and body["failed"] == "mode", body
+        assert body["state"] == {"lock": "on"}, body
+        # What did apply was stored; what did not kept its old value.
+        got = c.get("/api/devices/esp32-fan/capabilities", headers=tok).json()
+        assert got["state"]["lock"] == "on", got["state"]
+        assert got["state"]["mode"] == "eco", got["state"]
+
         # §5.4: `agent:"deny"` is filtered out before Maya is ever called.
         import capability_store
         from database import SessionLocal
@@ -431,7 +472,8 @@ def test_v2_set_round_trip():
             db.close()
         assert "reset" in {cap["key"] for cap in human["capabilities"]}
         assert "reset" not in {cap["key"] for cap in agent["capabilities"]}
-        assert human["capabilities"][3]["agent"] == "deny"
+        assert {c["key"]: c.get("agent") for c in human["capabilities"]}["reset"] == "deny"
+        assert any(c.get("confirm") for c in human["capabilities"])
     finally:
         _close(ws, session)
     print("  v2 set: `set` frame sent with a req, ack echo believed and stored,")

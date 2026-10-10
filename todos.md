@@ -92,16 +92,44 @@ descriptors; shims protocol 1. Nothing else changes." Status and reasoning:
   switched relays off via `ch1` defaults; an error ack matched no branch so the
   caller waited the full 5s timeout; `wait_for_ack` registered its future after the
   send, so a fast device's ack could be dropped.
+- [x] **Spec revision 2.1 (2026-10-10)** — swept every question step 1 could not
+  answer from the document, so steps 2-6 build against a complete contract:
+  §4.1 claiming creates the device record and nothing else; §5.10 permissions
+  (a grant per child/device/capability key, writes only, new keys denied to
+  children by default, grants die with the capability); §5.11 labels (house name
+  beats firmware label beats key, and a firmware update may never overwrite a
+  name a person chose); §5.12 history (on-change sampling, the gap rule that
+  stops a chart inventing data through an outage, 30 days, 5,000 points);
+  §5.8 the `status` vocabulary (`online`/`asleep`/`stale`/`offline`, derived, and
+  `asleep` MUST NOT read as a fault); §5.4 who enforces `confirm` (the server,
+  on client-supplied evidence; an API key can never supply it); §12 the public
+  API surface (v1 frozen, v2 is the capability surface, per-key scoping, and a
+  list of what a key may never reach); plus §6.2/§9 for a button press, a partial
+  `set` failure and `failed`. `proto` stays 2.
+- [x] **Fixed a contradiction in the spec itself:** §5.8 used `_report_every` as
+  a reserved key but §5.3's table never listed it, so `descriptor.py` dropped the
+  capability silently — making the check-in interval unadjustable on every device
+  that offered it. Table, code and test all updated.
+- [x] Reconciled step-1 code with the new sections where leaving it would have
+  created the gap at once: `confirm:true` enforced in `_dispatch_set` (never in
+  the clients), `failed` passed through to the caller, `_report_every` accepted.
 - [ ] **Step 2** — app renders from the descriptor. Needs per-capability permissions
   (`Permission` keys on `relay_id` today) and capability renaming to replace the
   `Relay.name` override.
 - [ ] **Step 3** — Maya's six tools become one `set_capability`, honouring `confirm`.
 - [ ] **Step 4** — extract the Arduino library. **Step 5** — peering (§7).
   **Step 6** — device to Maya (§8).
-- [ ] `report_every` is stored but unread: §5.8 redefines `status` as "reported
-  within its expected interval", which touches `ConnectionManager`, the device list
+- [ ] `report_every` is stored but unread: the §5.8 `status` vocabulary exists on
+  paper only, and the three call sites are `ConnectionManager`, the device list
   endpoint and Maya's house context.
-- [ ] `history:true` is stored; no time series is retained, so no sparkline yet.
+- [ ] `history:true` is stored; no series is retained (§5.12 now says what to
+  retain), so no sparkline yet.
+- [ ] §4.1 is specified but not implemented: `register_device` still gives every
+  device a `SmartExtension` and three `Relay` rows, so a sensor-only device is
+  born with three relays it does not have. §10 assigns it to step 2 because it
+  touches the same tables as the permission and label conversions.
+- [ ] §12 v2 public API + per-key scoping — also closes the open half of security
+  finding #4.
 
 ### Child data collection (DONE — 2026-07-07)
 - [x] GPS location on the child device (foreground-only while app is open; `geolocator`, 3-min timer in `child_shell.dart`). Parent sees last-known location + "Open in Maps".

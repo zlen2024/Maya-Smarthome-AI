@@ -1484,7 +1484,9 @@ async def set_device_capability(device_id: str, payload: dict,
     """Set capabilities by key: {"values": {"ch1": "on", "speed": 60}} (§6.2).
 
     The generic replacement for `POST /command`, which stays for the app, the
-    Open API and Maya until steps 2 and 3 move them over.
+    Open API and Maya until steps 2 and 3 move them over. A capability declared
+    `confirm:true` also needs `"confirmed": true`, which the client sends only
+    after a human has said yes (§5.4).
     """
     device = _device_in_house_or_404(db, device_id, current_auth["house_id"])
     if device.blocked:
@@ -1512,7 +1514,8 @@ async def set_device_capability(device_id: str, payload: dict,
             if denial:
                 raise HTTPException(status_code=403, detail=denial)
 
-    result = await _dispatch_set(db, device_id, values)
+    result = await _dispatch_set(db, device_id, values,
+                                 confirmed=payload.get("confirmed") is True)
     if result.get("status") == "ok":
         db.commit()          # _dispatch_set merged nothing, but the ack handler may have
         if current_auth["type"] == "child":
@@ -1626,13 +1629,20 @@ def _next_req() -> str:
     return f"c-{_req_counter}"
 
 
-async def _dispatch_set(db: Session, device_id: str, values: dict) -> dict:
+async def _dispatch_set(db: Session, device_id: str, values: dict,
+                        confirmed: bool = False) -> dict:
     """Set one or more capabilities on a protocol-2 device (§6.2).
 
     Values are validated against what the device declared at identify time
     before anything is sent, so a bad value is a 400 from us rather than a
     `bad_value` ack after a round trip. The reply carries the device's own state
     echo, which is what the caller should believe over what it asked for.
+
+    `confirmed` carries the evidence for §5.4's `confirm:true`: a client acting
+    for a present human — the app after its confirm step, or Maya after an
+    explicit yes in the turn she asked. The gate is here rather than in those
+    clients because the same capability is reachable from every caller, and a
+    flag enforced only in clients is enforced nowhere.
     """
     caps = {c.key: c for c in capability_store.load_capabilities(db, device_id)}
     if not caps:
@@ -1647,6 +1657,10 @@ async def _dispatch_set(db: Session, device_id: str, values: dict) -> dict:
         if not cap.writable:
             return {"status": "not_permitted", "device_id": device_id, "key": key,
                     "detail": f"{key} is read-only"}
+        if cap.confirm and not confirmed:
+            return {"status": "not_permitted", "device_id": device_id, "key": key,
+                    "needs_confirmation": True,
+                    "detail": f"{cap.label} needs confirming before it can be set"}
         try:
             resolved[key] = coerce_value(cap, raw)
         except ValueError as e:
@@ -1668,8 +1682,14 @@ async def _dispatch_set(db: Session, device_id: str, values: dict) -> dict:
         return {"status": "busy", "device_id": device_id}
     status = ack.get("status", "ok")
     echoed = ack.get("state") if isinstance(ack.get("state"), dict) else {}
-    return {"status": status, "device_id": device_id,
-            "state": echoed or ({} if status != "ok" else resolved)}
+    out = {"status": status, "device_id": device_id,
+           "state": echoed or ({} if status != "ok" else resolved)}
+    # §6.2: a partial failure names the capability it stopped at, and the state
+    # it reports is what did apply before that. Pass both through — the caller
+    # cannot act on "something went wrong" without knowing which thing.
+    if ack.get("failed"):
+        out["failed"] = ack["failed"]
+    return out
 
 
 async def _dispatch_command(device_id: str, cmd: str, channel: int) -> dict:

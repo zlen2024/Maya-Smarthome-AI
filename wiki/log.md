@@ -144,3 +144,55 @@ which is the whole point of the migration order and is what the test checks.
 Graph: server 289/3727 (was 224/2797), mobile unchanged at 559/4566. Reconciled
 `index.md`, `data-model.md`, `server-backend.md`, `known-gaps.md`, and marked
 step 1 done in `PROTOCOL.md` §10 and Appendix B.
+
+## [2026-10-10] ingest | Spec revision 2.1 — closed every hole step 1 exposed
+
+Step 1 was implementable, but eight decisions had to be made in code that the
+document did not cover, and a ninth where it contradicted itself. Writing those
+choices into comments would have made `descriptor.py` the de facto contract, so
+they went into `PROTOCOL.md` instead: §4.1 claiming, §5.10 permissions, §5.11
+labels, §5.12 history, the §5.8 `status` vocabulary, §12 the public API surface,
+and the smaller interop points in §5.1, §6.2 and §9. The document is now 1,373
+lines; `proto` stays 2, since the only wire change is one optional ack field
+(§11 classes that as free).
+
+**The contradiction is the one worth remembering.** §5.8 declares
+`_report_every` as how a sleepy device says its check-in interval is adjustable;
+§5.3's reserved-key table never listed it. `descriptor.py` implements §5.3
+strictly, so it dropped the capability silently — the interval would have been
+unadjustable on every device that offered it, with no error anywhere. Found by
+re-reading §5.8 before writing the status vocabulary, not by testing.
+
+**Decisions worth noting**, since each had a plausible alternative:
+
+- Permissions are per capability **key**, not per `group`. `group` is free text a
+  firmware build chooses, so a grant stored against it would change meaning on a
+  firmware update — a child granted "Lights" could silently acquire whatever the
+  next build called lights.
+- Reading state is house-wide; only writing is granted. Hiding state makes an app
+  that lies by omission and protects nothing — the child is in the room with the
+  heater.
+- A new capability is **denied to every child** until a parent grants it, so a
+  firmware update can never widen a child's reach.
+- `confirm:true` is enforced **server-side**. §5.4 asked Maya and the app to do
+  it, and a flag enforced only in clients is enforced nowhere: the same
+  capability is reachable from REST and from a third party's key. An API key can
+  never supply the evidence — it is not a person.
+- History's **gap rule** matters more than its retention numbers: a gap shorter
+  than two intervals means nothing changed and draws flat; a longer one means the
+  device went quiet and MUST draw as a break. A flat line through an outage is a
+  chart inventing data.
+- `/api/open/v1/*` is **frozen, not deprecated**. A working integration in
+  someone else's script is not ours to break.
+
+Three rules were implemented in the same pass because they constrain code step 1
+had just written: `confirm` enforcement in `_dispatch_set`, `failed` passed
+through to the caller, and `_report_every` accepted as reserved. §4.1 was
+deliberately left: `register_device` still gives every device three relay rows,
+and §10 assigns that to step 2 alongside the permission and label conversions,
+because converting those tables twice would be the only alternative.
+
+All three server self-checks still pass. Reconciled
+[device protocol](pages/device-protocol.md) with a revision-2.1 section and a
+rewritten "what a reader will not find" — every entry there now names the section
+it can be built against.

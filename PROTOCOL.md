@@ -1,11 +1,17 @@
 # Maya Device Protocol
 
-**Version 2 (draft)** · Status: §10 step 1 implemented 2026-10-10; steps 2-6
-proposed. The server stores descriptors and shims protocol 1; the app, Maya and
+**Version 2 (draft), document revision 2.1** · Status: §10 step 1 implemented
+2026-10-10; steps 2-6 proposed. The server stores descriptors and shims protocol 1; the app, Maya and
 the firmware are untouched and still speak protocol 1. See
 `wiki/pages/device-protocol.md` for what exists versus what is still on paper —
 this file stays the contract either way, and describes the finished protocol, not
 the current build.
+
+Revision 2.1 (2026-10-10) closed the questions step 1 could not answer from the
+document: claiming (§4.1), permissions (§5.10), labels (§5.11), history (§5.12),
+the status vocabulary (§5.8), the public API surface (§12), and the smaller
+interop gaps marked there. `proto` stays **2** — one optional ack field was added
+(§6.2), which §11 classes as a free change.
 Contract between Maya firmware (`hardware/*`, and the Arduino library repo) and
 the Maya backend (`software/server`) + app (`software/mobile`).
 
@@ -91,6 +97,45 @@ server: { "type":"welcome", "proto":2, "server_proto_max":2 }
 - A v2 device MUST also accept the legacy command names, so a v2 device still
   works against a server that has not been upgraded yet.
 
+### 4.1 Claiming, and what the server may assume before identify
+
+A device must be **claimed** by a house before the server will talk to it: the
+owner provisions it over BLE and registers the id, and an unclaimed device that
+dials in is told to factory-reset (Appendix A). Claiming happens *before* the
+first identify, which fixes what the server can possibly know at that moment:
+**a device id, a PIN, and a name the owner typed.** Nothing about the hardware.
+
+**Therefore claiming creates the device record and nothing else.** No channels,
+no sub-entities, no assumed shape. Every structural fact comes from the
+descriptor at identify, because that is the first moment the server knows what
+the device is.
+
+This is not a refinement; it is the rule that makes §1 rule 1 true. The server
+that ships today creates a `SmartExtension` and exactly **three** `Relay` rows
+for every device at registration, whatever it turns out to be — so the salt jar
+of §5.7 is born with three relays it does not have, and a contributor's new
+hardware arrives pre-shaped like a 3-channel extension. A server that guesses at
+claim time cannot host hardware it has never heard of.
+
+Rules:
+
+- Claiming stores the id, the house, the PIN and the owner's name. It MUST NOT
+  create capability, channel or relay records.
+- **The shim's backing rows are created on first identify of a protocol-1
+  device** (§4), not at claim time — that identify is when three channels first
+  become a known fact. A protocol-2 device never gets them, even if it declares
+  `ch1`-`ch3`.
+- Re-claiming an existing id updates the name and PIN and leaves the descriptor
+  alone. The firmware re-declares on its next identify anyway.
+- Who may claim is a house question, not a protocol one: the master or a member
+  they have authorised.
+
+**Migration.** Devices claimed before this rule keep their relay rows; they are
+the shim's backing store until step 2 takes `Relay` off the read path. New claims
+create none. A server implementing this MUST NOT retro-create relay rows to make
+old and new devices look alike — that is the guess this section exists to
+forbid.
+
 ---
 
 ## 5. Capability descriptor
@@ -124,7 +169,10 @@ Sent in the identify frame. This is the heart of v2.
 ```
 
 Top-level descriptor fields: `id`, `proto`, `status` and `pin` are required;
-`ip`, `model`, `fw` and `report_every` are optional. `report_every` (seconds)
+`ip`, `model`, `fw`, `report_every`, `wake_mah` and `batt_mah` are optional. The
+last two are a battery device's energy per wake and its pack capacity, which let
+the app state the cost of a reporting interval instead of guessing at it
+(§5.8). `report_every` (seconds)
 declares how often the device intends to report and is what lets the server tell
 a sleeping device from a dead one — see §5.7 and §5.8.
 
@@ -135,7 +183,7 @@ a sleeping device from a dead one — see §5.7 and §5.8.
 | `key` | yes | Stable id, unique per device. `[a-z0-9_]` up to 24 chars. Never renumber across firmware versions — it is the permission and history key. |
 | `kind` | yes | Drives UI and value type. Table below. |
 | `label` | no | Human name. Defaults to `key`. A house member may rename it; the app's name wins over the firmware's. |
-| `access` | no | `rw` (default), `r` read-only sensor, `w` write-only actuator. |
+| `access` | no | `rw` (default), `r` read-only sensor, `w` write-only actuator. **An unrecognised value MUST be treated as `r`** — the safe reading of a declaration the server cannot parse is the one that does not write to hardware. Same reasoning as `agent` below, and stated because an implementation that guessed `rw` instead would let a peer write a capability this one refuses. |
 | `unit` | no | Display suffix only. Never parsed. |
 | `group` | no | Free-text; the app groups capabilities sharing a value. |
 | `history` | no | `true` asks the server to retain a time series and the app to draw a sparkline. Only meaningful for `number` and `range`. |
@@ -286,10 +334,19 @@ consistently in the device card header without knowing the device type:
 | `_rssi` | `number`, `unit:"dBm"`, `access:"r"` | WiFi signal |
 | `_fw` | `text`, `access:"r"` | Firmware version |
 | `_uptime` | `number`, `unit:"s"`, `access:"r"` | Seconds since boot |
+| `_report_every` | `duration`, `access:"rw"`, with `min`/`max` | Declaring it means "my check-in interval is adjustable" (§5.8) |
 
-The app renders reserved keys as device chrome, not as controls in the main list.
+The app renders reserved keys as device chrome, not as controls in the main list —
+except `_report_every`, which is a setting and renders with the duration picker.
+
 Contributors MUST NOT define new `_`-prefixed keys; that namespace belongs to
-this document.
+this document. **A server MUST drop an unrecognised `_` key** rather than store
+it or reject the device: the capability then simply does not exist, which is the
+fail-closed reading, where refusing the whole descriptor would brick a board over
+a naming slip. The consequence runs the other way too — a key added to this table
+is invisible to any server built before it, so adding one is the same kind of
+change as adding a `kind` (§11) and MUST be planned with the server and app
+alongside it.
 
 ### 5.4 Keeping Maya away from dangerous capabilities
 
@@ -314,6 +371,28 @@ stop), and `confirm:true` on anything merely disruptive.
 Servers MUST treat an unrecognised `agent` value as `deny`. Failing closed is the
 right default for a safety flag: a typo should hide a capability, never expose a
 dangerous one.
+
+#### Who enforces `confirm`
+
+"Maya must ask the user" and "the app shows a confirm step" are both *client*
+behaviour, and a flag enforced only in clients is enforced nowhere: the same
+capability is reachable from the REST API and from a third party's API key. So
+the gate is in the server, and the clients' job is to produce the evidence for
+it:
+
+- A `set` touching a `confirm:true` capability MUST carry `"confirmed": true`,
+  and a server MUST refuse one that does not, with `not_permitted`.
+- Only a client acting for a present human may send that flag: the app sets it
+  after the user taps through the confirm step, and Maya sets it only after an
+  explicit yes **in the turn she asked for it**, never inferred from a general
+  instruction given earlier.
+- **An API key is not a human.** A `confirm:true` capability MUST be refused on
+  the public API (§12) whatever flags the request carries. A third-party
+  integration that needs it is asking for a human's consent to be delegated to a
+  script, which is the thing the flag exists to prevent.
+- `confirm` and `agent` are independent and both apply. `agent:"deny"` hides a
+  capability from Maya entirely; `confirm:true` lets her reach it only with a
+  yes.
 
 ### 5.5 Limits
 
@@ -609,6 +688,34 @@ perfectly healthy having said nothing for 50 minutes.
 This reaches `ConnectionManager`, the device list endpoint, and Maya's house
 context — all three currently equate liveness with an open connection.
 
+**The vocabulary.** Prose is not enough here: three call sites and the app have
+to agree on the same words, so `status` is exactly one of four values, derived
+and never stored as an opinion:
+
+| `status` | Derivation | What it means to a person |
+|---|---|---|
+| `online` | A live socket, **or** a check-in within `report_every` | Here now |
+| `asleep` | No socket, `report_every` declared, last report within `2 × report_every` | Fine — napping on schedule |
+| `stale` | No socket, `report_every` declared, last report older than `2 × report_every` | Should have reported and has not |
+| `offline` | No socket and no `report_every` declared | Should be connected and is not |
+
+Two intervals of tolerance is the minimum, not a target: one missed wake is a
+weak WiFi moment, not a fault.
+
+- **`asleep` is healthy and MUST NOT be presented as a problem.** A jar on an
+  hourly schedule that said nothing for 50 minutes is working perfectly, and an
+  app that greys it out teaches the owner to ignore the only signal that matters.
+- **`stale` is the one worth a person's attention** — flat battery, out of range,
+  crashed between wakes. The app SHOULD show when it was last heard from, because
+  "4 hours ago on an hourly schedule" and "4 hours ago on a daily one" are
+  different situations.
+- Maya MUST distinguish them in words. "The jar is asleep, it last reported 20
+  minutes ago" is true; "the jar is offline" is not.
+- A `set` to a device with no socket still answers `not_connected` immediately
+  (§9) — except for a device with `report_every`, where the server queues it and
+  answers that it is pending delivery at the next check-in. The caller is told
+  which of the two happened; it is never left to assume.
+
 #### Why the server can never simply reach out
 
 Worth stating once, because it is the constraint every option above is shaped by:
@@ -771,6 +878,138 @@ association — ESP-NOW reaches hundreds of metres line-of-sight at low rates,
 which suits a field probe — or worse, if the hub sits in a cupboard. Hub
 placement is a real deployment decision, not an afterthought.
 
+### 5.10 Permissions: who may address a capability
+
+§5.1 calls `key` "the permission key" and §1 rule 5 makes the server the
+authority on permission, but nothing so far says what a permission *is*. It is
+this:
+
+**A grant is a row per (child, device, capability key), and it governs writing.**
+
+The unit is the key because the key is the only stable identifier a device
+promises never to renumber. Two things follow that are worth stating, because the
+obvious alternatives are both wrong:
+
+- **Not per `group`.** `group` is free text a firmware build chooses, so a grant
+  stored against it would change meaning on a firmware update — a child granted
+  "Lights" could silently acquire whatever the next build decided to call
+  lights. The app MAY offer "grant the whole group" as a convenience; what it
+  stores is still one row per key.
+- **Not per device.** "This child may use the fan" is not the same as "this child
+  may set the fan's `reset` button".
+
+#### Defaults, and what happens when a descriptor changes
+
+- **A capability the server has not seen before is denied to every child.** A
+  firmware update MUST NOT be able to widen what a child can reach. The parent
+  grants it, or it stays shut.
+- **Adults are not gated per capability.** Any adult member of the house may
+  address any capability of any device in it, as today. A second adult tier is a
+  real question — it is the same question as who may see a child's location — but
+  it is a *role* design, not a capability one, and inventing half of it here
+  would produce two half-models.
+- **When a capability leaves the descriptor, its grants are deleted with it**,
+  exactly as its stored state is. If the key comes back in a later build it comes
+  back denied. §5.1 makes "never renumber a key" a firmware MUST; this is the
+  server's protection against firmware that breaks it, and it fails in the safe
+  direction.
+
+#### Reading is house-wide; only writing is granted
+
+A child who may not switch the heater may still see that it is on.
+
+This is deliberate. Hiding state produces an app that lies by omission, and it
+protects nothing: the child is standing in the room with the heater. The
+exception needs no rule — `access:"w"` has no state to read, so for a write-only
+capability the grant is the only gate there is.
+
+If a capability ever genuinely needs a hidden value, that is a new **field**, not
+a change to this rule (§5.1: kinds are expensive, fields are free).
+
+#### How it composes with the other two gates
+
+Three independent checks, all of which must pass, and none of which substitutes
+for another:
+
+| Gate | Asks | Defined in |
+|---|---|---|
+| `agent` | May a model address this at all? | §5.4 |
+| `confirm` | Has a human just said yes? | §5.4 |
+| Grant | Is this child allowed to write this key? | here |
+
+Maya acting for a child needs all three: the capability not denied to agents, a
+confirmation if the capability asks for one, and the child's own grant. That is
+the shape the server already has for relay channels — the permission is checked
+in the tool implementation, not described to the model — and §5.4 is explicit
+that this must not regress into prompt instructions.
+
+**Migration.** Existing per-relay permissions map one-to-one onto keys `ch1`,
+`ch2`, `ch3` of the relay's device, which is a mechanical conversion and should
+be done as one, with the old table dropped in the same change rather than left as
+a second source of truth.
+
+### 5.11 Labels: who owns a capability's name
+
+§5.1 says a house member may rename a capability and that their name wins over
+the firmware's. Spelling that out, because precedence is the whole of it:
+
+**House name, else the firmware's `label`, else the `key`.**
+
+- The house name is stored per `(device, key)` on the server and set by a member
+  with the right to manage devices — the same right that renames a channel today.
+- **A firmware update MUST NOT overwrite it.** Someone named that socket
+  "Television" on purpose; a new build is not a reason to call it "Channel 1"
+  again. This is the one place where the descriptor is *not* the authority, and
+  the reason is that the name is the only part of a capability that belongs to
+  the household rather than to the hardware.
+- Clearing the house name falls back to the firmware's label. There is no third
+  state and no "reset to default" flag — clearing *is* the reset.
+- Renaming never touches the key. Grants and history survive a rename, which is
+  the point of keeping them keyed on `key`.
+- **Migration.** Existing `Relay.name` values become the house names for `ch1`,
+  `ch2` and `ch3`. Until step 2, a server MAY read them through directly; after
+  it, they are ordinary label rows.
+
+### 5.12 History: what `history:true` costs
+
+§5.1 lets a capability ask the server to retain a time series, and §5.7 leans on
+it — "falling fast" and "flat since Tuesday" are the two facts that make a salt
+jar worth having. What it never said is what the server promises, which left the
+flag meaning nothing in particular.
+
+The constraint is concrete and should be stated before the rules: one SQLite file
+on one small instance. A 1 Hz sensor stored naively is about 2.6 million rows a
+month, so retention is bounded in three ways at once.
+
+**Sampling — on change, at most one point per minute.** No point is written when
+the value has not changed. A series is therefore a list of changes, not a tick
+log.
+
+**The gap rule, which is what makes that safe to draw:**
+
+- A gap shorter than `2 × report_every` (or, for a socket device, than two missed
+  heartbeats) means *nothing changed*. The app draws it as a flat segment, which
+  is the truth.
+- A longer gap means *the device was not reporting*. The app MUST draw a break,
+  not a flat line. A flat line through an outage is a graph that invents data,
+  and it is exactly how someone concludes a tank was full all weekend when the
+  sensor was dead.
+
+**Retention — 30 days, and at most 5,000 points per capability**, oldest dropped
+first, trimmed on a daily sweep. A chattering device loses its own old data and
+nobody else's.
+
+**Reading** — `GET` by device and key with a `since`, returning `[[ts, value], …]`
+oldest first, at most 1,000 points, **decimated server-side** when the window
+holds more. A sparkline cannot show more than that and a phone should not parse
+it.
+
+Only `number` and `range` can carry history (§5.1). On any other kind the flag is
+ignored rather than refused — a device that sets it on a `switch` is confused, not
+broken.
+
+---
+
 ## 6. Control-plane messages
 
 ### 6.1 Device to server
@@ -810,6 +1049,40 @@ Multiple capabilities in one frame apply atomically where the hardware allows it
 otherwise apply in order and report the first failure. `req` MUST be echoed in
 the ack. Also defined: `{"type":"get_status"}`, `{"type":"reboot"}`,
 `{"type":"factory_reset"}` — same semantics as their v1 `cmd` equivalents.
+
+**Pressing a button.** A `button` has no state, so there is no value to send and
+none to read back: the press is `null`.
+
+```json
+{"id":"esp32-...", "type":"set", "req":"c-9", "values":{"horn":null}}
+```
+
+The ack omits the button from its `state` — there is nothing to report — and a
+device MUST NOT invent one. A button in a *state* report is ignored (§6.1).
+
+**When part of a multi-key set fails.** The device stops at the first failure and
+says exactly what happened:
+
+```json
+{"id":"esp32-...", "type":"ack", "req":"c-9", "status":"bad_value",
+ "failed":"speed", "state":{"ch1":"on"}}
+```
+
+- `status` is the failing capability's error code (§9), `failed` names it, and
+  `state` carries **what did apply before the failure** — here `ch1` went on and
+  `speed` was refused.
+- **There is no rollback.** A device cannot generally un-ring a bell or un-open a
+  valve, and a protocol that pretended otherwise would have devices lying about
+  physical state. Reporting precisely how far it got is more useful than a clean
+  story that is false.
+- A caller that needs all-or-nothing must ask for one capability at a time. The
+  atomic case is a hardware property, not a promise this protocol can make.
+
+**One command at a time per device.** The server MUST NOT have two commands
+outstanding to the same device: it sends, waits for the ack or the 5 s timeout,
+then sends the next. `req` is therefore a cross-check that an ack belongs to the
+command being awaited, not a multiplexing key — a library author should not build
+pipelining against it, and a device need keep only one `req` in memory.
 
 ---
 
@@ -925,8 +1198,20 @@ Ack `status` values: `ok`, `unknown_capability`, `bad_value`, `not_permitted`,
 `busy`, `unsupported`, `descriptor_too_large`. Anything unrecognised MUST be
 treated as a generic failure, never as success.
 
-Server-side outcomes on the control plane are unchanged: `not_connected` when the
-device has no live socket, `timeout` when no ack arrives within 5 s.
+A failing ack MAY carry `failed` — the capability key the status refers to — and
+`state` for whatever did apply before it stopped (§6.2). Both are optional
+additions to the ack shape and are the only wire change in document revision 2.1.
+
+**An error ack is still an ack.** A server MUST match it to the outstanding
+command and answer the caller with it. Letting a failure fall through to the 5 s
+timeout turns a precise answer that already arrived into a vague one that did
+not.
+
+Server-side outcomes on the control plane: `not_connected` when the device has no
+live socket, `timeout` when no ack arrives within 5 s, and `pending` when the
+device declares `report_every` and the command was queued for its next check-in
+(§5.8). A caller is always told which of the three it got, never left to assume
+that silence meant delivery.
 
 ---
 
@@ -944,7 +1229,12 @@ on its own and none of them breaks what is already deployed:
    — **done 2026-10-10** (`descriptor.py`, `capability_store.py`, the
    `device_capabilities` + `capability_state` tables, and two endpoints;
    `test_descriptor.py` plays both a v1 and a v2 device against the real app).
-2. App renders from the descriptor instead of three hardcoded toggles.
+2. App renders from the descriptor instead of three hardcoded toggles. This is
+   where §5.10 (permissions), §5.11 (labels) and §4.1 (claiming creates nothing
+   but the device) land: the app cannot render from the descriptor while the
+   permission model, the names and the claim shape all still assume three
+   relays. The old per-relay permission table and `Relay.name` are converted in
+   the same change, not left beside the new ones.
 3. Maya swaps its six fixed tools for a generic `set_capability`, driven by the
    descriptors already in its house context — filtering `agent:"deny"` and
    honouring `confirm` (§5.4) **in the same change**, not as a follow-up.
@@ -952,6 +1242,13 @@ on its own and none of them breaks what is already deployed:
    protocol, so it is thin and stable.
 5. Peering: grants, local link, audit.
 6. Device to Maya.
+
+Two pieces of this document sit outside that order because they depend on it
+rather than on each other: **§5.12 (history)** needs step 2 to have somewhere to
+draw a sparkline, and **§12 (the public API v2)** needs step 2's descriptor
+surface to expose. Neither blocks anything; both are worth doing before the
+first outside integration, because a frozen v1 is only kind to third parties if
+there is a v2 to move to.
 
 ## 11. Versioning rules for the library repo
 
@@ -967,6 +1264,69 @@ on its own and none of them breaks what is already deployed:
   add a row to the matrix in §10.
 - This file is the source of truth. If library docs and this file disagree, this
   file wins, and the library has a bug.
+
+**Revisions of this document**, as distinct from the protocol version: a
+clarification or a new section bumps the revision in the header (2.0 → 2.1) and
+leaves `proto` alone, because nothing on the wire changed. A new optional field
+does the same. Only a rename, a removed field or changed semantics bumps `proto`
+and earns a row in §10's matrix. A new entry in the reserved-key table (§5.3) or
+the kinds table (§5.2) is a revision on the wire but a change in the app, so it
+MUST be planned with the server and app alongside it — those two tables are the
+places where "free" stops being free.
+
+---
+
+## 12. The public API surface
+
+Everything above describes the device link. A third party reaches the house
+through a house-scoped API key instead, and self-describing devices change what
+that API can be: it can no longer be a list of three channels.
+
+**`/api/open/v1/*` is frozen, not deprecated.** It lists devices and switches
+channels, and it keeps working through the shim — `ch1`-`ch3` are ordinary
+capability keys, so a 3-channel extension answers v1 forever. Nothing is removed;
+a working integration in someone else's script is not ours to break.
+
+**`/api/open/v2/*` is the capability surface.** `GET /devices` returns
+descriptors and state as §5 defines them, and a single `POST /devices/{id}/set`
+takes `values`, with the same validation and the same ack statuses as §6.2. There
+is no v2 endpoint per capability kind: the whole point is that a kind is data, not
+a route.
+
+A v2 key reaching a v1-only concept, or the reverse, is not a special case —
+both speak capabilities underneath.
+
+### 12.1 Scoping a key
+
+A key today grants read and command rights over **every device in its house**.
+That is too much for "let my dashboard read the tank level", and it is the open
+half of a recorded security finding, so:
+
+- A key MAY be scoped to a list of devices and a list of capability keys. The
+  default for a key issued without a scope is the whole house, which is what
+  already-issued keys must keep meaning.
+- New keys SHOULD be scoped at creation, and the issuing UI SHOULD default to
+  read-only.
+- Scope is checked on the server, per request, against the descriptor — not
+  recorded in the key and trusted. A capability that leaves a device's descriptor
+  is unreachable through any key, whatever its scope says.
+- **`confirm:true` capabilities are refused on this surface entirely** (§5.4): a
+  key is not a person, and no flag can make it one.
+- Rate limits are a separate concern and already apply per key.
+
+### 12.2 What a key may never reach
+
+Stated as a list because it is easier to audit than prose, and because the
+temptation to add "just one" convenience endpoint here is permanent:
+
+- Anything about children — location, screen time, homework, chat. An integration
+  has no business with them, and the surface that cannot reach them cannot leak
+  them.
+- Pairing and grants (§7): peering two devices is a household decision made by a
+  person in the app.
+- `factory_reset`, `reboot`, and the provisioning path. A key that can wipe a
+  device can erase the house's own hardware.
+- House membership, PINs, and other keys.
 
 ---
 

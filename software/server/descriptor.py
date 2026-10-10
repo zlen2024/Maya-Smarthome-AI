@@ -33,8 +33,12 @@ KINDS = frozenset({"switch", "range", "number", "text", "enum", "button",
                    "color", "time", "duration", "location"})
 
 # §5.3 — the `_` namespace belongs to the protocol document. A device may report
-# these; it may not invent others.
-RESERVED_KEYS = frozenset({"_batt", "_rssi", "_fw", "_uptime"})
+# these; it may not invent others. `_report_every` is the odd one out: it is a
+# setting rather than a health reading, and declaring it is how a sleepy device
+# says its check-in interval is adjustable (§5.8). Leaving it out of this set
+# dropped the capability silently, which made the interval unadjustable on every
+# device that offered it.
+RESERVED_KEYS = frozenset({"_batt", "_rssi", "_fw", "_uptime", "_report_every"})
 
 ACCESS_VALUES = frozenset({"rw", "r", "w"})
 
