@@ -48,7 +48,9 @@ a tight, auditable surface.
 
 - **Pages** (4) — `/`, `/store`, `/integrate`, `/admin`. HTML from `static/`.
   `/admin` is HTTP Basic; the rest are public.
-- **Auth** (3) — register, login, me.
+- **Auth** (3) — register, login, me. Both register and login carry abuse limits
+  (`ratelimit.py`); the full table is in
+  [security-notes](security-notes.md#abuse-limits-in-one-place).
 - **Houses** (12) — CRUD, join-by-PIN, switch, members, per-member device
   permission, kick, reset-pin, and API-key create/list/revoke.
 - **Open API v1** (3) — `X-API-Key`, `tags=["Open API v1"]` so they render as
@@ -62,7 +64,7 @@ a tight, auditable surface.
 - **Store** (4) — catalog, public catalog, orders.
 - **Permissions** (4), **messages** (2), **activity** (1).
 - **Admin** (4 JSON + `/db`) — gated on `current_user.role != AccountRole.admin`,
-  a *different* gate from `/admin`'s Basic auth ([security notes §2](security-notes.md#2-admin-falls-back-to-password-admin)).
+  a *different* gate from `/admin`'s Basic auth ([security notes §2](security-notes.md#2-admin-fell-back-to-password-admin--fixed-2026-10-10)).
 
 ## WebSockets
 

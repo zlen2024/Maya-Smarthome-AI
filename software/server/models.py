@@ -67,7 +67,11 @@ class Child(Base):
     child_id = Column(Integer, primary_key=True, index=True)
     house_id = Column(Integer, ForeignKey("houses.house_id"), nullable=False)
     name = Column(String, nullable=False)
-    pin = Column(String, default="0000")
+    # bcrypt hash of the sign-in PIN, never the digits. No default: a child row
+    # created without one used to get "0000" here, and a caller that forgets the
+    # PIN should fail loudly rather than inherit a known one. create_child
+    # validates it through validators.normalize_child_pin.
+    pin = Column(String, nullable=False)
     is_home = Column(Boolean, default=False)
     last_lat = Column(Float, nullable=True)
     last_lng = Column(Float, nullable=True)
@@ -86,7 +90,11 @@ class Device(Base):
     device_id = Column(String, primary_key=True, index=True)
     house_id = Column(Integer, ForeignKey("houses.house_id"), nullable=True)
     name = Column(String, default="Smart Extension")
-    pin = Column(String, default="0000")  # device security PIN, set at provisioning; verified on WS identify
+    # Device security PIN, set at provisioning and verified on WS identify. Stored
+    # in cleartext because the firmware holds its own copy and presents it on
+    # connect. No default: "0000" here is exactly what made the identify check
+    # decorative (wiki/pages/security-notes.md §7).
+    pin = Column(String, nullable=False)
     status = Column(String, default="offline")
     price = Column(Float, default=0.0)
     blocked = Column(Boolean, default=False)

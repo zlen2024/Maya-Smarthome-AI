@@ -370,9 +370,11 @@ class ApiService {
     return data;
   }
 
+  /// [pin] is required: the server refuses a device PIN of 0000, and a default
+  /// here is what used to supply one.
   static Future<Map<String, dynamic>> registerDevice(
       String deviceId, String name,
-      {double price = 0.0, String pin = '0000'}) async {
+      {double price = 0.0, required String pin}) async {
     final res = await post('/api/devices/register', {
       'device_id': deviceId,
       'name': name,

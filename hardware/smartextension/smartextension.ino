@@ -4,7 +4,8 @@
 
   Features:
   - BLE provisioning for SSID / PASS / WS_URL / BLE_PIN
-  - BLE PIN protection (default "0000"; also verified server-side at WS identify)
+  - BLE PIN protection (no default: an unclaimed board has no PIN and the first
+    owner sets one; afterwards it is required here and at WS identify)
   - Save settings to Preferences (committed once WiFi verifies; server
     reachability is then confirmed after an automatic reboot, BLE off)
   - WiFi auto-reconnect; BLE provisioning re-opens on boot/persistent WiFi failure
@@ -108,15 +109,16 @@ void setStatus(const char* code) {
 // ─── Settings Persistence ────────────────────────────────────
 // NVS Preferences survive sketch uploads, so a reflashed (or factory-fresh)
 // board could keep an old owner's PIN/WiFi. Wipe everything whenever the
-// firmware build fingerprint changes — every flash starts clean: PIN "0000",
-// no WiFi, BLE provisioning mode.
+// firmware build fingerprint changes — every flash starts clean: no PIN,
+// no WiFi, BLE provisioning mode. An empty PIN means unclaimed, which is the
+// only state where provisioning is allowed without presenting one.
 void resetPrefsIfNewFirmware() {
   const String buildTag = String(__DATE__) + " " + String(__TIME__);
   prefs.begin("iotdata", false);
   if (prefs.getString("build", "") != buildTag) {
     prefs.clear();
     prefs.putString("build", buildTag);
-    Serial.println("New firmware build detected. Settings wiped: PIN=0000, no WiFi config.");
+    Serial.println("New firmware build detected. Settings wiped: no PIN, no WiFi config.");
   }
   prefs.end();
 }
@@ -136,7 +138,7 @@ void loadSettings() {
   wifi_ssid = prefs.getString("ssid", "");
   wifi_pass = prefs.getString("pass", "");
   ws_url    = prefs.getString("ws",   "");
-  ble_pin   = prefs.getString("pin",  "0000");
+  ble_pin   = prefs.getString("pin",  "");   // "" = unclaimed, never "0000"
   prefs.end();
   wifi_ssid = sanitizeBleText(wifi_ssid);
   wifi_pass = sanitizeBleText(wifi_pass);
@@ -164,11 +166,29 @@ class GenericWriteCallback : public BLECharacteristicCallbacks {
     }
 };
 
+// A PIN the owner will actually be asked for, rather than one that defeats the
+// check. "0000" used to be the default at every layer — firmware, server and
+// app — which meant the PIN gate was skipped on nearly every board in the field.
+// Keep this in step with normalize_device_pin() in software/server/validators.py.
+bool isAcceptablePin(const String& p) {
+  if (p.length() != 4) return false;
+  for (int i = 0; i < 4; i++) {
+    if (!isDigit(p[i])) return false;
+  }
+  bool allSame = true;
+  for (int i = 1; i < 4; i++) {
+    if (p[i] != p[0]) { allSame = false; break; }
+  }
+  if (allSame) return false;                      // 0000, 1111, ...
+  if (p == "1234" || p == "4321") return false;   // the next thing anyone tries
+  return true;
+}
+
 // ─── BLE Provisioning ────────────────────────────────────────
 void startBLEProvisioning() {
   String advName = "Maya-" + String(DEVICE_ID);
   Serial.printf("Starting BLE provisioning mode. Advertising as '%s'...\n", advName.c_str());
-  Serial.printf("PIN protection: %s\n", (ble_pin == "" || ble_pin == "0000") ? "default (unset)" : "enabled");
+  Serial.printf("PIN protection: %s\n", ble_pin == "" ? "unclaimed (first owner sets the PIN)" : "enabled");
 
   BLEDevice::setMTU(517);
   BLEDevice::init(advName.c_str());
@@ -205,9 +225,25 @@ void startBLEProvisioning() {
       Serial.println("All provisioning values received.");
 
       // PIN validation (no dev override — server also verifies this PIN on WS identify)
-      if (ble_pin != "" && ble_pin != "0000" && recvPIN != ble_pin) {
+      // An empty stored PIN means unclaimed: the first owner's PIN is accepted
+      // as-is and becomes the device's PIN. Any stored PIN is then required,
+      // including "0000" on a board provisioned before that was refused.
+      if (ble_pin != "" && recvPIN != ble_pin) {
         Serial.println("PIN mismatch. Rejecting.");
         setStatus("6"); // PIN mismatch code
+        havePIN = haveSSID = havePASS = haveWS = false;
+        recvPIN = recvSSID = recvPASS = recvWS = recvNEWPIN = "";
+        continue;
+      }
+
+      // The PIN that will be in force after this round — a new one if the owner
+      // supplied it, otherwise the one just presented — must be a real PIN.
+      // Rejecting it here, rather than saving it, is what stops the board from
+      // ending up with a PIN that cannot protect it.
+      String pinToStore = recvNEWPIN.length() > 0 ? recvNEWPIN : recvPIN;
+      if (!isAcceptablePin(pinToStore)) {
+        Serial.println("PIN rejected: must be 4 digits, not 0000/1111/1234.");
+        setStatus("9"); // weak PIN refused
         havePIN = haveSSID = havePASS = haveWS = false;
         recvPIN = recvSSID = recvPASS = recvWS = recvNEWPIN = "";
         continue;
@@ -268,7 +304,7 @@ void startBLEProvisioning() {
       wifi_ssid = recvSSID;
       wifi_pass = recvPASS;
       ws_url    = recvWS;
-      ble_pin   = recvNEWPIN.length() > 0 ? recvNEWPIN : recvPIN;
+      ble_pin   = pinToStore;   // validated above by isAcceptablePin
       saveSettings();
       wifiFailCycles = 0;
       wsFailCycles   = 0;

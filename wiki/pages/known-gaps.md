@@ -78,15 +78,25 @@ mobile. Firmware pages are written from source reading, not graph queries.
   for the Flutter app and server-rendered pages; a blocker for a separate web
   frontend.
 - **SQLite single-file store with hand-rolled migrations.** `run_migrations()`
-  (`software/server/main.py:34`) issues `ALTER TABLE ... ADD COLUMN` under
+  (`software/server/main.py:37`) issues `ALTER TABLE ... ADD COLUMN` under
   `inspect()` guards. There is no migration tool (no Alembic), no down-migration,
-  and no version table — column adds only.
-- **`main.py` is 2,429 lines** and holds routes, WS handlers, the Maya agent loop,
-  the automation alerts and the migrations. It is the single largest file by a
-  wide margin (next is `settings_tab.dart` at 1,109).
-- **One test file.** `software/server/test_screen_limit.py` (55 lines) plus a
-  default `software/mobile/test/widget_test.dart` (16 lines). No test covers the
-  agent loop, the WS routing, or auth.
+  and no version table — column adds only. This is the mechanism protocol v2's
+  capability/state table will have to arrive through (`PROTOCOL.md` Appendix B).
+- **`main.py` is 2,541 lines** (2026-10-10) and holds routes, WS handlers, the
+  Maya agent loop, the automation alerts, the abuse limits and the migrations. It
+  is the single largest file by a wide margin (next is `settings_tab.dart` at
+  1,109). Protocol v2 steps 1 and 3 both land in this file.
+- **Two test files, no test runner.** `software/server/test_screen_limit.py`
+  (55 lines) and `software/server/test_security.py` (274 lines, added 2026-10-10 —
+  abuse limits, PIN rules, the join→child-location chain, and device identify over
+  a real WebSocket), plus a default `software/mobile/test/widget_test.dart`
+  (16 lines). Both server tests are plain scripts run with `python <file>`; there
+  is no pytest, no CI, and nothing covering the Maya agent loop or command
+  dispatch. `test_security.py` needs `httpx<0.28` for Starlette 0.36's TestClient.
+- **No rate limiting outside the named guards.** `ratelimit.py` covers the
+  endpoints listed in [security-notes](security-notes.md#abuse-limits-in-one-place);
+  everything else — chat, device commands, the REST device API — is unmetered. The
+  state is also per-process, so it would not survive horizontal scaling.
 - **The old root `CODE_WIKI.md` is stale** — it documents 4 mobile screens (there
   are 14), omits `ai.py`/`auth.py`, and hardcodes paths from another machine
   (`/workspace`, `c:/dev/fyp/...`). Superseded by this wiki; see

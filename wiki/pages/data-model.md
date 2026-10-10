@@ -26,7 +26,7 @@ pointing at another backend, but the schema is hand-migrated for SQLite
 | `House` | `houses` | `join_pin` — plaintext 6 digits |
 | `AccountHouse` | `account_houses` | Join table: an account can belong to several houses; carries `is_master` and per-member device permission |
 | `Child` | `children` | `last_lat`/`last_lng`, screen-time limit |
-| `Device` | `devices` | `device_id`, `status`, `blocked`, `pin` (added by migration, `DEFAULT '0000'`) |
+| `Device` | `devices` | `device_id`, `status`, `blocked`, `pin` (added by migration with `DEFAULT '0000'` — the column default survives, but `register_device` has refused that value since 2026-10-10) |
 | `SmartExtension` | `smart_extensions` | The 3-channel extension type |
 | `Relay` | `relays` | Per-channel state and name |
 | `Permission` | `permissions` | Child → device/channel grants |

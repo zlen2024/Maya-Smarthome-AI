@@ -89,6 +89,7 @@
       <h2>Authentication</h2>
       <div class="card">
         <p class="muted">Every Open API request is authenticated with your key in the <code>X-API-Key</code> header. All data is scoped to the house the key belongs to.</p>
+        <p class="muted">Each key is limited to <strong>60 requests per minute</strong>. Over that, the API answers <code>429 Too Many Requests</code> with a <code>Retry-After</code> header in seconds — wait that long rather than retrying immediately.</p>
         <pre id="authExample"></pre>
       </div>
     </section>

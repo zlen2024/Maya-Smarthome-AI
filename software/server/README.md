@@ -71,3 +71,42 @@ uv run uvicorn main:app --reload
 - `main:app`: Refers to the `app` instance in the `main.py` file. Adjust this if your entry point is named differently (e.g., `server:app`).
 - `--reload`: Enables auto-reloading so the server restarts automatically when you make code changes. (Do not use in production).
 - `--host 0.0.0.0 --port 8080`: (Optional) Use these flags to expose the server on a specific host and port. You can use 8080 or any other port that you find easier to port forward.
+
+## 6. Environment variables
+
+The first two no longer have an insecure fallback — see
+[`wiki/pages/security-notes.md`](../../wiki/pages/security-notes.md).
+
+| Variable | Effect when set | Effect when absent |
+|---|---|---|
+| `SECRET_KEY` | Signs and verifies every JWT | A random key is generated per process and a warning is printed; all sessions die on restart |
+| `ADMIN_PASSWORD_HASH` | bcrypt hash of the `/admin` Basic-auth password (user `admin`) | A random password is generated per process and printed to the log once |
+| `DATABASE_URL` | SQLAlchemy URL | `sqlite:///./iot_data.db` |
+| `OLLAMA_API_KEY` | Maya's model access (Ollama Cloud) | Maya's AI features are unavailable |
+| `OLLAMA_MODEL` | Overrides the model id | Falls back to the default in `ai.py` |
+
+Generate an admin hash with:
+
+```powershell
+uv run python -c "from auth import hash_password; print(hash_password('your-password'))"
+```
+
+On Fly these live as secrets (`fly secrets set SECRET_KEY=...`).
+
+## 7. Self-checks
+
+Two scripts, no test runner — run them directly:
+
+```powershell
+uv run python test_screen_limit.py   # screen-time alert fires once per day
+uv run python test_security.py       # abuse limits, PIN rules, the join -> child-location chain
+```
+
+`test_security.py` boots the app against a throwaway SQLite file and replays the
+attack chain the limits exist to stop. It needs `httpx<0.28` (Starlette 0.36's
+TestClient is not compatible with newer httpx):
+
+```powershell
+uv pip install "httpx==0.27.2"
+```
+

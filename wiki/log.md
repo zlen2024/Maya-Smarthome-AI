@@ -59,3 +59,40 @@ Verified the graph regenerates deterministically: deleted `graph.json` +
 `symbol_index.md`, reran `build_graph.py`, got identical counts (179/2465 server,
 558/4560 mobile). Gitignored `graph.json` (4.3 MB) and Obsidian's
 `workspace.json` — the wiki was opened as an Obsidian vault mid-session.
+
+## [2026-10-10] ingest | Closed the 2026-09-08 security findings; reconciled pages
+
+The review on 2026-09-08 ended with four findings, a priority order and an
+unanswered "shall I start with number one?". Nothing had been implemented since,
+so this pass implemented all of it and re-read the code to confirm each finding
+was still live before touching it — all four were.
+
+**New modules.** `software/server/ratelimit.py` (`RateLimit` sliding window,
+`FailureLock` with lockout, `client_ip` reading Fly's headers) and
+`validators.py` (one PIN rule each for devices and children). Both are pure
+logic with an injectable clock, which is what let them be tested without a
+runner — matching `test_screen_limit.py`'s script style.
+
+**The chain that mattered** — register → sequential `house_id` → brute the
+6-digit `join_pin` → `GET /api/children` → a child's GPS — is closed at step 3
+by two locks, a constant-time comparison and an activity-log entry per failure.
+`list_children` still shows coordinates to any house member; that is now a
+recorded decision rather than an oversight
+([security-notes §6](pages/security-notes.md#6-a-guessable-chain-reached-a-childs-gps-coordinates--fixed-2026-10-10)).
+
+**`"0000"` was the default at six layers at once**, and the WS identify check
+read `if stored_pin and stored_pin != "0000"` — so the device PIN check never ran
+in practice. Server, app and firmware now share one rule, each file pointing at
+the other two.
+
+**Verification.** `test_security.py` (274 lines, 7 checks) boots the real app
+against a throwaway SQLite file: it replays the attack chain, drives three
+identify attempts over a real WebSocket, and asserts `/admin` has no default
+password. Both server self-checks pass. Flutter was **not** compiled — no SDK on
+this machine — so the three Dart edits are reviewed, not built.
+
+Graph rebuilt after the changes: server 224/2797 (was 179/2465 — the jump is
+mostly the two new modules plus `main.py` growth), mobile 559/4566. Reconciled
+`security-notes.md` (rewritten, 2 new findings), `known-gaps.md` (test census,
+`main.py` now 2,541 lines, rate-limit scope), `data-model.md`, `server-backend.md`.
+One anchor broke when finding 2 was retitled; the linter caught it.

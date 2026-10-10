@@ -42,7 +42,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
   final _nameCtrl = TextEditingController();
   final _ssidCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
-  final _pinCtrl = TextEditingController(text: '0000');
+  final _pinCtrl = TextEditingController();
   final _newPinCtrl = TextEditingController(); // optional — change the device PIN
 
   // Characteristic References
@@ -321,6 +321,19 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
     _showSnack('Bluetooth connection lost');
   }
 
+  /// The PIN rule, in the app's words. Kept in step with isAcceptablePin() in
+  /// the firmware and normalize_device_pin() on the server — all three refuse
+  /// the same PINs, so the user is told here instead of after a BLE round-trip.
+  String? _pinProblem(String pin) {
+    if (!RegExp(r'^\d{4}$').hasMatch(pin)) {
+      return 'PIN must be exactly 4 digits';
+    }
+    if (pin.split('').toSet().length == 1 || pin == '1234' || pin == '4321') {
+      return 'Pick a less guessable PIN — not 0000, 1111 or 1234';
+    }
+    return null;
+  }
+
   // ── Unified Registration & Provision Flow ───────────────────────
   Future<void> _submitRegistration() async {
     final name = _nameCtrl.text.trim();
@@ -334,8 +347,13 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
       _showSnack('Please fill in all fields');
       return;
     }
-    if (newPin.isNotEmpty && newPin.length != 4) {
-      _showSnack('New PIN must be exactly 4 digits');
+    // The PIN that will be in force after this round is the one that has to be
+    // sound: a new one if given, otherwise the one being presented. On a device
+    // already claimed with a weak PIN, that means supplying a new one here.
+    final pinToCheck = newPin.isNotEmpty ? newPin : pin;
+    final problem = _pinProblem(pinToCheck);
+    if (problem != null) {
+      _showSnack(newPin.isNotEmpty ? problem : '$problem (or set a New PIN below)');
       return;
     }
     if (newPin.isNotEmpty && _newPinChar == null) {
@@ -480,6 +498,13 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
       case '7':
         _appendLog('✗ Could not connect.');
         _handleFailure('Could not connect. Please re-enter your credentials.');
+        break;
+      case '9':
+        // Firmware refused the PIN itself, not a mismatch — it will not store a
+        // PIN that cannot protect the device.
+        _appendLog('✗ Device refused that PIN as too easy to guess.');
+        _handleFailure('The device refused that PIN. Use 4 digits that are not '
+            '0000, 1111 or 1234 — set one in "New PIN".');
         break;
       default:
         // Ignore other codes
@@ -866,7 +891,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
             labelText: 'Security PIN (BLE/Device)',
             prefixIcon: Icon(Icons.pin_outlined),
             counterText: '',
-            helperText: 'Default PIN is 0000',
+            helperText: 'New device: choose a 4-digit PIN. Already set up: enter its PIN',
           ),
         ),
         const SizedBox(height: 16),

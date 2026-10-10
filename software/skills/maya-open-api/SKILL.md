@@ -163,6 +163,10 @@ The command response `status` tells you what happened:
 - `404` — `device_id` not in this key's house. Re-run `GET /devices`; don't
   reuse a `device_id` from another house/key.
 - `400` — bad `cmd` (must be `on`/`off`/`all_on`/`all_off`).
+- `429` — the key's rate limit (60 requests/minute). The response carries a
+  `Retry-After` header in seconds; wait that long before the next call rather
+  than retrying straight away. Hitting this usually means a polling loop is too
+  tight — read device state once and act on it, don't poll per channel.
 
 ## Safety
 

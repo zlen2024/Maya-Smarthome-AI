@@ -28,6 +28,44 @@ report artifacts that still need manual updating. Generated alongside the report
 - [ ] Agentic *power-off* automation (actually cut a relay on a rule) — still **deferred to 3.1**; current rule is notify-only.
 - DEPLOY: `OLLAMA_API_KEY` is set as a Fly secret (live). Optional: `OLLAMA_MODEL` to override the model.
 
+### Iteration 4 — security hardening (DONE — 2026-10-10)
+Implements the four findings from the 2026-09-08 review, which had been decided but
+never built. Full reasoning in `wiki/pages/security-notes.md`; the self-check is
+`software/server/test_security.py` (run `python test_security.py`).
+- [x] **Brute-force chain to a child's GPS closed.** `POST /api/houses/join` was the
+  gate: sequential `house_id`, 6-digit `join_pin`, `!=` comparison, no rate limit at
+  all — then `GET /api/children` returns `last_lat`/`last_lng`. Now `JOIN_LOCK`
+  (5 failures/h per account+house → 1h lockout), `JOIN_WALK_LOCK` (10/h per account,
+  so walking the id space dies too), `secrets.compare_digest`, and every failed join
+  written to the house activity log so an attack is visible to the household.
+- [x] **No more `"0000"` anywhere.** It was the default at six layers, and WS identify
+  read `if stored_pin and stored_pin != "0000"` — so the device PIN check never ran.
+  New `validators.py` (4 digits, no repeated digits, no 1234/4321) enforced in
+  `register_device` + `create_child`; `compare_digest` on identify; firmware
+  `isAcceptablePin` refuses to *store* a weak PIN (BLE status `9`) and treats an empty
+  PIN as "unclaimed"; app no longer pre-fills the field.
+  **Needs a reflash** to take effect on the board — existing devices keep working
+  meanwhile (they send the PIN they were provisioned with, which is now compared).
+- [x] **`/admin` default password gone.** No fixed fallback: absent
+  `ADMIN_PASSWORD_HASH` mints a random password per process and prints it once.
+  Guarded by `ADMIN_LOCK` (5 failures/15m per IP → 30m).
+- [x] **General rate limiting.** `ratelimit.py` — login (per email + per IP),
+  registration (per IP), `/api/maya/voice` (20/min + 300/day per caller, a budget
+  guard: every call is a paid Ollama request), Open API (60/min per key, documented
+  on `/integrate` and in the agent skill as a `429` + `Retry-After`).
+- [x] **`SECRET_KEY` fallback literal removed** (`auth.py`). Was already safe in the
+  live deployment (set as a Fly secret) but was a trap for anyone forking a public
+  repo. Absent now means a random per-process key plus a warning.
+- [ ] **Per-key Open API scoping** — a key still grants full rights over every device
+  in its house. Rate limiting closed the operational half of that finding only.
+- [ ] **`list_children` shows GPS to any house member**, not only the master.
+  Accepted deliberately: a co-parent given the join PIN is a legitimate viewer, and
+  there is no role between `is_master` and plain member to express "may not see
+  locations". Revisit with the permissions UI.
+- [ ] Hash `join_pin` / `devices.pin` at rest. Low value while the device must present
+  its PIN in cleartext on every connect, and the master's own join PIN is displayed
+  on purpose.
+
 ### Child data collection (DONE — 2026-07-07)
 - [x] GPS location on the child device (foreground-only while app is open; `geolocator`, 3-min timer in `child_shell.dart`). Parent sees last-known location + "Open in Maps".
 - [x] Screen-time / app-usage tracking (Android UsageStats via `maya/usage` MethodChannel in `MainActivity.kt`; needs the special Usage Access grant in Settings). Daily totals upserted to `screen_time`.

@@ -121,8 +121,14 @@ class _ChildrenTabState extends State<ChildrenTab>
     if (result == true) {
       final name = nameCtrl.text.trim();
       final pin = pinCtrl.text.trim();
-      if (name.isEmpty || pin.length != 4) {
+      if (name.isEmpty || !RegExp(r'^\d{4}$').hasMatch(pin)) {
         _snack('Please enter a name and 4-digit PIN');
+        return;
+      }
+      // The server refuses these outright (normalize_child_pin); say so here
+      // rather than letting the dialog bounce back with a 400.
+      if (pin.split('').toSet().length == 1 || pin == '1234' || pin == '4321') {
+        _snack('Pick a less guessable PIN — not 0000, 1111 or 1234');
         return;
       }
       try {

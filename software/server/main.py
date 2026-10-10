@@ -5,7 +5,8 @@ import string
 import asyncio
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, status as http_status
+from fastapi import (FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException,
+                     Request, status as http_status)
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -24,6 +25,8 @@ from auth import (
 import secrets
 
 import ai
+from ratelimit import RateLimit, FailureLock, client_ip
+from validators import normalize_device_pin, normalize_child_pin
 
 import mimetypes
 mimetypes.add_type('application/vnd.android.package-archive', '.apk')
@@ -111,7 +114,35 @@ def run_migrations():
         db.close()
 
 
+def warn_about_legacy_device_pins():
+    """Name the devices that still carry the old default PIN.
+
+    The identify check used to be skipped whenever a device's stored PIN was
+    "0000", so rows left at the migration default (`ALTER TABLE devices ADD
+    COLUMN pin TEXT DEFAULT '0000'`) connected without proving anything. The
+    check now runs for every stored PIN -- but a PIN of "0000" is a value anyone
+    can read in this repo, so these rows are verified against a secret that is
+    not secret. Only the owner re-provisioning the board fixes that. Nothing is
+    rewritten here, because changing a PIN the firmware still holds would lock a
+    working device out; the list is printed so it is actionable instead of
+    invisible.
+    """
+    db = SessionLocal()
+    try:
+        stale = db.query(Device).filter(Device.pin.in_(("0000", ""))).all()
+        if stale:
+            ids = ", ".join(d.device_id for d in stale)
+            print(f"WARNING: {len(stale)} device(s) still carry the old default PIN, "
+                  f"which is public knowledge, so identify proves nothing for them: "
+                  f"{ids}. Re-provision each one from the app (set a New PIN).")
+    except Exception as e:
+        print(f"Legacy PIN check skipped: {e}")
+    finally:
+        db.close()
+
+
 run_migrations()
+warn_about_legacy_device_pins()
 
 app = FastAPI(
     title="Maya Smart Home API",
@@ -128,6 +159,31 @@ app = FastAPI(
                         "All data is scoped to the house the API key belongs to."},
     ],
 )
+
+# ─── Abuse limits ─────────────────────────────────────────────
+# Guessable secrets get a FailureLock; costly endpoints get a RateLimit. The
+# numbers are chosen to be invisible to a household and fatal to a script: a
+# 6-digit house PIN at 5 tries/hour needs ~23 years of uninterrupted guessing.
+JOIN_LOCK      = FailureLock(5,  3600, 3600, "house join")        # per account+house
+JOIN_WALK_LOCK = FailureLock(10, 3600, 3600, "house join")        # per account, any house
+LOGIN_LOCK     = FailureLock(8,  900,  900,  "login")             # per email
+CHILD_PIN_LOCK = FailureLock(5,  900,  900,  "child sign-in")     # per child
+ADMIN_LOCK     = FailureLock(5,  900,  1800, "admin sign-in")     # per IP
+LOGIN_RATE     = RateLimit(30, 300, "login")                      # per IP
+REGISTER_RATE  = RateLimit(5, 3600, "account registration")       # per IP
+VOICE_RATE     = RateLimit(20, 60, "voice command")               # per caller
+VOICE_DAY_RATE = RateLimit(300, 86400, "voice command (daily)")   # per caller
+OPEN_API_RATE  = RateLimit(60, 60, "Open API")                    # per key
+
+
+async def api_key_house_limited(request: Request,
+                                house: House = Depends(get_api_key_house)) -> House:
+    """`get_api_key_house` plus a per-key rate limit. Open API keys are long-lived
+    and live in other people's scripts, so a loop there is the likeliest source of
+    load on this server."""
+    OPEN_API_RATE.hit(hash_api_key(request.headers.get("x-api-key", ""))[:16])
+    return house
+
 
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -232,13 +288,27 @@ manager = ConnectionManager()
 # ─── Landing Page & Admin Page ────────────────────────────────
 
 security_basic = HTTPBasic()
-DEFAULT_ADMIN_PASSWORD_HASH = None
 
-def get_default_admin_hash():
-    global DEFAULT_ADMIN_PASSWORD_HASH
-    if DEFAULT_ADMIN_PASSWORD_HASH is None:
-        DEFAULT_ADMIN_PASSWORD_HASH = hash_password("admin")
-    return DEFAULT_ADMIN_PASSWORD_HASH
+# `/admin` used to fall back to the password "admin" when ADMIN_PASSWORD_HASH was
+# unset — a known credential on a public URL, reachable by anyone who read the
+# source. There is no fixed fallback now: without the env var a random password
+# is minted per process and printed to the log once, so a local run stays usable
+# and no deployment ever carries a guessable one.
+_EPHEMERAL_ADMIN_PASSWORD = None
+_EPHEMERAL_ADMIN_HASH = None
+
+
+def get_admin_hash() -> str:
+    global _EPHEMERAL_ADMIN_PASSWORD, _EPHEMERAL_ADMIN_HASH
+    configured = os.environ.get("ADMIN_PASSWORD_HASH")
+    if configured:
+        return configured
+    if _EPHEMERAL_ADMIN_HASH is None:
+        _EPHEMERAL_ADMIN_PASSWORD = secrets.token_urlsafe(12)
+        _EPHEMERAL_ADMIN_HASH = hash_password(_EPHEMERAL_ADMIN_PASSWORD)
+        print("WARNING: ADMIN_PASSWORD_HASH is not set. This run's /admin password "
+              f"is: {_EPHEMERAL_ADMIN_PASSWORD}  (user 'admin'; changes on restart)")
+    return _EPHEMERAL_ADMIN_HASH
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -260,17 +330,20 @@ async def integrate_page():
 
 
 @app.get("/admin", response_class=HTMLResponse)
-async def admin_page(credentials: HTTPBasicCredentials = Depends(security_basic)):
-    admin_pw_hash = os.environ.get("ADMIN_PASSWORD_HASH")
-    if not admin_pw_hash:
-        admin_pw_hash = get_default_admin_hash()
-        
-    if credentials.username != "admin" or not verify_password(credentials.password, admin_pw_hash):
+async def admin_page(request: Request,
+                     credentials: HTTPBasicCredentials = Depends(security_basic)):
+    ip = client_ip(request)
+    ADMIN_LOCK.guard(ip)
+    ok = (secrets.compare_digest(credentials.username, "admin")
+          and verify_password(credentials.password, get_admin_hash()))
+    if not ok:
+        ADMIN_LOCK.fail(ip)
         raise HTTPException(
             status_code=http_status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Basic"},
         )
+    ADMIN_LOCK.clear(ip)
     html_path = STATIC_DIR / "admin.html"
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
 
@@ -278,7 +351,11 @@ async def admin_page(credentials: HTTPBasicCredentials = Depends(security_basic)
 # ─── Auth Endpoints ───────────────────────────────────────────
 
 @app.post("/api/auth/register")
-async def register(payload: dict, db: Session = Depends(get_db)):
+async def register(payload: dict, request: Request, db: Session = Depends(get_db)):
+    # Registration is open by design (anyone can create a household), but an
+    # unlimited supply of accounts is what makes guessing a house PIN cheap --
+    # each fresh account gets its own lockout budget. Cap how fast they appear.
+    REGISTER_RATE.hit(client_ip(request))
     email = payload.get("email", "").strip()
     password = payload.get("password", "")
     name = payload.get("name", "").strip()
@@ -307,12 +384,20 @@ async def register(payload: dict, db: Session = Depends(get_db)):
 
 
 @app.post("/api/auth/login")
-async def login(payload: dict, db: Session = Depends(get_db)):
+async def login(payload: dict, request: Request, db: Session = Depends(get_db)):
     email = payload.get("email", "").strip()
     password = payload.get("password", "")
+    # bcrypt already makes each guess slow; the lockout is what makes a long run
+    # pointless. Keyed on the email so one attacker cannot lock out a whole
+    # household by hammering from the same address, and rate-limited per IP so a
+    # spray across many emails is bounded too.
+    LOGIN_RATE.hit(client_ip(request))
+    LOGIN_LOCK.guard(email.lower())
     account = db.query(Account).filter(Account.email == email).first()
     if not account or not verify_password(password, account.password):
+        LOGIN_LOCK.fail(email.lower())
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    LOGIN_LOCK.clear(email.lower())
     token = create_access_token({"sub": account.acc_id})
     return {
         "acc_id": account.acc_id,
@@ -432,9 +517,33 @@ async def join_house(payload: dict, db: Session = Depends(get_db),
     pin = payload.get("pin", "").strip()
     if not house_id or not pin:
         raise HTTPException(status_code=400, detail="house_id and pin required")
+    # This is the endpoint that guarded a child's GPS coordinates: house ids are
+    # sequential, the PIN is 6 digits, and nothing used to slow a guess down, so
+    # a script could walk id 1..n and brute the PIN for each. Two locks: one per
+    # (account, house) so repeated tries at one house die quickly, and one per
+    # account across all houses so walking the id space dies too. A failure is
+    # also written to the target house's activity log, which makes a quiet attack
+    # visible to the people who live there.
+    acct_key = str(current_user.acc_id)
+    pair_key = "%s:%s" % (current_user.acc_id, house_id)
+    JOIN_LOCK.guard(pair_key)
+    JOIN_WALK_LOCK.guard(acct_key)
     house = db.query(House).filter(House.house_id == house_id).first()
-    if not house or house.join_pin != pin:
+    stored = (house.join_pin or "") if house else ""
+    # Constant-time: a plain != leaks how many leading digits matched through its
+    # return time, which turns 10**6 guesses into roughly 6 * 10 of them.
+    if not house or not stored or not secrets.compare_digest(stored, pin):
+        locked = JOIN_LOCK.fail(pair_key)
+        JOIN_WALK_LOCK.fail(acct_key)
+        if house:
+            log_activity(db, house.house_id, "parent", current_user.acc_id,
+                         current_user.name, "join_failed",
+                         f"Failed join attempt for house {house_id} by {current_user.email}"
+                         + (" - further attempts blocked for an hour" if locked else ""))
+            db.commit()
         raise HTTPException(status_code=403, detail="Invalid house ID or PIN")
+    JOIN_LOCK.clear(pair_key)
+    JOIN_WALK_LOCK.clear(acct_key)
     # Check if already joined
     existing = db.query(AccountHouse).filter(
         AccountHouse.acc_id == current_user.acc_id,
@@ -643,7 +752,7 @@ def _open_device_dict(db: Session, device: Device) -> dict:
 
 @app.get("/api/open/v1/devices", tags=["Open API v1"])
 async def open_list_devices(db: Session = Depends(get_db),
-                            house: House = Depends(get_api_key_house)):
+                            house: House = Depends(api_key_house_limited)):
     """List every device in the key's house with channel states."""
     devices = db.query(Device).filter(Device.house_id == house.house_id).all()
     return {"devices": [_open_device_dict(db, d) for d in devices]}
@@ -651,14 +760,14 @@ async def open_list_devices(db: Session = Depends(get_db),
 
 @app.get("/api/open/v1/devices/{device_id}", tags=["Open API v1"])
 async def open_get_device(device_id: str, db: Session = Depends(get_db),
-                          house: House = Depends(get_api_key_house)):
+                          house: House = Depends(api_key_house_limited)):
     """Get one device with channel states."""
     return _open_device_dict(db, _open_device_or_404(db, house, device_id))
 
 
 @app.post("/api/open/v1/devices/{device_id}/command", tags=["Open API v1"])
 async def open_send_command(device_id: str, payload: dict, db: Session = Depends(get_db),
-                            house: House = Depends(get_api_key_house)):
+                            house: House = Depends(api_key_house_limited)):
     """Switch a channel: body {"cmd": "on"|"off"|"all_on"|"all_off", "channel": 1-3}."""
     device = _open_device_or_404(db, house, device_id)
     if device.blocked:
@@ -811,7 +920,10 @@ async def create_child(payload: dict, db: Session = Depends(get_db),
     house_id = current_user.house_id
     if not house_id:
         raise HTTPException(status_code=400, detail="Account has no house")
-    pin = payload.get("pin", "0000")
+    try:
+        pin = normalize_child_pin(payload.get("pin"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     child = Child(
         house_id=house_id,
         name=payload.get("name", "").strip(),
@@ -861,8 +973,19 @@ async def child_login(child_id: int, payload: dict, db: Session = Depends(get_db
     if not child:
         raise HTTPException(status_code=404, detail="Child not found")
     pin = payload.get("pin", "")
+    # A 4-digit PIN is 10,000 guesses - minutes without a lockout. child_id is
+    # the key because the PIN is per child, and the child's own device is the
+    # only legitimate caller.
+    lock_key = str(child.child_id)
+    CHILD_PIN_LOCK.guard(lock_key)
     if not verify_password(pin, child.pin):
+        if CHILD_PIN_LOCK.fail(lock_key):
+            log_activity(db, child.house_id, "child", child.child_id, child.name,
+                         "child_login_blocked",
+                         f"Too many wrong PINs for {child.name} - sign-in blocked for 15 minutes")
+            db.commit()
         raise HTTPException(status_code=401, detail="Invalid PIN")
+    CHILD_PIN_LOCK.clear(lock_key)
     token = create_access_token({"sub": f"child_{child.child_id}", "role": "child", "house_id": child.house_id})
     log_activity(db, child.house_id, "child", child.child_id, child.name,
                  "child_login", f"{child.name} logged in")
@@ -1094,7 +1217,10 @@ async def register_device(payload: dict, db: Session = Depends(get_db),
     device_id = payload.get("device_id", "").strip()
     name = payload.get("name", "Smart Extension")
     price = payload.get("price", 0.0)
-    pin = str(payload.get("pin", "0000")).strip() or "0000"
+    try:
+        pin = normalize_device_pin(payload.get("pin"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not device_id:
         raise HTTPException(status_code=400, detail="device_id required")
     existing = db.query(Device).filter(Device.device_id == device_id).first()
@@ -1681,6 +1807,15 @@ async def maya_voice(payload: dict, db: Session = Depends(get_db),
     if not transcript:
         raise HTTPException(status_code=400, detail="transcript required")
 
+    # Every call here is a paid Ollama request, so this is a budget guard as much
+    # as an abuse one: a loop in a client could otherwise drain the account.
+    if current_auth["type"] == "child":
+        caller = "child:%s" % current_auth["child"].child_id
+    else:
+        caller = "parent:%s" % current_auth["user"].acc_id
+    VOICE_RATE.hit(caller)
+    VOICE_DAY_RATE.hit(caller)
+
     if current_auth["type"] == "child":
         child = current_auth["child"]
         house_id, sender_role, sender_id, sender_name, child_id = (
@@ -2115,8 +2250,13 @@ async def _handle_websocket(websocket: WebSocket):
                         return
                     # PIN proves identity first, so an impostor can't probe house state
                     stored_pin = (device_db.pin or "").strip()
-                    if stored_pin and stored_pin != "0000":
-                        if str(json_data.get("pin", "")).strip() != stored_pin:
+                    if stored_pin:
+                        # The old condition skipped verification when the stored
+                        # PIN was "0000" -- and "0000" was the default everywhere,
+                        # so in practice this check never ran. Registration now
+                        # refuses that PIN, and any stored PIN is enforced.
+                        sent_pin = str(json_data.get("pin", "")).strip()
+                        if not secrets.compare_digest(sent_pin, stored_pin):
                             print(f"Device {device_id} failed PIN verification. Closing connection.")
                             manager.disconnect(websocket)
                             await websocket.close(code=1008)

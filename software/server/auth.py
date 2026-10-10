@@ -1,5 +1,6 @@
 import hashlib
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 from fastapi import Depends, HTTPException, Security, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, APIKeyHeader
@@ -9,7 +10,16 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import Account, ApiKey, Child, House
 
-SECRET_KEY = os.environ.get("SECRET_KEY", "maya-smarthome-secret-key-change-in-production")
+# No fallback literal. A shipped default key is a silent trap: anyone who forks
+# this repo and deploys it would sign tokens with a key that is public, and
+# nothing would look wrong. Missing in development is answered with a random
+# per-process key instead — tokens then die on restart, which is annoying but
+# never shared.
+SECRET_KEY = os.environ.get("SECRET_KEY")
+if not SECRET_KEY:
+    SECRET_KEY = secrets.token_urlsafe(32)
+    print("WARNING: SECRET_KEY is not set. Generated an ephemeral signing key — "
+          "every restart invalidates all sessions. Set SECRET_KEY in production.")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 1440
 
