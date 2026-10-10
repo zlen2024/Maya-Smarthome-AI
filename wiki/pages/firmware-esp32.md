@@ -3,6 +3,14 @@
 `hardware/smartextension/smartextension.ino` — 618 lines of Arduino C++.
 Companion docs: `SETUP.md`, `WIRING.md`.
 
+> **Superseded in intent, not yet in practice.** The provisioning, WiFi and
+> WebSocket code on this page now also lives in `hardware/libraries/Maya`, which
+> speaks protocol v2 ([Device protocol v2 §Step 4](device-protocol.md#step-4-2026-10-10-the-arduino-library)).
+> This sketch stays the shipped firmware until the library's
+> `SmartExtension3ch` example has run on a real board. It does **not** build on
+> ESP32 core 2.0.17 (BLE `getValue()` returns `std::string` there) and needs the
+> Huge APP partition scheme.
+
 > **Not in the graph.** `code2graph index .` admits **0 files** here — `.ino` is
 > not a recognised extension, and `build_graph.py` excludes this root by design.
 > Everything below was read from source, not queried.

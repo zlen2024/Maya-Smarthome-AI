@@ -103,6 +103,7 @@ uv run python test_security.py       # abuse limits, PIN rules, the join -> chil
 uv run python test_descriptor.py     # protocol 2: descriptors stored, protocol 1 shimmed
 uv run python test_grants.py         # protocol 2 step 2: claiming, capability grants, labels
 uv run python test_maya.py           # protocol 2 step 3: Maya's set_capability, deny + confirm gates
+uv run python ../../hardware/libraries/Maya/extras/test/test_library.py   # protocol 2 step 4: the Arduino library vs this server (needs a C++ compiler)
 ```
 
 `test_security.py` and `test_descriptor.py` boot the app against a throwaway

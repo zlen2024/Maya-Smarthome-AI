@@ -1254,6 +1254,17 @@ on its own and none of them breaks what is already deployed:
    model-supplied `confirmed:true` is not evidence by itself.
 4. **Extract the Arduino library** — by now it only has to implement a written
    protocol, so it is thin and stable.
+   — **done 2026-10-10** (`hardware/libraries/Maya`). Two halves, split on
+   purpose: `MayaCore` is the protocol with no hardware in it (descriptor,
+   `set`/ack/state frames, the §9 errors, the legacy command names), and `Maya`
+   is the radio half (BLE provisioning, WiFi, the WebSocket) moved from
+   `smartextension.ino` unchanged in behaviour. The split is what makes the
+   claim "it implements this document" checkable: `extras/test/test_library.py`
+   builds the core on a laptop and has the **server's own** `parse_identify` and
+   value rules judge what it says, then runs it against the real app. The
+   radio half compiles for ESP32 (core 2.0.17) but **has not been flashed to a
+   board**. Not covered yet: peering (§7), device→Maya (§8), `report_every`
+   (§5.8).
 5. Peering: grants, local link, audit.
 6. Device to Maya.
 

@@ -1,0 +1,515 @@
+#include "Maya.h"
+
+#include <WiFi.h>
+#include <Preferences.h>
+#include <BLEDevice.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
+#include <BLE2902.h>
+#include <WebSocketsClient.h>
+
+// Provisioning, WiFi and the WebSocket link, moved out of the sketch they used
+// to live in (hardware/smartextension) without changing how they behave: the
+// app's provisioning flow, the status codes it reads over BLE and the PIN rules
+// are all part of the contract this library has to keep.
+
+namespace {
+
+Preferences prefs;
+WebSocketsClient webSocket;
+Maya* self = nullptr;
+
+String DEVICE_ID;
+
+// BLE UUIDs - the app is written against these.
+#define SERVICE_UUID  "12345678-1234-1234-1234-123456789000"
+#define SSID_UUID     "12345678-1234-1234-1234-123456789001"
+#define PASS_UUID     "12345678-1234-1234-1234-123456789002"
+#define WSURL_UUID    "12345678-1234-1234-1234-123456789004"
+#define PIN_UUID      "12345678-1234-1234-1234-123456789003"
+#define CMD_UUID      "12345678-1234-1234-1234-123456789005"
+#define STATUS_UUID   "12345678-1234-1234-1234-123456789006"
+#define NEWPIN_UUID   "12345678-1234-1234-1234-123456789007"
+
+String wifi_ssid = "";
+String wifi_pass = "";
+String ws_url    = "";
+String ble_pin   = "";
+
+String recvSSID = "", recvPASS = "", recvWS = "", recvPIN = "";
+String recvNEWPIN = "";
+bool haveSSID = false, havePASS = false, haveWS = false, havePIN = false;
+
+bool wifiConnected = false;
+bool wsConnected   = false;
+
+const int WIFI_CONNECT_TRIES = 20;
+const int WIFI_RECONNECT_CYCLES_BEFORE_PROVISION = 6;
+int wifiFailCycles = 0;
+int wsFailCycles   = 0;
+unsigned long lastServerContact = 0;
+
+BLEServer*         pServer  = nullptr;
+BLEService*        pService = nullptr;
+BLECharacteristic* ssidChar;
+BLECharacteristic* passChar;
+BLECharacteristic* wsChar;
+BLECharacteristic* pinChar;
+BLECharacteristic* newpinChar;
+BLECharacteristic* cmdChar;
+BLECharacteristic* statusChar;
+
+String sanitizeBleText(String s) {
+  s.replace("\r", "");
+  s.replace("\n", "");
+  s.replace("\0", "");
+  s.trim();
+  return s;
+}
+
+void setStatus(const char* code) {
+  if (statusChar) {
+    statusChar->setValue(code);
+    statusChar->notify();
+    Serial.printf("Status update sent to BLE: %s\n", code);
+  }
+}
+
+// NVS survives sketch uploads, so a reflashed board could keep an old owner's PIN
+// and WiFi. Wipe everything whenever the firmware changes - every flash starts
+// clean: no PIN, no WiFi, BLE provisioning. An empty PIN means unclaimed, which
+// is the only state where provisioning is allowed without presenting one.
+//
+// The fingerprint is the running sketch's MD5, not __DATE__/__TIME__: those
+// would be baked in when *this library* was compiled, and a cached library
+// object would then never notice a new sketch.
+void resetPrefsIfNewFirmware() {
+  const String buildTag = ESP.getSketchMD5();
+  prefs.begin("iotdata", false);
+  if (prefs.getString("build", "") != buildTag) {
+    prefs.clear();
+    prefs.putString("build", buildTag);
+    Serial.println("New firmware build detected. Settings wiped: no PIN, no WiFi config.");
+  }
+  prefs.end();
+}
+
+void saveSettings() {
+  prefs.begin("iotdata", false);
+  prefs.putString("ssid", wifi_ssid);
+  prefs.putString("pass", wifi_pass);
+  prefs.putString("ws",   ws_url);
+  prefs.putString("pin",  ble_pin);
+  prefs.end();
+  Serial.println("Settings saved to Preferences.");
+}
+
+void loadSettings() {
+  prefs.begin("iotdata", true);
+  wifi_ssid = prefs.getString("ssid", "");
+  wifi_pass = prefs.getString("pass", "");
+  ws_url    = prefs.getString("ws",   "");
+  ble_pin   = prefs.getString("pin",  "");   // "" = unclaimed, never "0000"
+  prefs.end();
+  wifi_ssid = sanitizeBleText(wifi_ssid);
+  wifi_pass = sanitizeBleText(wifi_pass);
+  ws_url    = sanitizeBleText(ws_url);
+  ble_pin   = sanitizeBleText(ble_pin);
+  Serial.printf("Loaded: ssid='%s', ws='%s', pin_len=%d\n",
+    wifi_ssid.c_str(), ws_url.c_str(), (int)ble_pin.length());
+}
+
+class GenericWriteCallback : public BLECharacteristicCallbacks {
+ public:
+  void onWrite(BLECharacteristic* pChar) {
+    String s = String(pChar->getValue().c_str());   // std::string on core 2.x, String on 3.x
+    s = sanitizeBleText(s);
+    String uuid = pChar->getUUID().toString().c_str();
+
+    if      (uuid == SSID_UUID)   { recvSSID = s; haveSSID = true; }
+    else if (uuid == PASS_UUID)   { recvPASS = s; havePASS = true; }
+    else if (uuid == WSURL_UUID)  { recvWS   = s; haveWS   = true; }
+    else if (uuid == PIN_UUID)    { recvPIN  = s; havePIN  = true; }
+    else if (uuid == NEWPIN_UUID) { recvNEWPIN = s; }
+  }
+};
+
+// A PIN the owner will actually be asked for, rather than one that defeats the
+// check. Keep this in step with normalize_device_pin() in
+// software/server/validators.py.
+bool isAcceptablePin(const String& p) {
+  if (p.length() != 4) return false;
+  for (int i = 0; i < 4; i++) {
+    if (!isDigit(p[i])) return false;
+  }
+  bool allSame = true;
+  for (int i = 1; i < 4; i++) {
+    if (p[i] != p[0]) { allSame = false; break; }
+  }
+  if (allSame) return false;                      // 0000, 1111, ...
+  if (p == "1234" || p == "4321") return false;   // the next thing anyone tries
+  return true;
+}
+
+void startBLEProvisioning() {
+  String advName = "Maya-" + String(DEVICE_ID);
+  Serial.printf("Starting BLE provisioning mode. Advertising as '%s'...\n", advName.c_str());
+  Serial.printf("PIN protection: %s\n", ble_pin == "" ? "unclaimed (first owner sets the PIN)" : "enabled");
+
+  BLEDevice::setMTU(517);
+  BLEDevice::init(advName.c_str());
+  pServer  = BLEDevice::createServer();
+  pService = pServer->createService(SERVICE_UUID);
+
+  ssidChar   = pService->createCharacteristic(SSID_UUID,   BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  passChar   = pService->createCharacteristic(PASS_UUID,   BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  wsChar     = pService->createCharacteristic(WSURL_UUID,  BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  pinChar    = pService->createCharacteristic(PIN_UUID,    BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  newpinChar = pService->createCharacteristic(NEWPIN_UUID, BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  cmdChar    = pService->createCharacteristic(CMD_UUID,    BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
+  statusChar = pService->createCharacteristic(STATUS_UUID, BLECharacteristic::PROPERTY_READ  | BLECharacteristic::PROPERTY_NOTIFY);
+
+  GenericWriteCallback* cb = new GenericWriteCallback();
+  ssidChar->setCallbacks(cb); passChar->setCallbacks(cb);
+  wsChar->setCallbacks(cb);   pinChar->setCallbacks(cb);
+  newpinChar->setCallbacks(cb); cmdChar->setCallbacks(cb);
+
+  ssidChar->addDescriptor(new BLE2902()); passChar->addDescriptor(new BLE2902());
+  wsChar->addDescriptor(new BLE2902());   pinChar->addDescriptor(new BLE2902());
+  statusChar->addDescriptor(new BLE2902());
+
+  statusChar->setValue("0");
+
+  pService->start();
+  BLEDevice::startAdvertising();
+  Serial.println("BLE advertising started. Waiting for SSID, PASS, WSURL, PIN...");
+
+  unsigned long start   = millis();
+  unsigned long timeout = 5UL * 60 * 1000;
+  while (millis() - start < timeout) {
+    if (haveSSID && havePASS && haveWS && havePIN) {
+      Serial.println("All provisioning values received.");
+
+      // An empty stored PIN means unclaimed: the first owner's PIN is accepted
+      // as-is and becomes the device's PIN. Any stored PIN is then required.
+      if (ble_pin != "" && recvPIN != ble_pin) {
+        Serial.println("PIN mismatch. Rejecting.");
+        setStatus("6");
+        havePIN = haveSSID = havePASS = haveWS = false;
+        recvPIN = recvSSID = recvPASS = recvWS = recvNEWPIN = "";
+        continue;
+      }
+
+      // The PIN in force after this round must be a real one. Rejecting it here,
+      // rather than saving it, is what stops the board from ending up with a PIN
+      // that cannot protect it.
+      String pinToStore = recvNEWPIN.length() > 0 ? recvNEWPIN : recvPIN;
+      if (!isAcceptablePin(pinToStore)) {
+        Serial.println("PIN rejected: must be 4 digits, not 0000/1111/1234.");
+        setStatus("9");
+        havePIN = haveSSID = havePASS = haveWS = false;
+        recvPIN = recvSSID = recvPASS = recvWS = recvNEWPIN = "";
+        continue;
+      }
+
+      setStatus("1");
+      delay(200);
+
+      bool wifiOk = false;
+      int connectRetries = 3;
+      for (int r = 0; r < connectRetries; r++) {
+        Serial.printf("Attempting WiFi connect to '%s' (try %d/%d)...\n", recvSSID.c_str(), r + 1, connectRetries);
+        WiFi.persistent(false);
+        WiFi.mode(WIFI_STA);
+        WiFi.disconnect(true);
+        delay(150);
+        WiFi.begin(recvSSID.c_str(), recvPASS.c_str());
+
+        int attempts = 0;
+        while (attempts < WIFI_CONNECT_TRIES) {
+          delay(500);
+          if (WiFi.status() == WL_CONNECTED) { wifiOk = true; break; }
+          attempts++;
+        }
+        if (wifiOk) break;
+        Serial.println("WiFi connect attempt failed.");
+      }
+
+      if (!wifiOk) {
+        Serial.println("WiFi connection failed during BLE setup.");
+        setStatus("4");
+        WiFi.disconnect(true);
+        delay(1000);
+        haveSSID = havePASS = haveWS = havePIN = false;
+        recvPIN = recvSSID = recvPASS = recvWS = recvNEWPIN = "";
+        start = millis();
+        continue;
+      }
+
+      setStatus("2");
+      Serial.println("WiFi connected during provisioning.");
+
+      // Commit the verified credentials, then reboot to reach the server. The
+      // TLS WebSocket is deliberately NOT opened while BLE is up: the single
+      // 2.4GHz radio is shared with the BLE link to the phone, and a TLS
+      // handshake gets corrupted under that coexistence (and Bluedroid + mbedTLS
+      // compete for heap). A clean WiFi-only boot connects reliably.
+      wifi_ssid = recvSSID;
+      wifi_pass = recvPASS;
+      ws_url    = recvWS;
+      ble_pin   = pinToStore;
+      saveSettings();
+      wifiFailCycles = 0;
+      wsFailCycles   = 0;
+      wifiConnected  = true;
+
+      setStatus("8");
+      Serial.println("Credentials saved. Rebooting to connect to the server with BLE off.");
+      delay(1500);
+
+      BLEDevice::stopAdvertising();
+      delay(100);
+      ESP.restart();
+    }
+    delay(200);
+  }
+
+  Serial.println("Provisioning timed out.");
+  BLEDevice::stopAdvertising();
+  BLEDevice::deinit();
+  statusChar = ssidChar = passChar = wsChar = pinChar = newpinChar = cmdChar = nullptr;
+}
+
+bool connectToWiFiOnce() {
+  if (WiFi.status() == WL_CONNECTED) { wifiConnected = true; return true; }
+  if (wifi_ssid.length() == 0) { Serial.println("No SSID saved."); return false; }
+  wifi_ssid = sanitizeBleText(wifi_ssid);
+  wifi_pass = sanitizeBleText(wifi_pass);
+  WiFi.persistent(false);
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect(true);
+  delay(150);
+  Serial.printf("Connecting to WiFi '%s'...\n", wifi_ssid.c_str());
+  WiFi.begin(wifi_ssid.c_str(), wifi_pass.c_str());
+
+  int attempts = 0;
+  while (WiFi.status() != WL_CONNECTED && attempts < WIFI_CONNECT_TRIES) {
+    delay(500); Serial.print("."); attempts++;
+  }
+  Serial.println();
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("WiFi connected. IP=%s\n", WiFi.localIP().toString().c_str());
+    wifiConnected = true; wifiFailCycles = 0; return true;
+  }
+  Serial.printf("WiFi failed. status=%d\n", (int)WiFi.status());
+  wifiConnected = false; return false;
+}
+
+void sendFrame(const char* json, size_t len) {
+  webSocket.sendTXT((uint8_t*)json, len);
+}
+
+void webSocketEvent(WStype_t type, uint8_t* payload, size_t length) {
+  if (!self) return;
+  switch (type) {
+    case WStype_DISCONNECTED:
+      Serial.println("[WS] Disconnected");
+      wsConnected = false;
+      wsFailCycles++;
+      break;
+
+    case WStype_PONG:
+      lastServerContact = millis();
+      break;
+
+    case WStype_CONNECTED: {
+      Serial.println("[WS] Connected");
+      wsConnected  = true;
+      wsFailCycles = 0;
+      lastServerContact = millis();
+      // The PIN is verified by the server here, and the descriptor is the first
+      // moment it learns what this device is (PROTOCOL.md 4.1, 5).
+      if (!self->sendIdentify(DEVICE_ID.c_str(), ble_pin.c_str(),
+                              WiFi.localIP().toString().c_str(), sendFrame)) {
+        Serial.printf("[Maya] Identify not sent: %s\n", self->problem() ? self->problem() : "descriptor unusable");
+      }
+      break;
+    }
+
+    case WStype_TEXT: {
+      lastServerContact = millis();
+      mayalib::Action a = self->onFrame((const char*)payload, length, DEVICE_ID.c_str(),
+                                     (uint32_t)millis(), sendFrame);
+      if (a == mayalib::REBOOT) {
+        delay(200);
+        ESP.restart();
+      } else if (a == mayalib::FACTORY_RESET) {
+        self->factoryReset();
+      }
+      break;
+    }
+
+    default: break;
+  }
+}
+
+void startWebSocket() {
+  if (wsConnected) return;
+  if (ws_url.length() == 0) { Serial.println("No WS URL configured."); return; }
+
+  bool useSSL = false;
+  String url  = ws_url;
+  // wss:// is checked first: "wss://" also starts with "ws"
+  if (url.startsWith("wss://")) { useSSL = true; url = url.substring(6); }
+  else if (url.startsWith("ws://")) { url = url.substring(5); }
+
+  String host = url;
+  String path = "/";
+  int slashPos = url.indexOf('/');
+  if (slashPos != -1) { host = url.substring(0, slashPos); path = url.substring(slashPos); }
+
+  int port = useSSL ? 443 : 80;
+  int colonIdx = host.indexOf(':');
+  if (colonIdx != -1) { port = host.substring(colonIdx + 1).toInt(); host = host.substring(0, colonIdx); }
+
+  Serial.printf("Starting WebSocket: host='%s', port=%d, path='%s', ssl=%d\n",
+    host.c_str(), port, path.c_str(), useSSL);
+
+  if (useSSL) {
+    // beginSSL with no CA cert skips verification - needed for Fly.io TLS
+    webSocket.beginSSL(host.c_str(), port, path.c_str());
+  } else {
+    webSocket.begin(host.c_str(), port, path.c_str());
+  }
+
+  webSocket.onEvent(webSocketEvent);
+  webSocket.setReconnectInterval(5000);
+  // Protocol-level ping/pong detects half-open sockets the TCP stack never
+  // reports (server scale-to-zero, a NAT mapping dropped). Ping every 15s; two
+  // missed pongs fire DISCONNECTED and the reconnect timer takes over.
+  webSocket.enableHeartbeat(15000, 3000, 2);
+  webSocket.setExtraHeaders("ngrok-skip-browser-warning: true");
+}
+
+}  // namespace
+
+// ---------------------------------------------------------------------------
+
+void Maya::enableHealth() {
+  addReserved("_rssi");
+  addReserved("_uptime");
+  addReserved("_fw");
+  health_ = true;
+}
+
+void Maya::refreshHealth() {
+  if (!health_) return;
+  setNumber("_rssi", WiFi.RSSI());
+  setNumber("_uptime", millis() / 1000);
+}
+
+const char* Maya::id() const { return DEVICE_ID.c_str(); }
+bool Maya::connected() const { return wsConnected; }
+
+void Maya::factoryReset() {
+  Serial.println("Factory reset. Wiping settings and rebooting.");
+  delay(300);
+  prefs.begin("iotdata", false);
+  prefs.clear();   // WiFi, WS URL, PIN and build tag: boots fresh into BLE provisioning
+  prefs.end();
+  ESP.restart();
+}
+
+void Maya::begin() {
+  self = this;
+  Serial.begin(115200);
+
+  // Unique per-board id from the factory MAC (lower 32 bits).
+  DEVICE_ID = "esp32-" + String((uint32_t)ESP.getEfuseMac(), HEX);
+  Serial.printf("Device ID: %s\n", DEVICE_ID.c_str());
+
+  if (problem()) {
+    // Not fatal to the board, but the server would refuse this descriptor, so
+    // say so where the person writing the sketch is looking.
+    Serial.printf("[Maya] Declaration problem: %s\n", problem());
+  }
+
+  resetPrefsIfNewFirmware();
+  loadSettings();
+
+  if (wifi_ssid.length() == 0) {
+    Serial.println("No WiFi config. Entering BLE provisioning.");
+    startBLEProvisioning();
+    loadSettings();
+  }
+
+  if (!connectToWiFiOnce()) {
+    Serial.println("Boot WiFi failed. Entering BLE provisioning for re-setup.");
+    startBLEProvisioning();
+    loadSettings();
+    connectToWiFiOnce();
+  } else {
+    startWebSocket();
+  }
+  refreshHealth();
+}
+
+void Maya::loop() {
+  // WiFi watchdog - every 3s
+  if (millis() - lastWiFiCheck_ > 3000) {
+    lastWiFiCheck_ = millis();
+    if (WiFi.status() != WL_CONNECTED) {
+      wifiConnected = false;
+      Serial.println("WiFi lost. Reconnecting...");
+      if (!connectToWiFiOnce()) {
+        wifiFailCycles++;
+        if (wifiFailCycles >= WIFI_RECONNECT_CYCLES_BEFORE_PROVISION) {
+          Serial.println("Too many WiFi failures. BLE provisioning.");
+          startBLEProvisioning();
+          loadSettings();
+          connectToWiFiOnce();
+        }
+      } else {
+        startWebSocket();
+      }
+    } else {
+      wifiConnected = true;
+    }
+  }
+
+  webSocket.loop();
+
+  // Zombie-link watchdog: with pings every 15s the server should never be silent
+  // for long while "connected". If it is, force a disconnect so the reconnect
+  // timer takes over. Deliberately NOT ESP.restart(): that would drop every
+  // output the sketch is holding.
+  if (wsConnected && millis() - lastServerContact > 180000) {
+    Serial.println("[WS] No server contact for 3 min. Forcing reconnect.");
+    wsConnected = false;
+    webSocket.disconnect();
+  }
+
+  if (wsFailCycles >= 5 && millis() - lastWarning_ > 30000) {
+    Serial.println("Warning: Multiple WebSocket connection failures. Retrying in background...");
+    lastWarning_ = millis();
+  }
+
+  if (wsConnected) {
+    // Changes the sketch made, at most four times a second: a noisy sensor
+    // calling setNumber() every pass must not turn into a frame every pass.
+    if (millis() - lastFlush_ > 250) {
+      lastFlush_ = millis();
+      flush(DEVICE_ID.c_str(), (uint32_t)millis(), sendFrame);
+    }
+    // A full report every 30s doubles as the keep-alive the server's
+    // last-heartbeat time comes from.
+    if (millis() - lastFull_ > 30000) {
+      lastFull_ = millis();
+      refreshHealth();
+      sendFullState(DEVICE_ID.c_str(), (uint32_t)millis(), sendFrame);
+    }
+  }
+
+  delay(10);
+}

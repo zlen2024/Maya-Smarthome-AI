@@ -153,8 +153,15 @@ descriptors; shims protocol 1. Nothing else changes." Status and reasoning:
 - [x] Fixed a pre-existing bug on that path: `_dispatch_set` sent a v2 `set` frame
   to protocol-1 boards, which would have timed out. It now translates to the v1
   command (`_dispatch_set_v1`), for the REST endpoint and Maya alike.
-- [ ] **Step 4** — extract the Arduino library. **Step 5** — peering (§7).
-  **Step 6** — device to Maya (§8).
+- [x] **Step 4 — the Arduino library** (`hardware/libraries/Maya`, 2026-10-10).
+  `MayaCore` (the protocol, no hardware) + `Maya` (BLE/WiFi/WebSocket, moved from
+  `smartextension.ino`). Both examples compile for ESP32 (core 2.0.17, Huge APP
+  partition). `extras/test/test_library.py` checks the core against the real
+  server's parser and app. **Not flashed to a board** — the radio half has only
+  been compiled.
+- [ ] Flash `examples/SmartExtension3ch` to a real board and provision it; until
+  then `hardware/smartextension/smartextension.ino` stays as the shipped firmware.
+- [ ] **Step 5** — peering (§7). **Step 6** — device to Maya (§8).
 - [ ] `report_every` is stored but unread: the §5.8 `status` vocabulary exists on
   paper only, and the three call sites are `ConnectionManager`, the device list
   endpoint and Maya's house context.

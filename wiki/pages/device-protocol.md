@@ -10,7 +10,7 @@ The goal the protocol exists for: a contributor builds new hardware, drops it in
 firmware to app — `ch1`/`ch2`/`ch3` appeared 76 times across 6 files when the
 migration was planned.
 
-## Status: steps 1 and 3 done, step 2 server-complete, spec at revision 2.1 (2026-10-10)
+## Status: steps 1, 3 and 4 done, step 2 server-complete, spec at revision 2.1 (2026-10-10)
 
 §10 defines a six-step migration order. Only the first is implemented.
 
@@ -19,11 +19,11 @@ migration was planned.
 | 1. Server accepts and stores descriptors; shims protocol 1 | **done** |
 | 2. App renders from the descriptor instead of three hardcoded toggles | server done; app partly — see below |
 | 3. Maya swaps her relay tool for a generic `set_capability` | **done** |
-| 4. Extract the Arduino library | not started |
+| 4. Extract the Arduino library | **done** (compiles for ESP32; not yet flashed) |
 | 5. Peering: grants, local link, audit (§7) | not started |
 | 6. Device to Maya (§8) | not started |
 
-**No firmware change was needed or made.** The ESP32 still speaks protocol 1 and
+**Steps 1–3 needed no firmware change.** The shipped ESP32 still speaks protocol 1 and
 is served by the shim — which is the point of the migration order, and what
 `test_descriptor.py` checks rather than assumes.
 
@@ -237,3 +237,59 @@ Specified, not built — each has a section to build against:
   including the salt jar from §5.7
 - [data model](data-model.md) for the two new tables, [server
   backend](server-backend.md) for where the handlers sit
+
+## Step 4 (2026-10-10): the Arduino library
+
+`hardware/libraries/Maya` — a contributor's sketch declares capabilities and
+supplies handlers; everything the protocol cares about is the library's.
+
+```cpp
+Maya maya("my_lamp", "1.0.0");
+maya.addSwitch("lamp", "Lamp", [](bool on) { digitalWrite(2, on); return true; });
+maya.addNumber("temp", "Temperature").unit("C").history();
+maya.begin();   // ... maya.loop(); maya.setNumber("temp", t);
+```
+
+**Two halves, split so the claim is checkable.** `MayaCore.{h,cpp}` is the
+protocol with no hardware in it — it needs only ArduinoJson, so it builds on a
+laptop. `Maya.{h,cpp}` is the radio half: BLE provisioning, WiFi, the WebSocket
+and the zombie-link watchdog, moved from `smartextension.ino` with the same
+behaviour (the BLE UUIDs, status codes `0/1/2/4/6/8/9`, the PIN rules and the
+"every flash starts clean" wipe are part of what the app expects).
+
+**Verification, and its limit.** `extras/test/test_library.py` (7 checks) builds
+the core with a C++ compiler and drives it through a small stdin/stdout driver.
+What it says is judged by the **server's own code**: the identify frame must pass
+`descriptor.parse_identify` with no warnings, every ack's `state` must survive
+`coerce_state`, and the second half connects the same code to the real app over a
+WebSocket (set → hardware → ack → database, the `confirm` hold, a hardware
+refusal reported back, device-initiated state stored). Two deliberate bugs were
+introduced to confirm the checks bite — letting a write through to a read-only
+capability, and re-sending an acked value as a change — and both failed the run.
+Both examples then **compile for ESP32** with arduino-cli (core 2.0.17).
+**Nothing has been flashed.** `Maya.cpp` is moved code that has only been
+compiled, so the first real board is the first real test of it.
+
+**Things the build found, worth keeping:**
+
+- The first draft put the protocol in `namespace maya` and the examples used a
+  variable called `maya`, which does not compile (`expected primary-expression
+  before '.'`). The namespace is `mayalib` so the obvious name is free.
+- The BLE `getValue()` returns `std::string` on ESP32 core 2.x and `String` on
+  3.x; `smartextension.ino` as written does not build on 2.0.17 for that reason.
+  The library converts through `c_str()` so it builds on either.
+- BLE + TLS + WiFi is ~1.7 MB, over the default 1.2 MB app partition. Both the
+  library and the old sketch need the **Huge APP** partition scheme; the old
+  `SETUP.md` never said so.
+- The "wipe on a new build" fingerprint used `__DATE__ __TIME__`, which inside a
+  library is baked in when *the library* is compiled — a cached object would never
+  notice a new sketch. It is now `ESP.getSketchMD5()`.
+
+**Declarations the library refuses** (and prints on Serial at `begin()`): a bad
+key, a duplicate, a `_` key it does not own, more than 32 capabilities, a
+descriptor over 4 KB. Nothing is sent in that case — the server would only reject
+it — so a wrong sketch fails loudly on the bench instead of silently on the wire.
+
+**Not in the library yet:** peering (§7), device→Maya (§8), `report_every`
+(§5.8). `hardware/smartextension/smartextension.ino` is untouched and remains the
+shipped firmware until `examples/SmartExtension3ch` has run on a real board.

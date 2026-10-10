@@ -39,6 +39,7 @@ assistant you can talk to, and child supervision (screen time and location).
 | [`software/server`](software/server) | FastAPI backend, AI agent loop, data models, web portals ([setup](software/server/README.md)) |
 | [`software/mobile`](software/mobile) | Flutter Parent/Child app ([design system](software/mobile/DESIGN.md)) |
 | [`hardware/smartextension`](hardware/smartextension) | ESP32 firmware ([setup](hardware/smartextension/SETUP.md), [wiring](hardware/smartextension/WIRING.md)) |
+| [`hardware/libraries/Maya`](hardware/libraries/Maya) | Arduino library for building your own Maya device: declare what it can do, the library speaks the protocol ([README](hardware/libraries/Maya/README.md)) |
 | [`software/skills/maya-open-api`](software/skills/maya-open-api) | Agent skill for driving Maya through the Open API |
 | [`wiki/`](wiki/index.md) | Code wiki: architecture, server, mobile, firmware, AI agent, data model, known gaps |
 | [`PROTOCOL.md`](PROTOCOL.md) | Maya Device Protocol v2 draft (self-describing devices, sensors, hubs) |

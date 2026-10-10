@@ -34,6 +34,8 @@ You need to install two third-party libraries for WebSockets and JSON parsing.
 3. Navigate to the `hardware/smartextension` directory and select `smartextension.ino`.
 
 ## 5. Select Your Board and Port
+0. Set **Tools** > **Partition Scheme** to **Huge APP (3MB No OTA/1MB SPIFFS)**. BLE, TLS and Wi-Fi together are about 1.7 MB, which does not fit the default partition; without this the build stops with "Sketch too big".
+   *(Building your own device? Use the [Maya library](../libraries/Maya/README.md) instead of this sketch.)*
 1. Go to **Tools** > **Board** > **ESP32 Arduino**, and select your specific ESP32 board model (e.g., "DOIT ESP32 DEVKIT V1", "ESP32 Dev Module").
 2. Connect your ESP32 to your computer using the USB cable.
 3. Go to **Tools** > **Port**, and select the COM port (Windows) or `/dev/cu.usbserial...` (Mac/Linux) corresponding to your ESP32.

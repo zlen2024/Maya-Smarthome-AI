@@ -276,3 +276,19 @@ stored as floats, which reads like a decimal control to a model. The first was
 the test's ordering, the second was fixed in `_describe_capability`.
 
 All five server self-checks pass. Dart unchanged by this step.
+
+## [2026-10-10] ingest | Protocol v2 step 4: the Arduino library
+
+Added `hardware/libraries/Maya` (`MayaCore` = the protocol with no hardware,
+`Maya` = BLE/WiFi/WebSocket moved from `smartextension.ino`), two examples, and
+`extras/test/test_library.py`. Updated: `PROTOCOL.md` §10 (step 4 done),
+`pages/device-protocol.md` (new Step 4 section), `pages/firmware-esp32.md`
+(superseded-in-intent note), `index.md` (coverage row), `todos.md`, `README.md`,
+`hardware/smartextension/SETUP.md` (Huge APP partition).
+
+**No graph rebuild needed:** the library lives outside both graph roots, so
+`symbol_index.md` is unchanged by this step. Verified instead by running the
+test: 7 checks against the real server's parser and app, two deliberate bugs
+confirmed to fail it, and both examples compiled for ESP32 with arduino-cli.
+**Not verified:** anything on a real board.
+
