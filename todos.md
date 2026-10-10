@@ -161,7 +161,25 @@ descriptors; shims protocol 1. Nothing else changes." Status and reasoning:
   been compiled.
 - [ ] Flash `examples/SmartExtension3ch` to a real board and provision it; until
   then `hardware/smartextension/smartextension.ino` stays as the shipped firmware.
-- [ ] **Step 5** — peering (§7). **Step 6** — device to Maya (§8).
+- [x] **Step 5a — peering, server half** (2026-10-10, spec revision 2.2). One-way
+  grants with an explicit finite scope, a server-generated key never returned to an
+  app, `peer_grant` / `peer_revoke` / `peer_sync` pushed to devices, `peer_log`
+  ingest with a two-ended cross-check. `test_peering.py` (6 checks).
+- [ ] **Step 5b — peering, library half**: send `mac` in identify, grant store in
+  flash, HMAC-SHA256 frame check, `(ep, seq)` replay ordering, scope enforcement,
+  audit ring buffer. The logic belongs in `MayaCore` and can be host-tested; the
+  ESP-NOW radio cannot be tested without two boards. Until then no device can be
+  paired (the server refuses a device with no MAC).
+- [ ] Peering UI in the app (pair, list, revoke, audit view) — needs the Flutter SDK.
+- [ ] Hub relay (§5.9) is a *user* of peering and is not started.
+- [ ] **Step 6** — device to Maya (§8).
+- [ ] **Open security finding, not fixed:** `POST /api/devices/register` lets any
+  house with the right to add devices re-claim a device id already claimed by
+  another house, moving it. The device itself stays safe (the PIN the new claimer
+  sets will not match its firmware, so it cannot connect), but the old owner
+  silently loses the record. Device ids are `esp32-` plus the low 32 bits of the
+  MAC. A fix is a design decision (who may take a claimed device, and how the
+  previous owner is told), so it was recorded rather than changed.
 - [ ] `report_every` is stored but unread: the §5.8 `status` vocabulary exists on
   paper only, and the three call sites are `ConnectionManager`, the device list
   endpoint and Maya's house context.

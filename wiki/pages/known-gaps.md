@@ -112,3 +112,11 @@ mobile. Firmware pages are written from source reading, not graph queries.
   are 14), omits `ai.py`/`auth.py`, and hardcodes paths from another machine
   (`/workspace`, `c:/dev/fyp/...`). Superseded by this wiki; see
   [decisions](decisions.md#2026-09-08--replaced-the-single-file-code_wikimd).
+
+## Peering: the server half exists, the device half does not (2026-10-10)
+
+`/api/peerings` and the `peer_*` frames work and are tested, but no device speaks
+them yet: the Maya library does not send `mac` (so the server refuses to pair it)
+and has no grant store, frame check or audit buffer. The ESP-NOW radio and the
+hub relay cannot be tested without two boards. See
+[device-protocol §Step 5a](device-protocol.md#step-5a-2026-10-10-peering-the-servers-half).

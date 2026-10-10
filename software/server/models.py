@@ -111,6 +111,10 @@ class Device(Base):
     # holds a socket open; set by sleepy devices so the server can tell one that
     # is napping on schedule from one that has died (§5.8).
     report_every = Column(Integer, nullable=True)
+    # WiFi station MAC from identify (§7.1). Pairing needs it: a receiver matches
+    # the radio-level source address against the peer's MAC. Null until the
+    # device has said, and a device without one cannot be paired.
+    mac = Column(String, nullable=True)
 
     house = relationship("House", back_populates="devices")
     extensions = relationship("SmartExtension", back_populates="device", cascade="all, delete-orphan")
@@ -381,3 +385,69 @@ class Heartbeat(Base):
     ch2 = Column(String, default="off")
     ch3 = Column(String, default="off")
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class PeerGrant(Base):
+    """One device may address another over the local link (PROTOCOL.md §7.1).
+
+    One-way: `from_device` may send to `to_device`, within `scope`, which names
+    the *receiver's* capability keys. The 32-byte key is stored because the
+    server must re-send it when a device reconnects; it is never returned by any
+    API, only pushed down the device's own authenticated WebSocket.
+
+    Revoking sets `revoked_at` rather than deleting, so the audit of what the
+    pairing did outlives the pairing.
+    """
+    __tablename__ = "peer_grants"
+
+    grant_id = Column(Integer, primary_key=True, index=True)
+    house_id = Column(Integer, ForeignKey("houses.house_id"), nullable=False, index=True)
+    from_device = Column(String, ForeignKey("devices.device_id"), nullable=False, index=True)
+    to_device = Column(String, ForeignKey("devices.device_id"), nullable=False, index=True)
+    key = Column(String, nullable=False)          # base64, 32 random bytes
+    scope = Column(String, nullable=False)        # JSON list of the receiver's capability keys
+    expires_at = Column(DateTime, nullable=False)
+    created_by = Column(Integer, nullable=True)   # acc_id of the member who paired them
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    revoked_at = Column(DateTime, nullable=True)
+
+
+class PeerLogEntry(Base):
+    """One audit line a device reported about a grant (§7.3). Bounded per house
+    by the code that writes it: a device must not be able to fill the database."""
+    __tablename__ = "peer_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    house_id = Column(Integer, nullable=False, index=True)
+    grant_id = Column(Integer, nullable=False, index=True)
+    reporter = Column(String, nullable=False)     # the device that said it
+    dir = Column(String, nullable=False)          # "in" or "out"
+    ep = Column(Integer, nullable=False, default=0)
+    seq = Column(Integer, nullable=False, default=0)
+    count = Column(Integer, nullable=False, default=1)
+    kind = Column(String, nullable=True)
+    peer = Column(String, nullable=True)
+    summary = Column(String, nullable=True)
+    result = Column(String, nullable=True)
+    received_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class PeerLogCounter(Base):
+    """What each side claims, per (grant, reporter, dir, epoch): the highest seq,
+    the frames logged and the entries it admitted to dropping. The unexplained
+    gap `claimed - logged - dropped` is what §7.3 asks an operator to read."""
+    __tablename__ = "peer_log_counters"
+    __table_args__ = (
+        UniqueConstraint("grant_id", "reporter", "dir", "ep", name="_peer_counter_uc"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    grant_id = Column(Integer, nullable=False, index=True)
+    reporter = Column(String, nullable=False)
+    dir = Column(String, nullable=False)
+    ep = Column(Integer, nullable=False, default=0)
+    claimed = Column(Integer, nullable=False, default=0)
+    logged = Column(Integer, nullable=False, default=0)
+    dropped = Column(Integer, nullable=False, default=0)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+

@@ -1,6 +1,6 @@
 # Maya Device Protocol
 
-**Version 2 (draft), document revision 2.1** · Status: §10 step 1 implemented
+**Version 2 (draft), document revision 2.2** · Status: §10 step 1 implemented
 2026-10-10; steps 2-6 proposed. The server stores descriptors and shims protocol 1; the app, Maya and
 the firmware are untouched and still speak protocol 1. See
 `wiki/pages/device-protocol.md` for what exists versus what is still on paper —
@@ -12,6 +12,15 @@ document: claiming (§4.1), permissions (§5.10), labels (§5.11), history (§5.
 the status vocabulary (§5.8), the public API surface (§12), and the smaller
 interop gaps marked there. `proto` stays **2** — one optional ack field was added
 (§6.2), which §11 classes as a free change.
+
+Revision 2.2 (2026-10-10) specified the device-to-device link (§7) well enough to
+build: who may pair and what may be granted, the one-way grant and its `role`,
+the frame MAC and size limit, `(ep, seq)` replay ordering, `peer_sync`, and what
+the audit keeps. Two optional fields were added — `mac` in identify, and
+`role`/`dir`/`ep`/`count` in the peering frames — and two frame types,
+`peer_sync` and the local `ack`. Nothing was renamed, so `proto` stays **2**.
+The first draft's `ts` on local frames was dropped, because ordering never needed
+it; no implementation existed to break.
 Contract between Maya firmware (`hardware/*`, and the Arduino library repo) and
 the Maya backend (`software/server`) + app (`software/mobile`).
 
@@ -169,7 +178,8 @@ Sent in the identify frame. This is the heart of v2.
 ```
 
 Top-level descriptor fields: `id`, `proto`, `status` and `pin` are required;
-`ip`, `model`, `fw`, `report_every`, `wake_mah` and `batt_mah` are optional. The
+`ip`, `mac`, `model`, `fw`, `report_every`, `wake_mah` and `batt_mah` are optional.
+`mac` is the WiFi station MAC and is required **to be paired** (§7.1). The
 last two are a battery device's energy per wake and its pack capacity, which let
 the app state the cost of a reporting interval instead of guessing at it
 (§5.8). `report_every` (seconds)
@@ -1093,13 +1103,19 @@ This section defines the local link itself. Its largest user is the hub relay of
 it sends are ordinary local frames. Read §5.9 for *why* a device would use this;
 read here for *how* it is secured and shaped.
 
+Three planes meet here, and each rule below belongs to exactly one of them:
+**who may peer** is decided on the control plane (§7.1, the server); **what a
+frame looks like and whether to believe it** is the data plane (§7.2, the
+devices); **what happened** is the audit plane (§7.3, the devices reporting back
+to the server).
+
 ### 7.1 Pairing (control plane — this is the enforcement point)
 
 A house member pairs two devices in the app. The server then pushes a grant to
 **both** devices:
 
 ```json
-{"id":"esp32-a", "type":"peer_grant", "grant_id":"g-42",
+{"id":"esp32-a", "type":"peer_grant", "grant_id":"g-42", "role":"send",
  "peer":{"id":"esp32-b","mac":"24:6F:28:AA:BB:CC"},
  "key":"<32-byte base64>", "scope":["speed","msg"], "expires":"2026-12-31T00:00:00Z"}
 ```
@@ -1113,53 +1129,168 @@ Rules a device MUST follow:
 3. Persist grants across reboot; drop them on `factory_reset`.
 4. Treat an expired grant as absent.
 
-### 7.2 Local frame (data plane)
+#### Who may pair, and what may be granted
+
+Added in revision 2.2; the first draft of this section said what a device does
+with a grant and nothing about who may create one.
+
+- **Only a house master, or a member the master has authorised to manage
+  devices** (the same right that lets them claim a device, §4.1). Never a child.
+  Both devices MUST belong to that member's house and be unblocked.
+- **A grant is one-way.** It says *sender* may address *receiver*. The frame each
+  device is pushed carries `role`: `"send"` to the device that may transmit and
+  `"recv"` to the one that accepts. `scope` always names **the receiver's**
+  capability keys, and only the receiver enforces it. Two devices that should talk
+  both ways need two grants, because "A may press B's reset" must never come
+  free with "B may report to A".
+- **Scope is explicit and finite.** Each key MUST be a capability the receiver
+  currently declares, writable (`access` `rw` or `w`), and not a reserved `_`
+  key. A capability the receiver gains later is **not** in any existing scope —
+  the same default-denied rule as §5.10, for the same reason: a firmware update
+  must never widen what a peer can reach. A key the receiver later drops stops
+  being honoured immediately: the receiver receives its scope afresh at every
+  identify and MUST intersect it with what it currently declares.
+- **A capability declared `confirm:true` or `agent:"deny"` cannot be in a peer
+  scope; the server refuses.** Both mean "a person, or at least not an
+  automaton, stands between the request and the action" (§5.4). A peer is
+  precisely an automaton with no person present, so allowing it would be a way
+  around the control the firmware author asked for. The restriction can be
+  relaxed later without breaking anything; tightening it later could not.
+- **Re-pairing replaces.** Creating a grant for a (sender, receiver) pair that
+  already has an active one revokes the old and issues a new `grant_id` and a new
+  key. That is how a key is rotated and a scope changed — there is no edit.
+
+#### The key, and where it lives
+
+`key` is 32 random bytes, generated by the server, standard base64. The server
+keeps it (it must re-send it to a device that reconnects) and **never returns it
+to an app or any API caller**: the key is only ever sent down a device's own
+authenticated WebSocket. It is shared by both ends of one grant and by nobody
+else.
+
+`expires` is set by the server, ISO 8601 UTC, **default 30 days, at most 365**. An
+expired grant is absent (rule 4) and the server stops pushing it. Re-pairing
+renews.
+
+#### Identify carries a MAC
+
+A device that wants to be paired MUST include `"mac":"AA:BB:CC:DD:EE:FF"` — its
+WiFi station MAC, upper-case hex — in its identify frame. This is an optional
+field (§1 rule 4), so no existing device changes, but the server **refuses to
+pair a device whose MAC it does not know**, because the peer's `mac` in the frame
+above is what a receiver matches the radio-level source address against (§7.2).
+
+#### Staying in step: a revoke can be missed
+
+A device that is offline when a grant is revoked never receives `peer_revoke`.
+So at every identify of a protocol-2 device, after `welcome`, the server sends
+one `peer_grant` per active grant that involves it and then a single
 
 ```json
-{"v":2, "from":"esp32-a", "grant":"g-42", "seq":118, "ts":123456,
- "kind":"set", "values":{"speed":60}}
+{"id":"esp32-a", "type":"peer_sync", "grants":["g-42","g-57"]}
 ```
 
-- `seq` is a per-(sender, grant) counter, monotonic since boot. It exists so the
-  server can **detect gaps** in the audit log — a receiver SHOULD reject a `seq`
-  it has already seen (replay).
-- `ts` is sender `millis()`, not wall clock. Combined with `boot_id` in the audit
-  batch it lets the server order events without the device having a real clock.
+listing **every** active grant id for that device, possibly empty. A device MUST
+drop any grant it holds that is not in the list. This closes the stale-grant
+window of §7.4 at the next reconnect rather than leaving it to `expires`.
+
+### 7.2 Local frame (data plane)
+
+A local frame is a JSON object followed by a dot and a MAC:
+
+```
+{"v":2,"from":"esp32-a","grant":"g-42","ep":7,"seq":118,"kind":"set","values":{"speed":60}}.<mac>
+```
+
+- **The MAC is HMAC-SHA256 over the exact bytes of the JSON text** (everything
+  before the final `.`), keyed with the grant `key`, **truncated to 16 bytes and
+  encoded as 22 base64url characters, no padding.** Signing the bytes as sent,
+  rather than a re-serialisation, means two implementations can never disagree
+  about field order or number formatting — the usual way a MAC check starts
+  failing between two firmware versions.
+- **A receiver verifies before it believes anything.** It reads `grant` from the
+  not-yet-trusted JSON only to find which key to try, checks the MAC, and only
+  then looks at `from`, `kind` or `values`. It then also checks that `from` is
+  the grant's sender and that the radio-level source MAC matches the peer's `mac`.
+  The last check is cheap and spoofable; it is a tripwire, not the defence — the
+  MAC is the defence.
+- **A frame MUST fit one ESP-NOW payload: 250 bytes including the MAC.** A sender
+  that cannot fit a frame refuses to send it and reports `unsupported` locally; it
+  does not fragment. `kind:"msg"` payloads are bounded by this, deliberately.
+- **Ordering is `(ep, seq)`.** `ep` ("epoch") is a counter the sender persists
+  and increments on every boot; `seq` counts frames per (sender, grant) from 1
+  within an epoch. A receiver MUST reject any frame whose `(ep, seq)` is not
+  greater than the last accepted for that grant. Because `ep` survives reboots, a
+  restarted sender is *newer* rather than a replay — the first draft keyed on
+  `seq` alone, which made every reboot indistinguishable from an attack.
+- **Residual window, stated rather than hidden.** A receiver keeps `seq` in RAM
+  and `ep` in flash. After the receiver reboots it accepts the next frame of the
+  stored epoch regardless of `seq`, so an attacker who captured traffic could
+  replay **one** frame per receiver reboot. This is bounded by `expires`, by
+  revocation, and by the capture needing to be within radio range; devices whose
+  `set` is not idempotent should say so in their own design.
 - `kind` is `set`, `event`, or `msg` (free payload for device-defined chatter).
-- Frames MUST be authenticated with the grant `key`. An unauthenticated frame is
-  dropped, not processed.
+  A `set` applies the same value rules as §6.2 and is answered with a local
+  `kind:"ack"` frame carrying `status` as in §9. There is **no timestamp**: a
+  battery device has no clock worth trusting, and ordering is `(ep, seq)`.
+- Frames MUST be authenticated. An unauthenticated frame is dropped, not
+  processed — and not answered, so a probe learns nothing.
 
 ### 7.3 Audit (audit plane)
 
-Local activity is reported to the server **batched, best-effort, and bounded**:
+Local activity is reported to the server **batched, best-effort, and bounded**.
+**Both ends report**, because the value of the audit is comparing them:
 
 ```json
-{"id":"esp32-a", "type":"peer_log", "boot_id":"b-9f3", "batch":[
-  {"grant":"g-42","seq":118,"ts":123456,"kind":"set","peer":"esp32-b","summary":"speed=60","result":"ok"},
-  {"grant":"g-42","seq":119,"ts":123890,"kind":"set","peer":"esp32-b","result":"not_permitted"}
+{"id":"esp32-a", "type":"peer_log", "boot_id":"b-9f3", "dropped":0, "batch":[
+  {"grant":"g-42","dir":"out","ep":7,"seq":118,"count":1,"kind":"set","peer":"esp32-b","summary":"speed=60","result":"ok"},
+  {"grant":"g-42","dir":"out","ep":7,"seq":119,"count":1,"kind":"set","peer":"esp32-b","result":"not_permitted"}
 ]}
 ```
 
+- `dir` is `out` (this device sent) or `in` (this device received). `seq` is the
+  **highest** sequence number the entry covers and `count` how many frames it
+  stands for (default 1), so an aggregated entry says "frames 200-262, 63 of them".
 - **Buffer when offline.** A bounded ring buffer (RECOMMENDED at least 64
   entries) that flushes on reconnect. Without this, visibility disappears exactly
   when the network is broken — which is when it matters most.
 - **On overflow, drop oldest and set `"dropped":<n>`** on the next batch. The
   server records a gap. Never let logging block or fail the local data path.
 - **Do not log every frame at high rate.** A device exchanging frames faster than
-  about 1 Hz MUST aggregate (count, first/last `ts`, last value) rather than emit
+  about 1 Hz MUST aggregate (`count`, last `seq`, last value) rather than emit
   one entry per frame.
 - Flush at most every 10 s, or immediately for a `result` other than `ok`.
+- **At most 64 entries per frame.** A longer batch is truncated by the server and
+  counted as dropped.
 
-Because `seq` is monotonic, the server can report "device A claims 400 frames,
-logged 120" — so silence is visible as a gap rather than looking like inactivity.
+Because `seq` is monotonic within an epoch, the server can say "device A claims
+118 frames sent on this grant, device B logged 9 received" — silence on either
+side is visible as a gap rather than looking like inactivity.
+
+**What the server keeps.** Per (grant, reporter, `dir`, `ep`): the highest `seq`
+claimed and the sum of `count` logged; per reporter, the total of `dropped`. The
+**unexplained gap** for a side is `claimed − logged`; the reporter's `dropped`
+total is shown beside it as the most that buffer overflow could account for —
+`dropped` is a property of the batch, not of a grant, because an entry that was
+dropped took its grant with it. The server also lines the two ends up per epoch:
+the sender's highest claimed `seq` against what the receiver logged. That
+difference, minus whatever `dropped` can explain, is a frame that was sent and
+never arrived or never admitted. The server
+accepts a `peer_log` entry only from a device that is a party to the grant it
+names, and ignores the rest. Entries are retained per house up to 5,000, oldest
+first out — a device must not be able to fill the database. A device's log rate
+is limited like any other frame.
 
 ### 7.4 Revocation
 
 Revoking a pairing removes it server-side immediately and pushes
 `{"type":"peer_revoke","grant_id":"g-42"}` to both devices. A device that is
-offline keeps operating on the stale grant until it reconnects — an accepted
-window, and the reason grants carry `expires`. Keep expiry short (days, not
-years) for anything sensitive.
+offline keeps operating on the stale grant until it reconnects, at which point
+`peer_sync` (§7.1) corrects it — an accepted window, and the reason grants carry
+`expires`. Keep expiry short (days, not years) for anything sensitive.
+
+Removing a device from a house, or a `factory_reset`, revokes every grant that
+involves it.
 
 ---
 
@@ -1266,6 +1397,11 @@ on its own and none of them breaks what is already deployed:
    board**. Not covered yet: peering (§7), device→Maya (§8), `report_every`
    (§5.8).
 5. Peering: grants, local link, audit.
+   — **spec done 2026-10-10** (revision 2.2, §7). **5a, the server half, done
+   the same day** (`peering.py`, `/api/peerings`, `peer_sync`, `peer_log`
+   ingest; `test_peering.py`). **5b, the library's side of the link, and the
+   ESP-NOW radio itself, are not built**, and the radio cannot be tested
+   without two boards.
 6. Device to Maya.
 
 Two pieces of this document sit outside that order because they depend on it

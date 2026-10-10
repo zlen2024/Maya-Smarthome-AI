@@ -388,6 +388,10 @@ def test_against_the_real_server(exe):
         ws.send_json(identify)
         welcome = ws.receive_json()
         assert welcome["type"] == "welcome" and welcome["proto"] == 2, welcome
+        # §7.1: a protocol-2 device is always sent peer_sync after welcome; it is
+        # not what these tests are about, so read past it.
+        if welcome.get("proto", 1) >= 2:
+            assert ws.receive_json()["type"] == "peer_sync"
 
         caps = c.get(f"/api/devices/{ID}/capabilities", headers=tok).json()
         assert caps["proto"] == 2 and caps["model"] == "host_test" and caps["fw"] == "9.9.9", caps

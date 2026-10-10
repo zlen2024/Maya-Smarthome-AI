@@ -292,3 +292,18 @@ test: 7 checks against the real server's parser and app, two deliberate bugs
 confirmed to fail it, and both examples compiled for ESP32 with arduino-cli.
 **Not verified:** anything on a real board.
 
+## [2026-10-10] ingest | Protocol v2 step 5a: peering, server half (spec 2.2)
+
+Rewrote `PROTOCOL.md` §7 (revision 2.2) and built the server side:
+`peering.py`, three tables, `Device.mac`, `/api/peerings` (create/list/revoke/audit),
+`peer_grant`/`peer_revoke`/`peer_sync` pushes and the `peer_log` handler.
+`test_peering.py` (6 checks) added; the other five server self-checks and
+`test_library.py` re-run and pass, after four of them were taught to read past the
+new `peer_sync` frame.
+
+Updated: `pages/device-protocol.md` (Step 5a), `pages/data-model.md`,
+`pages/security-notes.md` (two new entries, one OPEN), `pages/known-gaps.md`,
+`todos.md`, `software/server/README.md`. Graph rebuilt.
+
+**Found, not fixed:** any house can re-claim a device id another house owns
+(security-notes §8). **Not verified:** anything involving a radio.

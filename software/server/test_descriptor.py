@@ -290,6 +290,10 @@ def test_v2_device_end_to_end():
         ws.send_json(SALT_JAR)
         welcome = ws.receive_json()
         assert welcome["proto"] == 2, welcome
+        # §7.1: a protocol-2 device is always sent peer_sync after welcome; it is
+        # not what these tests are about, so read past it.
+        if welcome.get("proto", 1) >= 2:
+            assert ws.receive_json()["type"] == "peer_sync"
 
         got = c.get("/api/devices/esp32-saltjar-01/capabilities", headers=tok).json()
         assert got["proto"] == 2 and got["model"] == "jar_scale_v1"
@@ -350,6 +354,7 @@ def test_v2_set_round_trip():
             "state": {"ch1": "off", "speed": 0, "mode": "eco", "lock": "off"},
         })
         assert ws.receive_json()["proto"] == 2
+        assert ws.receive_json()["type"] == "peer_sync"   # §7.1, always sent after welcome
 
         # The POST blocks until the device acks, so the device has to be played
         # from this thread while the request runs in another.

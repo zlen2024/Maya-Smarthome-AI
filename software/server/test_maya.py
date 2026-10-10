@@ -98,7 +98,12 @@ def identify(c, device_id, frame, pin):
     session = c.websocket_connect("/ws")
     ws = session.__enter__()
     ws.send_json({"id": device_id, "pin": pin, **frame})
-    assert ws.receive_json()["type"] == "welcome"
+    welcome = ws.receive_json()
+    assert welcome["type"] == "welcome"
+    # §7.1: a protocol-2 device is always sent peer_sync after welcome; it is
+    # not what these tests are about, so read past it.
+    if welcome.get("proto", 1) >= 2:
+        assert ws.receive_json()["type"] == "peer_sync"
     return ws, session
 
 

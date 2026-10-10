@@ -10,7 +10,7 @@ The goal the protocol exists for: a contributor builds new hardware, drops it in
 firmware to app — `ch1`/`ch2`/`ch3` appeared 76 times across 6 files when the
 migration was planned.
 
-## Status: steps 1, 3 and 4 done, step 2 server-complete, spec at revision 2.1 (2026-10-10)
+## Status: steps 1, 3, 4 and 5a done, step 2 server-complete, spec at revision 2.2 (2026-10-10)
 
 §10 defines a six-step migration order. Only the first is implemented.
 
@@ -20,7 +20,7 @@ migration was planned.
 | 2. App renders from the descriptor instead of three hardcoded toggles | server done; app partly — see below |
 | 3. Maya swaps her relay tool for a generic `set_capability` | **done** |
 | 4. Extract the Arduino library | **done** (compiles for ESP32; not yet flashed) |
-| 5. Peering: grants, local link, audit (§7) | not started |
+| 5. Peering: grants, local link, audit (§7) | spec done (2.2); **5a server done**; 5b library and the radio not started |
 | 6. Device to Maya (§8) | not started |
 
 **Steps 1–3 needed no firmware change.** The shipped ESP32 still speaks protocol 1 and
@@ -293,3 +293,63 @@ it — so a wrong sketch fails loudly on the bench instead of silently on the wi
 **Not in the library yet:** peering (§7), device→Maya (§8), `report_every`
 (§5.8). `hardware/smartextension/smartextension.ino` is untouched and remains the
 shipped firmware until `examples/SmartExtension3ch` has run on a real board.
+
+## Step 5a (2026-10-10): peering, the server's half
+
+The server never sees a local frame — they fly between two radios — so what it
+owns is the **decision** (who may peer, with what, until when) and the **record**
+(what the devices say happened). Spec revision 2.2 had to come first, because §7
+as drafted said what a device does with a grant and nothing about who may create
+one. It now fixes:
+
+| Question | Answer |
+|---|---|
+| Who may pair | Master, or a member authorised to manage devices; never a child. Both devices must be in that house. |
+| Direction | **One-way.** `role` is `send` or `recv`; `scope` names the *receiver's* keys and only the receiver enforces it. |
+| What may be granted | Writable, non-reserved capabilities that are **not** `confirm:true` and **not** `agent:"deny"` — a peer is an automaton with nobody present, so those controls cannot be reached through one. |
+| New capabilities | Default-denied, as in §5.10. A key the receiver drops stops being honoured; the scope is intersected with the live declaration on every push. |
+| Re-pairing | Replaces: new id, new key. There is no edit, which is also how a key is rotated. |
+| The key | 32 random bytes, kept so it can be re-sent, **never returned by any API**, only pushed down the device's authenticated WebSocket. |
+| Frame check | HMAC-SHA256 over the *exact bytes* sent, truncated to 16 bytes, so two implementations cannot disagree about field order. 250-byte ESP-NOW limit, no fragmentation. |
+| Replay | Ordered by `(ep, seq)`; `ep` is persisted and incremented each boot, so a restarted sender is *newer* rather than a replay. The residual window (one frame per receiver reboot) is stated in the spec, not hidden. |
+| Missed revokes | `peer_sync` after every v2 identify lists every active grant; the device drops the rest. |
+
+**What was built** — `peering.py` (no HTTP, no sockets, so testable alone),
+`PeerGrant` / `PeerLogEntry` / `PeerLogCounter`, `Device.mac`, four endpoints
+(`POST/GET /api/peerings`, `DELETE /api/peerings/{id}`, `GET .../audit`), the
+`peer_log` handler (rate limited to 12 a minute per device), and grant pushing at
+identify, on pairing and on revoke. `test_peering.py` plays two devices over real
+WebSockets.
+
+**The audit's point is that both ends report.** The sender says what it sent and
+the receiver what it received, per epoch, and the server lines them up:
+`cross_check` shows e.g. "sent 118, received 100, missing 18". An entry is
+accepted only from a device that is a party to the grant **and on the side it
+claims** — the sender says `out`, the receiver `in` — otherwise one end could
+write the other's half of the story. A device's own `dropped` count is a
+per-reporter total, not per-grant, because a dropped entry takes its grant with
+it. Retention is bounded (5,000 per house, oldest out) so a device cannot fill the
+database.
+
+**Three bugs the tests found in the first cut**, worth keeping:
+
+1. *Re-claim moved the device but not its grants.* The same device id claimed by a
+   second house left the first house's pairing active — a decision made by people
+   who no longer own the device. `register_device` now revokes on a change of
+   house, and the replace-on-repair query is scoped to the house.
+2. *`create_grant` checked state before ownership.* A device in someone else's
+   house answered 409 ("protocol 1") instead of 404, which confirms the device
+   exists. Both ends are now known to be this house's before anything is said
+   about either.
+3. *Pruning counted only committed rows,* so a batch that had not flushed yet was
+   invisible to the retention check. It now flushes first.
+
+**An intended behaviour change that broke four older tests:** every protocol-2
+device now receives `peer_sync` straight after `welcome`. The library ignores
+unknown frame types, so devices are unaffected; the tests that read "the next
+frame" now read past it.
+
+**Not done:** the library's side (5b — it does not yet send `mac`, so **no real
+device can be paired**: the server refuses one with no MAC), the ESP-NOW radio,
+the app UI, and the hub relay of §5.9. One security finding was recorded and not
+fixed — see [security notes](security-notes.md#8-any-house-can-re-claim-a-device-id-another-house-owns--open).

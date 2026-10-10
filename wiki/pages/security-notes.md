@@ -231,3 +231,32 @@ deployment — a single uvicorn process against one SQLite file — but behind
 several instances each would hold its own counters, so the effective limit is
 multiplied by the instance count. Counters also reset on restart. This is why the
 lockouts that matter also write to the activity log, which survives both.
+
+## 8. Any house can re-claim a device id another house owns — OPEN
+
+Found 2026-10-10 while testing step 5a. `POST /api/devices/register` sets
+`existing.house_id` to the caller's house without asking whether the device is
+already someone else's. Anyone with the right to add devices can therefore take a
+device record away from the house that owns it, given its id (`esp32-` plus the
+low 32 bits of the MAC).
+
+**What this does not do:** it does not give control of the device. The PIN the new
+claimer sets will not match the PIN in the firmware, so the board is refused at
+identify. **What it does:** the legitimate owner silently loses the record, and
+(until now) the peering grants made by the old house stayed live — step 5a now
+revokes them on a change of house.
+
+**Not fixed**, because the right fix is a decision about product behaviour: who may
+take a claimed device (the previous owner releasing it? a physical reset?), and how
+the previous house is told. Recorded in `todos.md`.
+
+## 9. Peering keys are stored in clear — by necessity
+
+`peer_grants.key` holds the 32-byte HMAC key unhashed, because the server must
+re-send it whenever a device reconnects. It is never returned by any API (checked
+in `test_peering.py`: the grant list and the audit contain no key), only pushed
+down the device's own PIN-authenticated WebSocket. A database leak therefore
+exposes the keys, which is the same exposure device PINs already have (§3). The
+mitigations are the ones §7.4 builds in: grants expire (30 days by default, 365 at
+most), re-pairing rotates the key, and revocation is immediate for a connected
+device and corrected by `peer_sync` for one that was offline.

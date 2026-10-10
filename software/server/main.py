@@ -19,6 +19,7 @@ from models import (
 )
 from models import ApiKey, ActivityLog, Mention
 from models import DeviceCapability, CapabilityState, CapabilityGrant, CapabilityLabel
+from models import PeerGrant, PeerLogEntry, PeerLogCounter
 from auth import (
     hash_password, verify_password, create_access_token, get_current_user,
     get_current_user_or_child, get_api_key_house, hash_api_key,
@@ -29,6 +30,7 @@ import secrets
 import ai
 from ratelimit import RateLimit, FailureLock, client_ip
 import capability_store
+import peering
 from descriptor import (PROTO_MAX, DescriptorError, coerce_value, parse_identify,
                         v1_state)
 from validators import normalize_device_pin, normalize_child_pin
@@ -97,6 +99,7 @@ def run_migrations():
             ('model', 'ALTER TABLE devices ADD COLUMN model TEXT'),
             ('fw', 'ALTER TABLE devices ADD COLUMN fw TEXT'),
             ('report_every', 'ALTER TABLE devices ADD COLUMN report_every INTEGER'),
+            ('mac', 'ALTER TABLE devices ADD COLUMN mac TEXT'),
         ):
             if col not in device_cols:
                 db.execute(text(ddl))
@@ -107,7 +110,10 @@ def run_migrations():
         for table, model in (('device_capabilities', DeviceCapability),
                              ('capability_state', CapabilityState),
                              ('capability_grants', CapabilityGrant),
-                             ('capability_labels', CapabilityLabel)):
+                             ('capability_labels', CapabilityLabel),
+                             ('peer_grants', PeerGrant),
+                             ('peer_log', PeerLogEntry),
+                             ('peer_log_counters', PeerLogCounter)):
             if table not in inspector.get_table_names():
                 model.__table__.create(bind=engine)
 
@@ -262,6 +268,7 @@ CHILD_PIN_LOCK = FailureLock(5,  900,  900,  "child sign-in")     # per child
 ADMIN_LOCK     = FailureLock(5,  900,  1800, "admin sign-in")     # per IP
 LOGIN_RATE     = RateLimit(30, 300, "login")                      # per IP
 REGISTER_RATE  = RateLimit(5, 3600, "account registration")       # per IP
+PEER_LOG_RATE  = RateLimit(12, 60, "peer log")                   # per device (§7.3)
 VOICE_RATE     = RateLimit(20, 60, "voice command")               # per caller
 VOICE_DAY_RATE = RateLimit(300, 86400, "voice command (daily)")   # per caller
 OPEN_API_RATE  = RateLimit(60, 60, "Open API")                    # per key
@@ -1334,7 +1341,12 @@ async def register_device(payload: dict, db: Session = Depends(get_db),
     if not device_id:
         raise HTTPException(status_code=400, detail="device_id required")
     existing = db.query(Device).filter(Device.device_id == device_id).first()
+    moved_grants = []
     if existing:
+        if existing.house_id != house_id:
+            # A device that changes house takes no peering with it: those grants
+            # were a decision of the old house's members (§7.4).
+            moved_grants = peering.revoke_for_device(db, device_id)
         existing.house_id = house_id
         existing.name = name
         existing.price = price
@@ -1358,6 +1370,7 @@ async def register_device(payload: dict, db: Session = Depends(get_db),
     # relay name back to "Channel N" on a re-claim, silently wiping a name a
     # member had chosen. §5.11 forbids that outright.
     db.commit()
+    await _push_revocations(moved_grants)
     return {"device_id": device.device_id, "name": device.name, "status": device.status,
             "house_id": device.house_id, "created": existing is None}
 
@@ -1408,13 +1421,115 @@ async def delete_device(device_id: str, db: Session = Depends(get_db),
     # the Device row, so they are cleared here — a grant naming a device that no
     # longer exists would be invisible and would come back to life if the same
     # device id were ever claimed again.
+    ended = peering.revoke_for_device(db, device_id)   # §7.4
     db.delete(device)
     db.query(Heartbeat).filter(Heartbeat.device_id == device_id).delete()
     db.query(CapabilityGrant).filter(CapabilityGrant.device_id == device_id).delete()
     db.query(CapabilityLabel).filter(CapabilityLabel.device_id == device_id).delete()
     db.commit()
     manager.device_info.pop(device_id, None)
+    await _push_revocations(ended, skip=device_id)
     return {"status": "deleted", "device_id": device_id, "device_reset": device_was_online}
+
+
+# ─── Peering (PROTOCOL.md §7, step 5a) ─────────────────────────
+# The server decides who may peer and records what the devices report; the local
+# frames themselves never pass through it.
+async def _push_revocations(grants, skip: str | None = None):
+    """Tell each still-connected end of an ended grant. An end that is offline is
+    corrected by `peer_sync` at its next identify (§7.1)."""
+    for g in grants:
+        for end in (g.from_device, g.to_device):
+            if end != skip:
+                await manager.send_personal_message(
+                    json.dumps(peering.revoke_frame(end, g)), end)
+
+
+def _grant_in_house_or_404(db: Session, grant_ref: str, user: Account) -> PeerGrant:
+    gid = peering.parse_grant_ref(grant_ref)
+    grant = db.query(PeerGrant).filter(PeerGrant.grant_id == gid).first() if gid else None
+    if grant is None or (user.role != AccountRole.admin and grant.house_id != user.house_id):
+        raise HTTPException(status_code=404, detail="Peering not found")
+    return grant
+
+
+@app.post("/api/peerings")
+async def create_peering(payload: dict, db: Session = Depends(get_db),
+                         current_user: Account = Depends(get_current_user)):
+    """Let one device address another: {"from", "to", "scope": [keys], "expires_days"}.
+
+    One-way, and `scope` names the *receiver's* keys (§7.1). Re-pairing a pair
+    replaces the old grant, which is how a key is rotated or a scope changed."""
+    if not _user_can_manage_devices(db, current_user):
+        raise HTTPException(status_code=403, detail="Only the house owner (or members they've authorized) can pair devices")
+    if not current_user.house_id:
+        raise HTTPException(status_code=400, detail="Account has no house")
+    from_id, to_id = payload.get("from"), payload.get("to")
+    if not isinstance(from_id, str) or not isinstance(to_id, str):
+        raise HTTPException(status_code=400, detail="from and to (device ids) required")
+    replaced = [g for g in peering.active_grants(db, from_id)
+                if g.from_device == from_id and g.to_device == to_id]
+    try:
+        grant = peering.create_grant(
+            db, house_id=current_user.house_id, from_id=from_id, to_id=to_id,
+            scope=payload.get("scope"), expires_days=payload.get("expires_days"),
+            created_by=current_user.acc_id)
+    except peering.PairingError as e:
+        db.rollback()
+        raise HTTPException(status_code=e.status, detail=e.detail)
+    log_activity(db, current_user.house_id, "parent", current_user.acc_id, current_user.name,
+                 "peering_created",
+                 f"{current_user.name} let {from_id} address {to_id}: "
+                 f"{', '.join(json.loads(grant.scope))}")
+    db.commit()
+
+    await _push_revocations(replaced)
+    pushed = []
+    for end in (from_id, to_id):
+        if await manager.send_personal_message(
+                json.dumps(peering.grant_frame(db, grant, end)), end):
+            pushed.append(end)
+    out = peering.grant_summary(db, grant)
+    out["delivered_to"] = pushed        # the rest get it at their next identify
+    return out
+
+
+@app.get("/api/peerings")
+async def list_peerings(db: Session = Depends(get_db),
+                        current_user: Account = Depends(get_current_user)):
+    """Active pairings in the house. Never includes the key."""
+    if current_user.role not in (AccountRole.parent, AccountRole.admin) or not current_user.house_id:
+        raise HTTPException(status_code=403, detail="Only parents can see pairings")
+    now = datetime.now(timezone.utc)
+    rows = db.query(PeerGrant).filter(PeerGrant.house_id == current_user.house_id,
+                                      PeerGrant.revoked_at.is_(None)).order_by(PeerGrant.grant_id).all()
+    return {"peerings": [peering.grant_summary(db, g, now) for g in rows if peering.is_active(g, now)]}
+
+
+@app.delete("/api/peerings/{grant_ref}")
+async def revoke_peering(grant_ref: str, db: Session = Depends(get_db),
+                         current_user: Account = Depends(get_current_user)):
+    if not _user_can_manage_devices(db, current_user):
+        raise HTTPException(status_code=403, detail="Only the house owner (or members they've authorized) can unpair devices")
+    grant = _grant_in_house_or_404(db, grant_ref, current_user)
+    changed = peering.revoke(db, grant)
+    if changed:
+        log_activity(db, grant.house_id, "parent", current_user.acc_id, current_user.name,
+                     "peering_revoked",
+                     f"{current_user.name} ended {grant.from_device} -> {grant.to_device}")
+    db.commit()
+    if changed:
+        await _push_revocations([grant])
+    return {"grant_id": grant_ref, "revoked": True}
+
+
+@app.get("/api/peerings/{grant_ref}/audit")
+async def peering_audit(grant_ref: str, db: Session = Depends(get_db),
+                        current_user: Account = Depends(get_current_user)):
+    """What each end says the link did, and where the two stories differ (§7.3)."""
+    if current_user.role not in (AccountRole.parent, AccountRole.admin):
+        raise HTTPException(status_code=403, detail="Only parents can see the audit")
+    return peering.audit(db, _grant_in_house_or_404(db, grant_ref, current_user))
 
 
 @app.get("/api/devices")
@@ -2866,6 +2981,10 @@ async def _handle_websocket(websocket: WebSocket):
                         await websocket.close(code=1009)
                         return
                     capability_store.store_descriptor(db, device_db, desc)
+                    # §7.1: the WiFi station MAC, which a peer matches the radio's
+                    # source address against. Replaced on every identify, so a
+                    # board that moves to new hardware is not paired by a stale one.
+                    device_db.mac = peering.parse_mac(json_data.get("mac"))
                     if desc.shimmed:
                         # §4.1: this identify is the first moment "three
                         # channels" is a fact rather than a guess, so the v1
@@ -2877,6 +2996,16 @@ async def _handle_websocket(websocket: WebSocket):
                     await websocket.send_text(json.dumps({
                         "id": device_id, "type": "welcome",
                         "proto": desc.proto, "server_proto_max": PROTO_MAX}))
+                    if desc.proto >= 2:
+                        # §7.1: every active grant, then the complete list, so a
+                        # revoke this device missed while offline is corrected now
+                        # rather than at expiry.
+                        mine = peering.active_grants(db, device_id)
+                        for g in mine:
+                            await websocket.send_text(json.dumps(
+                                peering.grant_frame(db, g, device_id)))
+                        await websocket.send_text(json.dumps(
+                            peering.sync_frame(device_id, mine)))
 
                 if json_data.get("type") == "state":
                     # §6.1 — replaces the ch1/ch2/ch3 heartbeat for v2 devices.
@@ -2905,6 +3034,30 @@ async def _handle_websocket(websocket: WebSocket):
                             "last_heartbeat": datetime.now(timezone.utc).isoformat(),
                             **{k: v for k, v in written.items() if k in ("ch1", "ch2", "ch3")},
                         })
+
+                elif json_data.get("type") == "peer_log":
+                    # §7.3 - what a device says its local link did. Rate limited
+                    # like everything a device can cause the server to store.
+                    try:
+                        PEER_LOG_RATE.hit(device_id)
+                    except HTTPException:
+                        print(f"peer_log from {device_id} dropped: rate limit")
+                        continue
+                    device_db = db.query(Device).filter(Device.device_id == device_id).first()
+                    if device_db is None or not device_db.house_id:
+                        continue
+                    outcome = peering.ingest_log(db, device_db, json_data)
+                    # A refused frame is the interesting one: say so in the house
+                    # activity log, at most three lines a batch so a chattering
+                    # peer cannot flood it.
+                    for item in outcome["notable"][:3]:
+                        log_activity(db, device_db.house_id, "device", None, device_db.name,
+                                     "peer_result",
+                                     f"{device_db.name}: {item['dir']} frame with "
+                                     f"{item['peer'] or 'a peer'} was {item['result']}")
+                    db.commit()
+                    print(f"peer_log from {device_id}: {outcome['accepted']} accepted, "
+                          f"{outcome['rejected']} rejected")
 
                 elif json_data.get("type") == "heartbeat":
                     uptime = json_data.get("uptime_ms", 0)
