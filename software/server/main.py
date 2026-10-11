@@ -917,6 +917,10 @@ def _open_device_dict(db: Session, device: Device,
                       scope: "open_api.Scope" = open_api.LEGACY) -> dict:
     ext = db.query(SmartExtension).filter(SmartExtension.device_id == device.device_id).first()
     relays = db.query(Relay).filter(Relay.se_id == ext.se_id).all() if ext else []
+    declared = capability_store.load_capabilities(db, device.device_id)
+    # §12.1: a channel the firmware hid from automation is not shown to a key either.
+    hidden = {c.key for c in declared if c.agent != "allow"}
+    relays = [r for r in relays if f"ch{r.channel_number}" not in hidden]
     return {
         "device_id": device.device_id,
         "name": device.name,
@@ -963,6 +967,9 @@ async def open_send_command(device_id: str, payload: dict, db: Session = Depends
     if not ctx.scope.write or not all(ctx.scope.sees_key(device_id, k) for k in wanted):
         raise HTTPException(status_code=403, detail="This API key may not switch that channel")
     declared = {c.key: c for c in capability_store.load_capabilities(db, device_id)}
+    if any(k in declared and declared[k].agent != "allow" for k in wanted):
+        # §12.1: the firmware hid this from automation, and a key is automation.
+        raise HTTPException(status_code=403, detail="This API key may not switch that channel")
     if any(declared[k].confirm for k in wanted if k in declared):
         # §5.4: a key is not a person. Before this the v1 route could switch a
         # capability the firmware had asked a person to confirm.

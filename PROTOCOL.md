@@ -16,7 +16,9 @@ interop gaps marked there. `proto` stays **2** — one optional ack field was ad
 Revision 2.5 (2026-10-11) made §12 buildable: the public API surface. A key is scoped to
 some devices, some capability keys, and read-only or read-and-write; a key issued without a
 scope keeps its old meaning, the whole house; `confirm:true` is refused to every key, on
-the frozen v1 surface too; and what is outside a key's scope reads as *not found*. New
+the frozen v1 surface too; `agent:"deny"` is hidden from every key, because a key is
+automation and that is what the flag means; and what is outside a key's scope reads as
+*not found*. New
 endpoints under `/api/open/v2/`, an optional `scope` on key creation, and `may_write` on
 each capability a key is shown. Nothing was removed or renamed, and `proto` (the device
 link's version) is not involved.
@@ -1772,7 +1774,7 @@ on its own and none of them breaks what is already deployed:
 8. The Open API v2 and scoped keys (§12).
    — **done 2026-10-11** (revision 2.5). `open_api.py`, `/api/open/v2/*`, `scope` on key
    creation, scope applied to v1, `confirm:true` refused on v1. `test_open_api.py`, with
-   twenty-one deliberate bugs each confirmed to fail it. **The app's API-key screen cannot
+   twenty-five deliberate bugs each confirmed to fail it. **The app's API-key screen cannot
    set a scope yet**, so today a scoped key is issued with `POST /api/houses/{id}/api-keys`.
    An existing key's scope is none, so nothing already issued changed meaning.
 
@@ -1865,6 +1867,15 @@ half of a recorded security finding, so:
   is unreachable through any key, whatever its scope says.
 - **`confirm:true` capabilities are refused on this surface entirely** (§5.4): a
   key is not a person, and no flag can make it one.
+- **`agent:"deny"` capabilities do not exist on this surface** (§5.4). The flag says the
+  firmware author does not want automation touching a capability, and an integration is
+  automation: a script that holds a key is exactly what the author was keeping out. Such a
+  capability is not listed, its state is not shown, and a `set` of it is refused as any key
+  the device does not declare. This holds for the unrestricted legacy key too, and on v1,
+  where it hides the channel and refuses a command that names it (and `all_on`/`all_off`,
+  which would include it). Revision 2.5 first excluded only `confirm`, as this section was
+  then worded, and was tightened the same day; no key had been issued against that
+  version.
 - Rate limits are a separate concern and already apply per key.
 
 **Issuing one** (the house master only, as before):

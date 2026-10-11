@@ -59,8 +59,9 @@ never built. Full reasoning in `wiki/pages/security-notes.md`; the self-check is
 - [x] **Per-key Open API scoping** (2026-10-11, spec revision 2.5, §12). A key may be scoped
   to devices, capability keys and read-only/read-write; unscoped keys keep meaning the whole
   house. Applied on v1 and the new `/api/open/v2/*`. `confirm:true` is refused to every key,
-  v1 included (it used to be switchable). Out of scope reads as not found. `test_open_api.py`,
-  twenty-one deliberate bugs each caught.
+  v1 included (it used to be switchable); `agent:"deny"` is hidden from every key, the
+  unrestricted one too (tightened the same day). Out of scope reads as not found.
+  `test_open_api.py`, twenty-five deliberate bugs each caught.
 - [ ] **The app's API-key screen cannot set a scope**, nor show one. A scoped key is issued
   with `POST /api/houses/{id}/api-keys {"scope": {...}}` today. The web portal (`/integrate`)
   likewise. Needs the Flutter SDK for the app half.

@@ -392,3 +392,13 @@ caught. Updated the maya-open-api agent skill (v2, `may_write`, 403 and 404 mean
 `security-notes` §4 and new §12, `device-protocol`, `server-backend`, `architecture-overview`, `todos.md`,
 the server README. **Not done:** the app's and the web portal's key screens cannot set a scope; no
 editing of a key's scope; no v2 history or subscription.
+
+## [2026-10-11] fix | `agent:"deny"` hidden from Open API keys
+
+§12 as first written excluded only `confirm:true` from keys, leaving a capability the firmware had
+hidden from Maya reachable by any script holding a key. Tightened: such a capability is not listed, has
+no state shown, and a `set` of it reads like an undeclared key, for every key including the unrestricted
+legacy one, on v1 (channel hidden, command and `all_*` refused) and v2. `PROTOCOL.md` §12.1, the skill,
+`security-notes` §12 (the residual risk is gone), `device-protocol`, `todos.md`. `test_open_api.py` gains
+a hidden capability and a hidden channel; four more deliberate bugs, twenty-five in all, each caught.
+Committed `0b7b437` described the earlier rule; no key had been issued against it.

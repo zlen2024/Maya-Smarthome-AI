@@ -17,6 +17,12 @@ Three rules shape it:
   whatever the scope says, and a key reaches only what the device declares *now*.
 * **A key is not a person.** `confirm:true` capabilities are refused on this surface
   whatever the scope says (§5.4): no flag a key can send makes it one.
+* **A key is an automaton.** `agent:"deny"` means the firmware author does not want
+  automation touching a capability (§5.4), and an integration is exactly that. Such a
+  capability does not exist as far as a key can tell: it is not listed, its state is not
+  shown, and a `set` of it reads like any other key the device does not declare. (This was
+  not the case in the first build of this surface, which excluded `confirm` only, as §12
+  was then worded; it was tightened the same day.)
 """
 import json
 import re
@@ -128,6 +134,12 @@ def load(text: str | None) -> Scope:
         return NOTHING
 
 
+def automatable(caps) -> set:
+    """The keys of these capabilities (descriptor objects) that automation may touch:
+    everything but `agent:"deny"`, and an `agent` value the server cannot read is deny."""
+    return {c.key for c in caps if c.agent == "allow"}
+
+
 def describe(scope: Scope) -> dict | None:
     """The scope as the master sees it in a key listing. None means the legacy meaning,
     which the app should show as what it is: the whole house, read and command."""
@@ -144,7 +156,7 @@ def view(scope: Scope, device_id: str, payload: dict) -> dict:
     false for a read-only key, a read-only capability and any `confirm:true` one."""
     caps = []
     for item in payload.get("capabilities", []):
-        if not scope.sees_key(device_id, item["key"]):
+        if item.get("agent", "allow") != "allow" or not scope.sees_key(device_id, item["key"]):
             continue
         writable = item.get("access", "rw") in ("rw", "w")
         caps.append({**item, "may_write": bool(scope.write and writable and not item.get("confirm"))})
@@ -168,7 +180,7 @@ def set_denial(scope: Scope, device_id: str, values, caps: dict) -> dict | None:
         return {"status": "bad_value", "detail": "values object required"}
     for key in values:
         cap = caps.get(key)
-        if cap is None or not scope.sees_key(device_id, key):
+        if cap is None or cap.agent != "allow" or not scope.sees_key(device_id, key):
             return {"status": "not_permitted", "key": key,
                     "detail": "this key may not set that capability"}
         if not cap.writable:

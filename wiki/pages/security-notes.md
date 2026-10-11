@@ -363,6 +363,11 @@ device in its house**, and the frozen v1 surface could switch a channel the firm
 - **A set is judged whole before anything is sent.** One refused key and none of it applies.
 - **`confirm:true` is refused to every key**, v1 included, and a `confirmed` field in the body is
   not read: it is evidence a person said yes, and a key is not one.
+- **`agent:"deny"` is hidden from every key**, the unrestricted legacy key too, on v1 as on v2: not
+  listed, no state, and a `set` of it reads like a key the device does not declare. The flag says
+  the firmware author does not want automation touching it, and a script holding a key is
+  automation. (The first build excluded only `confirm`, as §12 was then worded; the same day this was
+  noticed and tightened, before any key had been issued against it.)
 - **Scope is applied against the descriptor as it is now**, per request, not recorded in the key
   and trusted: a capability the device no longer declares is unreachable whatever the key says.
 - **Attribution.** An accepted set is logged as done by that key, by name — not as a parent.
@@ -375,6 +380,5 @@ master has to replace it to narrow it, and nothing yet tells them which keys are
 `"scope": null` in the listing — the app's key screen does not show it. The app and the web
 portal **cannot set a scope**, so in practice a scoped key is issued by API call today. A
 scoped key's scope **cannot be edited**; reissue and revoke. A key that may `set` a device may
-set anything on it that is not read-only or `confirm` — including something the firmware author
-would rather no automation touched, because `agent:"deny"` hides a capability from *Maya*, not
-from a key (§12 only excludes `confirm`). That is a decision worth revisiting.
+set anything on it that is writable, not `confirm` and not `agent:"deny"`; what a firmware author
+did not mark is, by design, open to automation.

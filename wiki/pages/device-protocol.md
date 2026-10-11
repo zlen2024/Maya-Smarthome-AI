@@ -550,9 +550,10 @@ route an `OpenKey` carrying the scope.
 frozen route sent `output_on` to whatever `ch{n}` named without looking at the descriptor, so a
 control the firmware author wanted a person to approve could be switched by any key. It is closed,
 and the only integrations it can affect are ones using a key on exactly the thing the firmware said
-a person must approve. And `agent:"deny"` is **not** applied to keys — it hides a capability from
-Maya, and §12 excludes only `confirm`; that is stated as a residual risk in
-[security notes §12](security-notes.md#12-what-an-open-api-key-can-reach--scoped-2026-10-11).
+a person must approve. `agent:"deny"` got the same treatment the same day: the first build applied it
+to Maya only and §12 excluded just `confirm`, which would have left a capability the firmware hid from
+automation reachable by every script holding a key. Now it is hidden from keys too, the unrestricted one
+included ([security notes §12](security-notes.md#12-what-an-open-api-key-can-reach--scoped-2026-10-11)).
 
 **Tests.** `test_open_api.py`: the scope rules alone (parse, storage that fails closed, what a view
 and a set allow), then the real app with real keys and boards that actually acknowledge a `set`: a
@@ -561,4 +562,4 @@ else is 404; a refused set sends nothing (the next frame the board sees is the a
 `confirmed` is ignored; a descriptor that loses a capability closes the key to it; an unreadable stored
 scope reaches nothing; v1 honours the scope; eleven routes that must never accept a key do not;
 write and read limits; revocation; another house; and a database from before scoping gains the column
-and its keys keep their meaning. Twenty-one deliberate bugs each fail it.
+and its keys keep their meaning. Twenty-five deliberate bugs each fail it.

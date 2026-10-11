@@ -38,9 +38,9 @@ from open_api import LEGACY, NOTHING, Scope, ScopeError  # noqa: E402
 HOUSE = {"esp32-fan", "esp32-jar", "esp32-old"}
 
 
-def cap(key, kind="switch", access="rw", confirm=False, label=None):
+def cap(key, kind="switch", access="rw", confirm=False, label=None, agent="allow"):
     return Capability(key=key, kind=kind, label=label or key, access=access, confirm=confirm,
-                      known_kind=True)
+                      agent=agent, known_kind=True)
 
 
 # ── the rules, on their own ───────────────────────────────────
@@ -96,7 +96,7 @@ def test_storage_fails_closed():
 
 
 def test_what_a_scope_sees_and_sets():
-    s = Scope(frozenset({"esp32-fan"}), frozenset({"ch1", "speed", "lock", "temp"}), True)
+    s = Scope(frozenset({"esp32-fan"}), frozenset({"ch1", "speed", "lock", "temp", "siren"}), True)
     assert s.sees_device("esp32-fan") and not s.sees_device("esp32-jar")
     assert s.sees_key("esp32-fan", "speed") and not s.sees_key("esp32-fan", "mode")
     assert not s.sees_key("esp32-jar", "speed"), "a key name is only meaningful on a device in scope"
@@ -104,23 +104,28 @@ def test_what_a_scope_sees_and_sets():
     payload = {"proto": 2, "capabilities": [
         {"key": "ch1", "kind": "switch"}, {"key": "speed", "kind": "range"},
         {"key": "mode", "kind": "enum"}, {"key": "lock", "kind": "switch", "confirm": True},
-        {"key": "temp", "kind": "number", "access": "r"}, {"key": "bell", "kind": "button", "access": "w"}],
-        "state": {"ch1": "on", "speed": 5, "mode": "eco", "lock": "off", "temp": 21}}
+        {"key": "temp", "kind": "number", "access": "r"}, {"key": "bell", "kind": "button", "access": "w"},
+        {"key": "siren", "kind": "switch", "agent": "deny"}],
+        "state": {"ch1": "on", "speed": 5, "mode": "eco", "lock": "off", "temp": 21, "siren": "off"}}
     v = open_api.view(s, "esp32-fan", payload)
-    assert [c["key"] for c in v["capabilities"]] == ["ch1", "speed", "lock", "temp"], v["capabilities"]
+    assert [c["key"] for c in v["capabilities"]] == ["ch1", "speed", "lock", "temp"], \
+        "the siren is in the scope and on the device, and still not shown: the firmware hid it from automation"
     assert {c["key"]: c["may_write"] for c in v["capabilities"]} == {
         "ch1": True, "speed": True, "lock": False, "temp": False}, "confirm and read-only are never writable by a key"
     assert v["state"] == {"ch1": "on", "speed": 5, "lock": "off", "temp": 21}, "state is cut to the same keys"
+    assert "siren" not in v["state"]
     ro = open_api.view(Scope(None, None, False), "esp32-fan", payload)
     assert not any(c["may_write"] for c in ro["capabilities"]), "a read-only key may write nothing"
     assert payload["state"]["mode"] == "eco", "viewing must not alter the original"
 
     caps = {c.key: c for c in (cap("ch1"), cap("speed", "range"), cap("mode", "enum"),
-                               cap("lock", confirm=True), cap("temp", "number", "r"))}
+                               cap("lock", confirm=True), cap("temp", "number", "r"),
+                               cap("siren", agent="deny"))}
     assert open_api.set_denial(s, "esp32-fan", {"ch1": "on", "speed": 5}, caps) is None
     for values, status, needle in [
             ({"mode": "eco"}, "not_permitted", "may not set"),                 # declared, outside the scope
             ({"ghost": 1}, "not_permitted", "may not set"),                    # not declared at all
+            ({"siren": "on"}, "not_permitted", "may not set"),                 # agent:"deny", though in scope
             ({"lock": "on"}, "not_permitted", "person"),                       # confirm
             ({"temp": 3}, "not_permitted", "read-only"),                       # a sensor
             ({"ch1": "on", "mode": "eco"}, "not_permitted", "may not set"),    # one bad key sinks the request
@@ -129,8 +134,10 @@ def test_what_a_scope_sees_and_sets():
         assert d and d["status"] == status and needle in d["detail"], (values, d)
     a = open_api.set_denial(s, "esp32-fan", {"mode": "eco"}, caps)
     b = open_api.set_denial(s, "esp32-fan", {"ghost": 1}, caps)
-    assert {k: v for k, v in a.items() if k != "key"} == {k: v for k, v in b.items() if k != "key"}, \
-        "out of scope and undeclared read the same, or a scoped key could list what it was not given"
+    c_ = open_api.set_denial(s, "esp32-fan", {"siren": "on"}, caps)
+    assert {k: v for k, v in a.items() if k != "key"} == {k: v for k, v in b.items() if k != "key"} \
+        == {k: v for k, v in c_.items() if k != "key"}, \
+        "out of scope, undeclared and hidden-from-automation read the same, or a key could list what it was not given"
     assert open_api.set_denial(Scope(None, None, False), "esp32-fan", {"ch1": "on"}, caps)["detail"].startswith("this key is read-only")
     assert open_api.set_denial(Scope(frozenset({"esp32-jar"}), None, True), "esp32-fan", {"ch1": "on"}, caps) \
         ["status"] == "not_permitted", "a device outside the scope"
@@ -147,8 +154,15 @@ FAN = {
         {"key": "mode", "kind": "enum", "label": "Mode", "options": ["eco", "boost"]},
         {"key": "lock", "kind": "switch", "label": "Child lock", "confirm": True},
         {"key": "temp", "kind": "number", "label": "Room temp", "access": "r"},
+        {"key": "siren", "kind": "switch", "label": "Siren", "agent": "deny"},
     ],
-    "state": {"ch1": "off", "speed": 0, "mode": "eco", "lock": "off", "temp": 21},
+    "state": {"ch1": "off", "speed": 0, "mode": "eco", "lock": "off", "temp": 21, "siren": "off"},
+}
+HUSH = {
+    "proto": 2, "status": "online", "model": "hush", "fw": "1.0.0", "mac": "24:6F:28:AA:EE:04",
+    "capabilities": [{"key": "ch1", "kind": "switch", "label": "Alarm", "agent": "deny"},
+                     {"key": "ch2", "kind": "switch", "label": "Lamp"}],
+    "state": {"ch1": "off", "ch2": "off"},
 }
 JAR = {
     "proto": 2, "status": "online", "model": "jar", "fw": "1.0.0", "mac": "24:6F:28:AA:EE:02",
@@ -194,7 +208,8 @@ def test_the_real_app():
     for limit in (main.OPEN_API_RATE, main.OPEN_API_WRITE_RATE):
         limit.clear_all()
     tok = household(c, "oa@x.test", "Open House",
-                    [("esp32-fan", "4821"), ("esp32-jar", "5937"), ("esp32-old", "6143"), ("esp32-vault", "7351")])
+                    [("esp32-fan", "4821"), ("esp32-jar", "5937"), ("esp32-old", "6143"), ("esp32-vault", "7351"),
+                     ("esp32-hush", "9157")])
     db = main.SessionLocal()
     try:
         house_id = db.query(main.Account).filter(main.Account.email == "oa@x.test").first().house_id
@@ -206,7 +221,8 @@ def test_the_real_app():
     jar = Board(c, "esp32-jar", "5937", JAR)
     old = Board(c, "esp32-old", "6143", OLD)
     vault = Board(c, "esp32-vault", "7351", VAULT)
-    boards = [fan, jar, old, vault]
+    hush = Board(c, "esp32-hush", "9157", HUSH)
+    boards = [fan, jar, old, vault, hush]
 
     def issue(name, scope="omit", expect=200):
         body = {"name": name}
@@ -241,13 +257,16 @@ def test_the_real_app():
         r = c.get("/api/open/v2/devices", headers=H(legacy))
         assert r.status_code == 200, r.text
         devices = {d["device_id"]: d for d in r.json()["devices"]}
-        assert set(devices) == {"esp32-fan", "esp32-jar", "esp32-old", "esp32-vault"}, set(devices)
+        assert set(devices) == {"esp32-fan", "esp32-jar", "esp32-old", "esp32-vault", "esp32-hush"}, set(devices)
         fan_caps = {x["key"]: x for x in devices["esp32-fan"]["capabilities"]}
         assert set(fan_caps) == {"ch1", "speed", "mode", "lock", "temp"}
         assert {k: v["may_write"] for k, v in fan_caps.items()} == {
             "ch1": True, "speed": True, "mode": True, "lock": False, "temp": False}, \
             "even the unrestricted key is told it cannot write a confirm capability or a sensor"
         assert devices["esp32-fan"]["state"]["speed"] == 0 and devices["esp32-fan"]["online"] is True
+        assert "siren" not in fan_caps and "siren" not in devices["esp32-fan"]["state"], \
+            "agent:deny is hidden from a key, the unrestricted one included"
+        assert [x["key"] for x in devices["esp32-hush"]["capabilities"]] == ["ch2"]
         assert [x["key"] for x in devices["esp32-old"]["capabilities"]] == ["ch1", "ch2", "ch3"], "the shim, as ordinary capabilities"
 
         # ── v2 read, a dashboard key: one device, one capability, nothing else ──
@@ -314,6 +333,11 @@ def test_the_real_app():
         # a sensor and a hidden capability, through the unrestricted key
         r = c.post("/api/open/v2/devices/esp32-fan/set", json={"values": {"temp": 3}}, headers=H(legacy))
         assert r.status_code == 403 and "read-only" in r.json()["detail"]
+        ghost = c.post("/api/open/v2/devices/esp32-fan/set", json={"values": {"ghost": "on"}}, headers=H(legacy))
+        siren = c.post("/api/open/v2/devices/esp32-fan/set", json={"values": {"siren": "on"}}, headers=H(legacy))
+        assert siren.status_code == ghost.status_code == 403, siren.text
+        assert {k: v for k, v in siren.json().items() if k != "key"} == {k: v for k, v in ghost.json().items() if k != "key"}, \
+            "a capability the firmware hid reads exactly like one the device does not have"
         r = c.post("/api/open/v2/devices/esp32-vault/set", json={"values": {"ch1": "on"}, "confirmed": True},
                    headers=H(legacy))
         assert r.status_code == 403 and r.json().get("needs_confirmation") is True
@@ -367,6 +391,20 @@ def test_the_real_app():
         # the confirm gate on the frozen surface: before, v1 could switch a lock a person had to approve
         r = c.post("/api/open/v1/devices/esp32-vault/command", json={"cmd": "on", "channel": 1}, headers=H(legacy))
         assert r.status_code == 403 and "confirm" in r.json()["detail"], r.text
+        # ...and the channel the firmware hid from automation, which is the same hole by another door
+        r = c.post("/api/open/v1/devices/esp32-hush/command", json={"cmd": "on", "channel": 1}, headers=H(legacy))
+        assert r.status_code == 403 and "may not" in r.json()["detail"], r.text
+        r = c.post("/api/open/v1/devices/esp32-hush/command", json={"cmd": "all_on"}, headers=H(legacy))
+        assert r.status_code == 403, "all channels includes the hidden one"
+        # a board that was once protocol 1 still has relay rows; the hidden channel is not listed from them
+        db = main.SessionLocal()
+        try:
+            main._ensure_v1_backing_rows(db, "esp32-hush", "esp32-hush")
+            db.commit()
+        finally:
+            db.close()
+        listed = {d["device_id"]: d for d in c.get("/api/open/v1/devices", headers=H(legacy)).json()["devices"]}
+        assert [x["channel"] for x in listed["esp32-hush"]["channels"]] == [2, 3], listed["esp32-hush"]["channels"]
 
         # ── §12.2: what a key may never reach ──
         nothing_for_keys = [
@@ -426,7 +464,7 @@ def test_the_real_app():
         finally:
             db.close()
         assert open_api.load(None) is LEGACY
-        assert len(c.get("/api/open/v2/devices", headers=H(control)).json()["devices"]) == 4, \
+        assert len(c.get("/api/open/v2/devices", headers=H(control)).json()["devices"]) == 5, \
             "...which is the whole house, as before"
     finally:
         for b in boards:

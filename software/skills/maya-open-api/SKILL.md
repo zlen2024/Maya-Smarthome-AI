@@ -215,6 +215,8 @@ Things a key can never do, however it is scoped — don't try, and don't offer t
 - Set a capability marked as needing confirmation (a door lock, a child lock): that needs a
   person in the Maya app. A `confirmed` field in the request is ignored.
 - Set a read-only capability (a sensor).
+- See or set anything the firmware marked as off-limits to automation: such a capability simply
+  is not in the list, and trying to set it is refused like a key the device does not have.
 - Anything about children, pairing devices, other keys, or rebooting/resetting a device.
 
 `set` is limited to 20 a minute per key, on top of the 60 requests a minute for everything.
