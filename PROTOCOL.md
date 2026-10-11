@@ -1,6 +1,6 @@
 # Maya Device Protocol
 
-**Version 2 (draft), document revision 2.3** · Status: §10 step 1 implemented
+**Version 2 (draft), document revision 2.4** · Status: §10 step 1 implemented
 2026-10-10; steps 2-6 proposed. The server stores descriptors and shims protocol 1; the app, Maya and
 the firmware are untouched and still speak protocol 1. See
 `wiki/pages/device-protocol.md` for what exists versus what is still on paper —
@@ -12,6 +12,18 @@ document: claiming (§4.1), permissions (§5.10), labels (§5.11), history (§5.
 the status vocabulary (§5.8), the public API surface (§12), and the smaller
 interop gaps marked there. `proto` stays **2** — one optional ack field was added
 (§6.2), which §11 classes as a free change.
+
+Revision 2.4 (2026-10-11) specified the hub relay (§7.5) that §5.9 had only
+described: a device declares itself a hub, a person pairs a sensor to it with a
+`relay` grant whose scope names the **sensor's** keys, the sensor sends a signed
+`report` frame, and the hub carries it to the server verbatim. **The hub is never
+given the grant key** — only the sensor and the server hold it — so the server
+authenticates every frame itself and a hub is a courier, not a witness: it cannot
+alter, forge, replay or widen what a sensor said. New optional fields
+(`hub` in identify, `purpose` on a grant, `age` on a report) and new frames
+(`relay`, `relay_ack`, `hub_status`, `hub_channel`, and `hub_failed` on `state`).
+A grant without `purpose` is the control grant of §7.1, so `proto` stays **2**.
+The sleepy class's `pending` queue (§5.9) is **not** in this revision.
 
 Revision 2.3 (2026-10-10) specified device-to-Maya (§8): a device's reach through
 Maya is exactly its outgoing peer grants (§7), the permission to invoke is off by
@@ -872,11 +884,13 @@ happen now, it is always-on and it is mains-powered.
 - Be mains-powered, and hold the WebSocket as an always-on device (§5.8).
 - Keep a per-peer queue of `pending` commands and hand them over on contact.
 - Relay peer state reports upward, attributed to the **origin** device id, not
-  its own.
-- Authenticate every local frame with the peering grant key of §7.2 — at the
-  application layer, not by relying on ESP-NOW's own encryption, whose encrypted
-  peer count is capped well below the 20-peer ceiling and would otherwise limit
-  how many probes a farm could run.
+  its own. How, and why the server need not trust the hub to do it, is §7.5.
+- Authenticate local frames at the application layer, not by relying on ESP-NOW's
+  own encryption, whose encrypted peer count is capped well below the 20-peer
+  ceiling and would otherwise limit how many probes a farm could run. For a
+  *control* grant that is the MAC of §7.2. For a *relay* the hub is deliberately
+  **not** given the key (§7.5): it forwards frames from the sensors it was paired
+  with and the server authenticates them.
 - Report its current WiFi channel to the server (below).
 
 A hub is a single point of failure for the devices that depend on it, which is
@@ -1114,8 +1128,9 @@ pipelining against it, and a device need keep only one `req` in memory.
 ## 7. Device to device
 
 This section defines the local link itself. Its largest user is the hub relay of
-§5.9 — a battery device pairing with a hub is an ordinary peering, and the frames
-it sends are ordinary local frames. Read §5.9 for *why* a device would use this;
+§5.9 — a battery device pairing with a hub is a peering, and the frames it sends
+are local frames; the one thing a hub needs that control does not is specified in
+§7.5. Read §5.9 for *why* a device would use this;
 read here for *how* it is secured and shaped.
 
 Three planes meet here, and each rule below belongs to exactly one of them:
@@ -1191,11 +1206,22 @@ with a grant and nothing about who may create one.
 keeps it (it must re-send it to a device that reconnects) and **never returns it
 to an app or any API caller**: the key is only ever sent down a device's own
 authenticated WebSocket. It is shared by both ends of one grant and by nobody
-else.
+else — **except a relay grant (§7.5), whose key is known to the sender and the
+server only: the receiving hub is not sent it.**
 
 `expires` is set by the server, ISO 8601 UTC, **default 30 days, at most 365**. An
 expired grant is absent (rule 4) and the server stops pushing it. Re-pairing
 renews.
+
+#### Two purposes: control and relay
+
+Added in revision 2.4. Every grant above is a **control** grant: the sender may
+`set` the receiver's keys. A grant may instead carry `"purpose":"relay"` (§7.5),
+where the receiver is a hub that will carry the sender's *readings* to the server.
+A grant with no `purpose` is control. **A device MUST ignore a grant whose
+`purpose` it does not recognise** rather than treat it as control: the two differ
+in whose keys `scope` names, so misreading one as the other would apply a scope to
+the wrong device.
 
 #### Identify carries a MAC
 
@@ -1254,8 +1280,8 @@ A local frame is a JSON object followed by a dot and a MAC:
   replay **one** frame per receiver reboot. This is bounded by `expires`, by
   revocation, and by the capture needing to be within radio range; devices whose
   `set` is not idempotent should say so in their own design.
-- `kind` is `set`, `event`, or `msg` (free payload for device-defined chatter,
-  carried as an object in `data`).
+- `kind` is `set`, `event`, `msg` (free payload for device-defined chatter,
+  carried as an object in `data`), or — on a relay grant only, §7.5 — `report`.
   A `set` applies the same value rules as §6.2 and is answered with a local
   `kind:"ack"` frame carrying `re` (the `seq` it answers), `status` as in §9, and
   `failed`/`state` as in §6.2. **Which side may send which kind follows the
@@ -1334,7 +1360,182 @@ offline keeps operating on the stale grant until it reconnects, at which point
 `expires`. Keep expiry short (days, not years) for anything sensitive.
 
 Removing a device from a house, or a `factory_reset`, revokes every grant that
-involves it.
+involves it. That includes relay grants (§7.5): a sensor taken out of the house
+stops being carried, and a hub taken out stops carrying.
+
+### 7.5 The hub relay
+
+§5.9 says *why* a hub exists. This is how one is trusted, because carrying another
+device's words is a privilege and the hub is the part of the system with the least
+reason to be believed: it sits in a cupboard, takes frames from anyone in radio
+range, and is one firmware bug from forwarding noise. The design is therefore that
+**the server never takes the hub's word for what a sensor said — and so the hub is
+never given the means to sign for one.** A grant's key is shared by both of its ends
+(§7.1); had a hub held it, it could have minted a perfectly valid MAC for a reading
+the sensor never took, and the server's check would have proved nothing about the
+hub. So on a relay grant the key goes to the sensor and the server, and the hub is
+told who the sensor is (id and MAC) and nothing it could sign with.
+
+#### Declaring a hub, and pairing to one
+
+- A device that can carry reports includes `"hub":true` in its identify frame
+  (optional, §1 rule 4; absent means false, and is re-read at every identify). It
+  is an *offer*: it gives the device no authority by itself.
+- A house master, or a member authorised to manage devices, pairs a sensor to a
+  hub with the §7.1 request plus `"purpose":"relay"`:
+  `{"from":"esp32-salt","to":"esp32-hub","purpose":"relay","scope":["salt","_batt"]}`.
+  The server refuses (409) if the receiver has not declared itself a hub.
+- **For a relay grant `scope` names the sender's keys**, the opposite of a control
+  grant, because what is being granted is the right to *carry* them. Each key MUST
+  be a capability the sender currently declares, readable (`access` `r` or `rw`),
+  not a `button`, and a known kind. Reserved health keys (`_batt`, `_rssi`) are
+  allowed — a sensor on batteries that cannot report `_batt` is a sensor that goes
+  flat unannounced. `confirm` and `agent:"deny"` do not apply: they guard actions,
+  and a report is an observation. As in §7.1, a key the sender later drops or makes
+  write-only stops being carried at once, and one it gains is not in the scope.
+- The grant is pushed to both ends as in §7.1, with `"purpose":"relay"`. The sender
+  is `role:"send"` and gets the `key`; the hub is `role:"recv"` and its frame
+  **has no `key` field.** Expiry, key, rotation,
+  revocation and `peer_sync` are unchanged. Re-pairing replaces the grant **of the
+  same purpose** between the pair; a control grant and a relay grant between the
+  same two devices do not displace each other.
+- **A relay grant is not reach.** §8.3 defines a device's reach through Maya as its
+  outgoing *control* grants; a relay grant's scope names the sender's own keys and
+  MUST NOT be read as permission to set anything on the hub.
+
+#### The `report` frame
+
+A sensor sends a local frame (§7.2) of `kind:"report"` to its hub:
+
+```
+{"v":2,"from":"esp32-salt","grant":"g-7","ep":3,"seq":12,"kind":"report","values":{"salt":21.5,"_batt":88},"age":0}.<mac>
+```
+
+- `values` is a non-empty map from keys to values, under the value rules of §6.1
+  for a `state` frame. `age` is optional, an integer number of seconds between 0
+  and 604800 (7 days) since the reading was taken: it is how a reading that was
+  buffered (§5.9 rule 4) says so without the sensor having a clock. A frame
+  carrying a reading must still fit 250 bytes (§7.2); a sensor with more to say
+  sends several.
+- The MAC is made with the grant key, which only the sensor and the server hold.
+  It is not acknowledged at the application layer — the sensor is about to sleep —
+  so the sensor learns the hub heard it from the ESP-NOW send callback (§5.9
+  rule 1), not from a reply.
+- **A hub cannot check that MAC, so it checks what it can:** the radio-level source
+  address is one of the senders it was paired with by a relay grant; the frame fits
+  250 bytes; it is a JSON object followed by `.` and a tag; the sender has not
+  exceeded a small per-sender rate (RECOMMENDED no more than 12 frames a minute —
+  a burst after a buffer flush is the legitimate case); and its own queue is not
+  full (RECOMMENDED 32 frames; drop the newest, never the oldest, so what is kept is
+  contiguous). It drops everything else **silently**, as §7.2 does for an
+  unauthenticated frame. The source address is spoofable, so none of this is
+  authentication; it only stops the hub spending the house's WiFi on noise. What
+  gets past it is stopped by the server.
+- A hub queues the frames it kept and forwards them as a `relay` message. It logs
+  an `in` entry of `kind:"report"` (§7.3) **when the server's answer arrives**, with
+  the server's `status` as the `result` — `ok` and the other post-authentication
+  results, never `bad_mac`, `bad_frame` or `unknown_grant`, which §7.3 says are not
+  logged. The sensor logs an `out` entry as it sends, so the audit's cross-check
+  still shows readings that left a sensor and never reached the server.
+
+#### The `relay` frame
+
+The hub carries what it accepted to the server, over its WebSocket:
+
+```json
+{"id":"esp32-hub","type":"relay","frames":[
+  "{\"v\":2,\"from\":\"esp32-salt\",...}.<mac>", "{...}.<mac>"]}
+```
+
+- Each element is the local frame **exactly as received, MAC included, as a
+  string.** The hub MUST NOT parse and re-serialise it: the MAC is over the bytes
+  (§7.2), and a hub that re-serialised would break every frame it carried.
+- At most **16 frames** per message, in the order received; the rest are ignored.
+  A hub forwards in order, because (below) an out-of-order frame is refused.
+
+**What the server does, per frame, regardless of what the hub checked:**
+
+1. Find the grant named in the frame. It MUST be a relay grant, active (not revoked
+   or expired), whose receiver is **this** hub, in this hub's house, and the hub
+   MUST still be declaring itself a hub. Otherwise `unknown_grant` — one answer for
+   "no such grant", "not yours" and "ended", so a hub cannot probe which exist.
+2. Verify the MAC with the grant key. A hub that invented a frame, or altered one
+   in transit, fails here: `bad_mac`. This is the **only** authentication of a
+   relayed frame, and the hub cannot supply it.
+3. Check `v` is 2, `kind` is `report`, `from` is the grant's sender, and `ep`, `seq`
+   and `age` are well formed: otherwise `bad_frame`.
+4. **`(ep, seq)` MUST be strictly greater than the highest the server has accepted
+   for this grant.** The server persists it, so unlike the receiver of §7.2 it has
+   no reboot window: a captured frame can be replayed to a hub, and from there to
+   the server, never. `replay` otherwise.
+5. Keep only keys in the grant's scope **and** currently reportable by the sender;
+   name the rest in `ignored`. Apply the survivors as the **sender's** state, by the
+   rules of a `state` frame, attributed to the sender and not to the hub. A reading
+   is placed `age` seconds in the past, and **never replaces a value stored from a
+   later moment** — a delayed frame must not put a stale temperature over a fresh
+   one.
+
+A frame whose MAC and shape are valid *consumes* its `(ep, seq)` whether or not
+anything was stored (`ok`, `not_permitted`, `bad_value`): it was a genuine frame
+and must not be accepted twice. `bad_mac`, `bad_frame` and `unknown_grant` consume
+nothing.
+
+**What this makes of a hub.** It holds no key, so it cannot make a sensor say
+something the sensor did not, cannot alter or replay a reading, cannot carry a key
+the person did not grant, and cannot speak for a sensor it is not paired to. It
+*can* withhold or delay frames, or drop them; that is visible, because the sensor's
+own `out` count is its own and the audit compares the two ends (§7.3). It can also
+forward out of order, which loses the older reading — a stated cost, not a hidden
+one. **Anyone in radio range who can spoof a paired sensor's address can make the
+hub forward junk; the server refuses it (`bad_mac`), and the hub's rate limit and
+the server's (below) bound the cost.** A captured genuine frame cannot be replayed
+into the system either, by §7.5 step 4, however many hubs it is tried on.
+
+#### The answer
+
+```json
+{"id":"esp32-hub","type":"relay_ack","results":[
+  {"grant":"g-7","seq":12,"status":"ok"},
+  {"grant":"g-7","seq":13,"status":"ok","ignored":["led"]}]}
+```
+
+One result per frame, in order. `status` is `ok`, `not_permitted` (no key was in
+scope), `bad_value` (keys were in scope but invalid, or older than what is stored),
+`bad_mac`, `replay`, `bad_frame` or `unknown_grant`. Anything unrecognised MUST be
+treated as failure. A run of `bad_mac` for one sender usually means its key was
+rotated and the sensor has not yet received the new grant, or that someone is
+spoofing its address; a hub SHOULD treat it as the sender's problem and not retry.
+
+A hub is limited to **30 `relay` messages a minute**; beyond that it receives
+`{"type":"relay_ack","status":"rate_limited","retry_after":<seconds>}` and keeps
+its queue. A device that is not a hub, is blocked, or has no house receives no
+answer at all.
+
+#### The hub's channel
+
+A hub sends `{"id":"esp32-hub","type":"hub_status","channel":6}` (1-14) after every
+connect and whenever its WiFi channel changes (§5.9). The server stores it, **tells
+the connected senders of the hub's active relay grants**
+(`{"id":"esp32-salt","type":"hub_channel","hub":"esp32-hub","channel":6}`), and
+includes `"channel"` in `peer` of the `peer_grant` it pushes to a sender that
+connects later. A report that changes nothing is not repeated; limit 6 a minute.
+
+#### A hub that has died
+
+A sensor that gave up on its hub (§5.9 rule 3) adds a top-level
+`"hub_failed":"<hub device id>"` to its first `state` frame on the fallback path.
+The server believes it **only if the sender holds an active relay grant to that
+hub**, then records it in the house activity log and tells connected apps
+(`{"type":"hub_failed","device_id":…,"hub":…,"summary":…}`), **once per sensor and
+hub every six hours**: a hub that is down should be one notice to the family, not
+one per sensor per reading.
+
+#### What is not here
+
+The `pending` queue for the sleepy class (§5.9) — a hub handing a battery device
+the commands it missed — is not specified in this revision; nor is the hub's own
+wake-window behaviour for a sensor that must receive. A hub that relays reports
+today relays reports only.
 
 ---
 
@@ -1547,6 +1748,13 @@ on its own and none of them breaks what is already deployed:
    attributed. `test_agent.py` (server) and `test_library.py` (the library's
    `askMaya`). **The app has no switch for `can_invoke_agent` yet**, so today it is
    set through `PUT /api/devices/{id}/agent`.
+7. The hub relay (§5.9, §7.5).
+   — **spec done 2026-10-11** (revision 2.4). **Server half done the same day**
+   (`peering.ingest_relay`, `relay`/`hub_status`/`hub_failed` handling in
+   `main.py`; `test_relay.py`, with thirteen deliberate bugs each confirmed to fail it).
+   Review caught that a hub holding the grant key could sign for a sensor, so the
+   key is withheld from the hub.
+   The library's hub and sensor halves and a hub firmware are not built yet.
 
 Two pieces of this document sit outside that order because they depend on it
 rather than on each other: **§5.12 (history)** needs step 2 to have somewhere to

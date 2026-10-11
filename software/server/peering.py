@@ -10,6 +10,8 @@ This module has no WebSocket and no HTTP in it, so the rules can be tested on
 their own (`test_peering.py`); `main.py` adds the endpoints and does the pushing.
 """
 import base64
+import hashlib
+import hmac
 import json
 import re
 import secrets
@@ -20,6 +22,9 @@ from sqlalchemy.orm import Session
 import capability_store
 from models import Device, PeerGrant, PeerLogCounter, PeerLogEntry
 
+PURPOSES = ("control", "relay")   # §7.5
+MAX_RELAY_FRAMES = 16           # §7.5 - local frames in one `relay` message
+MAX_REPORT_AGE_S = 7 * 86400    # §7.5 - how old a buffered reading may claim to be
 DEFAULT_EXPIRY_DAYS = 30        # §7.1
 MAX_EXPIRY_DAYS = 365
 MAX_BATCH = 64                  # §7.3 — entries per peer_log frame
@@ -98,6 +103,15 @@ def eligible_keys(db: Session, device_id: str) -> dict:
     return out
 
 
+def reportable_keys(db: Session, device_id: str) -> dict:
+    """What a relay grant may name (§7.5): capabilities the device *reports* - the
+    readable ones, health keys such as `_batt` included, but not buttons. A report
+    is observation, so `confirm` and `agent:"deny"` (which guard actions) do not
+    apply."""
+    return {cap.key: cap for cap in capability_store.load_capabilities(db, device_id)
+            if cap.readable and cap.known_kind and cap.kind != "button"}
+
+
 def _why_not(cap) -> str:
     if cap.key.startswith("_"):
         return "reserved keys cannot be granted"
@@ -113,9 +127,11 @@ def _why_not(cap) -> str:
 # ── creating and ending grants ───────────────────────────────────────────────
 def create_grant(db: Session, *, house_id: int, from_id: str, to_id: str, scope,
                  expires_days=None, created_by: int | None = None,
-                 now: datetime | None = None) -> PeerGrant:
+                 purpose: str = "control", now: datetime | None = None) -> PeerGrant:
     """Validate and store one grant, replacing any active one for the pair."""
     now = now or datetime.now(timezone.utc)
+    if purpose not in PURPOSES:
+        raise PairingError(400, f"purpose must be one of {', '.join(PURPOSES)}")
     if from_id == to_id:
         raise PairingError(400, "A device cannot be paired with itself")
 
@@ -148,17 +164,25 @@ def create_grant(db: Session, *, house_id: int, from_id: str, to_id: str, scope,
     if not isinstance(scope, list) or not scope or not all(isinstance(k, str) for k in scope):
         raise PairingError(400, "scope must be a non-empty list of capability keys")
     scope = list(dict.fromkeys(scope))      # de-duplicated, order kept
-    declared = {c.key: c for c in capability_store.load_capabilities(db, to_id)}
-    allowed = eligible_keys(db, to_id)
+    if purpose == "relay":
+        # §7.5: the receiver is a hub, and the scope names what the SENDER reports.
+        if not devices[to_id].is_hub:
+            raise PairingError(409, f"{devices[to_id].name} has not said it is a hub")
+        subject, subject_id, allowed = devices[from_id], from_id, reportable_keys(db, from_id)
+    else:
+        subject, subject_id, allowed = devices[to_id], to_id, eligible_keys(db, to_id)
+    declared = {c.key: c for c in capability_store.load_capabilities(db, subject_id)}
     for key in scope:
         if key not in declared:
-            raise PairingError(404, f"{devices[to_id].name} does not declare {key}")
+            raise PairingError(404, f"{subject.name} does not declare {key}")
         if key not in allowed:
-            raise PairingError(400, f"{key} cannot be granted to a peer: {_why_not(declared[key])}")
+            why = "it cannot be read" if purpose == "relay" else _why_not(declared[key])
+            raise PairingError(400, f"{key} cannot be granted to a peer: {why}")
 
     for old in db.query(PeerGrant).filter(PeerGrant.house_id == house_id,
                                           PeerGrant.from_device == from_id,
                                           PeerGrant.to_device == to_id,
+                                          PeerGrant.purpose == purpose,
                                           PeerGrant.revoked_at.is_(None)).all():
         old.revoked_at = now                # re-pairing replaces; there is no edit
 
@@ -166,7 +190,7 @@ def create_grant(db: Session, *, house_id: int, from_id: str, to_id: str, scope,
         house_id=house_id, from_device=from_id, to_device=to_id,
         key=base64.b64encode(secrets.token_bytes(32)).decode("ascii"),
         scope=json.dumps(scope), expires_at=now + timedelta(days=expires_days),
-        created_by=created_by, created_at=now)
+        created_by=created_by, created_at=now, purpose=purpose, relay_ep=0, relay_seq=0)
     db.add(grant)
     db.flush()
     return grant
@@ -210,15 +234,28 @@ def grant_frame(db: Session, grant: PeerGrant, device_id: str) -> dict:
     server would issue today."""
     other_id = grant.to_device if device_id == grant.from_device else grant.from_device
     other = db.query(Device).filter(Device.device_id == other_id).first()
-    live = eligible_keys(db, grant.to_device)
-    return {
+    relay = grant.purpose == "relay"
+    live = reportable_keys(db, grant.from_device) if relay else eligible_keys(db, grant.to_device)
+    peer = {"id": other_id, "mac": other.mac if other else None}
+    if relay and device_id == grant.from_device and other and other.hub_channel:
+        peer["channel"] = other.hub_channel      # §5.9: the sender learns where its hub is
+    frame = {
         "id": device_id, "type": "peer_grant", "grant_id": grant_ref(grant.grant_id),
         "role": "send" if device_id == grant.from_device else "recv",
-        "peer": {"id": other_id, "mac": other.mac if other else None},
+        "peer": peer,
         "key": grant.key,
         "scope": [k for k in _scope(grant) if k in live],
         "expires": _iso(grant.expires_at),
     }
+    if relay:
+        frame["purpose"] = "relay"           # absent means control (§7.5)
+        if device_id == grant.to_device:
+            # The hub is a courier. A key it held would let it sign a reading the
+            # sensor never took, which is exactly what the server's own check of
+            # the MAC (ingest_relay) exists to rule out. Only the sensor and the
+            # server know this one.
+            del frame["key"]
+    return frame
 
 
 def sync_frame(device_id: str, grants: list[PeerGrant]) -> dict:
@@ -238,11 +275,103 @@ def grant_summary(db: Session, grant: PeerGrant, now: datetime | None = None) ->
         "grant_id": grant_ref(grant.grant_id),
         "from": {"id": grant.from_device, "name": names.get(grant.from_device)},
         "to": {"id": grant.to_device, "name": names.get(grant.to_device)},
+        "purpose": grant.purpose or "control",
         "scope": _scope(grant), "expires": _iso(grant.expires_at),
         "created_at": _iso(grant.created_at) if grant.created_at else None,
         "active": is_active(grant, now),
         "revoked": grant.revoked_at is not None,
     }
+
+
+# ── the relay (§7.5) ─────────────────────────────────────────────────────────
+def frame_tag(body: str, key_b64: str) -> str:
+    """HMAC-SHA256 over the exact bytes, 16 of them, base64url without padding (§7.2)."""
+    mac = hmac.new(base64.b64decode(key_b64), body.encode("utf-8"), hashlib.sha256).digest()[:16]
+    return base64.urlsafe_b64encode(mac).decode("ascii").rstrip("=")
+
+
+def split_frame(text) -> tuple[str, str] | None:
+    """`{json}.<tag>` -> (json text, tag). The split is at the LAST dot, because the
+    JSON may contain dots (a decimal), and the tag, being base64url, never does."""
+    if not isinstance(text, str) or len(text.encode("utf-8")) > 250:
+        return None
+    body, dot, tag = text.rpartition(".")
+    return (body, tag) if dot and body.startswith("{") and body.endswith("}") and tag else None
+
+
+def ingest_relay(db: Session, hub: Device, frames, now: datetime | None = None) -> list[dict]:
+    """Take the local frames a hub carried upward and apply the readings (§7.5).
+
+    The hub is a courier, not a witness. It never holds the grant key (grant_frame
+    withholds it), so the MAC below is the only authentication and a hub cannot make
+    a sensor say something the sensor did not. What a hub *can* still do is withhold or delay
+    frames - the audit (§7.3) shows that, because the sensor's `out` count is its own.
+    Returns one result per frame: {"grant", "seq", "origin", "status", "written", "ignored"}.
+    """
+    now = now or datetime.now(timezone.utc)
+    results = []
+    if not isinstance(frames, list):
+        return results
+    caps_cache: dict[str, list] = {}
+
+    for text in frames[:MAX_RELAY_FRAMES]:
+        result = {"grant": None, "seq": None, "origin": None, "status": "bad_frame",
+                  "written": {}, "ignored": []}
+        results.append(result)
+        parts = split_frame(text)
+        if parts is None:
+            continue
+        body, tag = parts
+        try:
+            frame = json.loads(body)
+        except ValueError:
+            continue
+        gid = parse_grant_ref(frame.get("grant")) if isinstance(frame, dict) else None
+        grant = db.query(PeerGrant).filter(PeerGrant.grant_id == gid).first() if gid else None
+        # One answer for every reason the grant is not usable by *this* hub, so a hub
+        # cannot probe which grants exist elsewhere.
+        if (grant is None or grant.purpose != "relay" or grant.to_device != hub.device_id
+                or grant.house_id != hub.house_id or not hub.is_hub or not is_active(grant, now)):
+            result["status"] = "unknown_grant"
+            continue
+        result["grant"] = grant_ref(grant.grant_id)
+        if not hmac.compare_digest(tag, frame_tag(body, grant.key)):
+            result["status"] = "bad_mac"
+            continue
+
+        ep, seq = _int(frame.get("ep")), _int(frame.get("seq"), 1)
+        age = _int(frame.get("age", 0), 0, MAX_REPORT_AGE_S)
+        values = frame.get("values")
+        if (frame.get("v") != 2 or frame.get("from") != grant.from_device
+                or frame.get("kind") != "report" or ep is None or seq is None
+                or age is None or not isinstance(values, dict) or not values):
+            result["status"] = "bad_frame"
+            continue
+        result["seq"] = seq
+        if (ep, seq) <= (grant.relay_ep, grant.relay_seq):
+            result["status"] = "replay"
+            continue
+        grant.relay_ep, grant.relay_seq = ep, seq     # consumed, whatever the readings turn out to be
+
+        origin = db.query(Device).filter(Device.device_id == grant.from_device).first()
+        if origin is None or origin.blocked or origin.house_id != grant.house_id:
+            result["status"] = "unknown_grant"
+            continue
+        result["origin"] = origin.device_id
+        if origin.device_id not in caps_cache:
+            caps_cache[origin.device_id] = capability_store.load_capabilities(db, origin.device_id)
+        caps = caps_cache[origin.device_id]
+        live = reportable_keys(db, origin.device_id)
+        scope = set(_scope(grant))
+        allowed = {k: v for k, v in values.items() if k in scope and k in live}
+        result["ignored"] = sorted(k for k in values if k not in allowed)
+        result["written"] = capability_store.merge_state(
+            db, origin.device_id, allowed, capabilities=caps, at=now - timedelta(seconds=age))
+        # Nothing named a key in scope -> not_permitted; keys in scope that were all
+        # invalid, or older than what is stored -> bad_value.
+        result["status"] = ("ok" if result["written"] else
+                            "bad_value" if allowed else "not_permitted")
+    return results
 
 
 # ── audit ────────────────────────────────────────────────────────────────────

@@ -354,3 +354,16 @@ real BLE name), `WIRING.md` (protocol-2 and legacy command reference, state repo
 polarity), top-level `README.md`, `pages/firmware-esp32.md` (rewritten), `architecture-overview`,
 `index`, `security-notes` (line references that no longer exist), `device-protocol`, `todos.md`.
 Compiled for ESP32 with both polarities (54% flash, 25% RAM). **Not flashed.**
+
+## [2026-10-11] ingest | Hub relay, server half (spec 2.4, step 7a)
+
+`PROTOCOL.md` revision 2.4 adds §7.5: a device declares `hub:true`, a person pairs a sensor
+to it with a `relay` grant (scope = the sensor's keys), the sensor sends a signed `report`,
+the hub forwards it verbatim in a `relay` message and the server authenticates it itself.
+Server: `peering.ingest_relay`, `relay`/`relay_ack`, `hub_status`/`hub_channel`, `hub_failed`;
+new columns `devices.is_hub/hub_channel` and `peer_grants.purpose/relay_ep/relay_seq`, with
+ALTER migrations. **Design correction found in review:** the hub is not given the grant key,
+else it could sign for a sensor. `test_relay.py` plus thirteen deliberate bugs, each caught.
+All earlier server tests still pass. Updated `device-protocol`, `data-model`, `known-gaps`,
+`security-notes` §11, `todos.md`, the server README. Not built: the library's hub/sensor
+halves, a hub firmware, the sleepy `pending` queue, the app UI. No radio involved.

@@ -119,7 +119,7 @@ The server (`/api/peerings`, `peer_*` frames) and the library's decisions (grant
 HMAC, replay, scope, audit) are tested, including two library devices paired
 through the real server. **No frame has ever crossed an actual ESP-NOW link**: the
 radio glue in `Maya.cpp` compiles and is otherwise unverified, and the tests carry
-frames through Python. The hub relay and the app's pairing UI are not started. See
+frames through Python. The hub relay's server half is built (step 7a); its library halves, a hub firmware and the app's pairing UI are not. See
 [device-protocol §Step 5b](device-protocol.md#step-5b-2026-10-10-the-librarys-half-of-the-local-link).
 
 ## Device-to-Maya: no UI, and no real-model test (2026-10-10)

@@ -38,7 +38,8 @@ pointing at another backend, but the schema is hand-migrated for SQLite
 | `ActivityLog` | `activity_log` | Written by `log_activity`, read by `read_activity_log` |
 | `Mention` | `mentions` | Unread `@`-mention badge state |
 | `Heartbeat` | `heartbeats` | Device uptime, IP, `ch1`/`ch2`/`ch3` snapshot |
-| `PeerGrant` | `peer_grants` | One-way device-to-device permission (§7.1): sender, receiver, the shared key, the scope, expiry, `revoked_at`. Revoked rather than deleted so the audit outlives the pairing. The key is never returned by an API. |
+| `PeerGrant` | `peer_grants` | One-way device-to-device permission (§7.1): sender, receiver, the shared key, the scope, expiry, `revoked_at`. Revoked rather than deleted so the audit outlives the pairing. The key is never returned by an API. `purpose` is `control` (scope = the receiver's keys) or `relay` (§7.5: the receiver is a hub, scope = the **sender's** keys, and the key is *not* sent to the hub); `relay_ep`/`relay_seq` are the highest relayed `(ep, seq)` the server has accepted, so a relayed frame can never be replayed. |
+| `Device.is_hub`, `Device.hub_channel` | columns | Did the device say it can carry others' reports (§7.5)? Re-read at every identify; an offer, not authority. Its last reported WiFi channel (§5.9). |
 | `PeerLogEntry` | `peer_log` | One audit line a device reported about a grant (§7.3). Capped at 5,000 per house. |
 | `PeerLogCounter` | `peer_log_counters` | Per (grant, reporter, direction, epoch): highest `seq` claimed and frames logged. `grant_id = 0` is the sentinel row for a reporter's total `dropped`. |
 | `Device.can_invoke_agent` | column | May this device ask Maya to act (§8)? Default false; only a person who can manage devices sets it; re-read before every action a request takes. |

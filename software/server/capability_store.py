@@ -97,8 +97,13 @@ def store_descriptor(db: Session, device: Device, desc: Descriptor) -> None:
 
 
 def merge_state(db: Session, device_id: str, values: dict,
-                capabilities: list[Capability] | None = None) -> dict:
+                capabilities: list[Capability] | None = None,
+                at: datetime | None = None) -> dict:
     """Upsert reported values. Returns what was actually written.
+
+    `at` is when the reading was *taken*, for one that arrives late (a buffered
+    report, §7.5). A value already stored from a later moment is kept, so a delayed
+    frame cannot put a stale temperature over a fresh one.
 
     `values` must already have been through `descriptor.coerce_state` or
     `coerce_value`; passing `capabilities` re-checks them against the declaration,
@@ -112,15 +117,23 @@ def merge_state(db: Session, device_id: str, values: dict,
     rows = {row.key: row for row in db.query(CapabilityState).filter(
         CapabilityState.device_id == device_id,
         CapabilityState.key.in_(list(values.keys()))).all()}
-    now = datetime.now(timezone.utc)
+    now = at or datetime.now(timezone.utc)
+    written = {}
     for key, value in values.items():
         row = rows.get(key)
         if row is None:
             row = CapabilityState(device_id=device_id, key=key)
             db.add(row)
+        elif at is not None and row.updated_at is not None:
+            stored = row.updated_at
+            if stored.tzinfo is None:
+                stored = stored.replace(tzinfo=timezone.utc)
+            if stored > at:
+                continue
         row.value = _dump(value)
         row.updated_at = now
-    return values
+        written[key] = value
+    return written
 
 
 def load_capabilities(db: Session, device_id: str) -> list[Capability]:

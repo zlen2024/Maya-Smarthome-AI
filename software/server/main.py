@@ -101,6 +101,8 @@ def run_migrations():
             ('report_every', 'ALTER TABLE devices ADD COLUMN report_every INTEGER'),
             ('mac', 'ALTER TABLE devices ADD COLUMN mac TEXT'),
             ('can_invoke_agent', 'ALTER TABLE devices ADD COLUMN can_invoke_agent BOOLEAN DEFAULT 0 NOT NULL'),
+            ('is_hub', 'ALTER TABLE devices ADD COLUMN is_hub BOOLEAN DEFAULT 0 NOT NULL'),
+            ('hub_channel', 'ALTER TABLE devices ADD COLUMN hub_channel INTEGER'),
         ):
             if col not in device_cols:
                 db.execute(text(ddl))
@@ -117,6 +119,19 @@ def run_migrations():
                              ('peer_log_counters', PeerLogCounter)):
             if table not in inspector.get_table_names():
                 model.__table__.create(bind=engine)
+
+        # Revision 2.4 (§7.5): a grant is "control" or "relay". Grants made before
+        # it are all control, which is what the default says.
+        if 'peer_grants' in inspector.get_table_names():
+            grant_cols = [c['name'] for c in inspector.get_columns('peer_grants')]
+            for col, ddl in (
+                ('purpose', "ALTER TABLE peer_grants ADD COLUMN purpose TEXT DEFAULT 'control' NOT NULL"),
+                ('relay_ep', 'ALTER TABLE peer_grants ADD COLUMN relay_ep INTEGER DEFAULT 0 NOT NULL'),
+                ('relay_seq', 'ALTER TABLE peer_grants ADD COLUMN relay_seq INTEGER DEFAULT 0 NOT NULL'),
+            ):
+                if col not in grant_cols:
+                    db.execute(text(ddl))
+                    db.commit()
 
         # Protocol 2 step 2 (§5.10, §5.11): convert the per-relay permission
         # table and the relay names onto capability keys, then drop the old
@@ -271,6 +286,9 @@ LOGIN_RATE     = RateLimit(30, 300, "login")                      # per IP
 REGISTER_RATE  = RateLimit(5, 3600, "account registration")       # per IP
 CLAIM_CONFLICT_RATE = RateLimit(5, 3600, "device claim conflicts")  # per account: stops guessing which ids exist
 PEER_LOG_RATE  = RateLimit(12, 60, "peer log")                   # per device (§7.3)
+RELAY_RATE     = RateLimit(30, 60, "relay")                      # per hub: calls, each up to 16 frames (§7.5)
+HUB_STATUS_RATE = RateLimit(6, 60, "hub status")                 # per hub (§5.9)
+HUB_FAILED_RATE = RateLimit(1, 6 * 3600, "hub failed notice")    # per (sensor, hub): one notice, not a stream (§5.9)
 VOICE_RATE     = RateLimit(20, 60, "voice command")               # per caller
 VOICE_DAY_RATE = RateLimit(300, 86400, "voice command (daily)")   # per caller
 OPEN_API_RATE  = RateLimit(60, 60, "Open API")                    # per key
@@ -1492,7 +1510,10 @@ def _device_reach(db: Session, device_id: str) -> dict:
     moment of use, so revoking a pairing stops an action that was already asked for."""
     reach = {}
     for g in peering.active_grants(db, device_id):
-        if g.from_device != device_id:
+        # A relay grant (§7.5) is permission to *carry* this device's readings; its
+        # scope names this device's own keys, so reading it as reach over the hub
+        # would hand an agent-capable sensor whatever the hub happens to call the same.
+        if g.from_device != device_id or g.purpose != "control":
             continue
         target = db.query(Device).filter(Device.device_id == g.to_device).first()
         if not target:
@@ -1694,6 +1715,83 @@ async def _push_revocations(grants, skip: str | None = None):
                     json.dumps(peering.revoke_frame(end, g)), end)
 
 
+async def _handle_relay(db: Session, websocket: WebSocket, hub_id: str, frame: dict):
+    """A hub's `relay` message (§7.5): local frames verbatim, checked again here."""
+    try:
+        RELAY_RATE.hit(hub_id)
+    except HTTPException as e:
+        await websocket.send_text(json.dumps({
+            "id": hub_id, "type": "relay_ack", "status": "rate_limited",
+            "retry_after": int(e.headers.get("Retry-After", "60"))}))
+        return
+    hub = db.query(Device).filter(Device.device_id == hub_id).first()
+    if hub is None or not hub.house_id or hub.blocked or not hub.is_hub:
+        return
+    results = peering.ingest_relay(db, hub, frame.get("frames"))
+    db.commit()
+    wire = []
+    for r in results:
+        item = {"grant": r["grant"], "seq": r["seq"], "status": r["status"]}
+        if r["ignored"]:
+            item["ignored"] = r["ignored"]
+        wire.append(item)
+    await websocket.send_text(json.dumps({"id": hub_id, "type": "relay_ack", "results": wire}))
+    for r in results:
+        if r["written"]:
+            # The sensor's readings, as if it had reported them itself - plus who
+            # carried them, so an app can say "via Kitchen hub".
+            await manager.broadcast_to_house(hub.house_id, {
+                "type": "device_update", "device_id": r["origin"], "state": r["written"],
+                "via": hub_id, "last_heartbeat": datetime.now(timezone.utc).isoformat()})
+    print(f"relay from {hub_id}: " + ", ".join(r["status"] for r in results))
+
+
+async def _handle_hub_status(db: Session, hub_id: str, frame: dict):
+    """A hub's WiFi channel (§5.9). Stored, and pushed to the devices that depend on
+    it - a router that moved channel silently breaks every pairing otherwise."""
+    try:
+        HUB_STATUS_RATE.hit(hub_id)
+    except HTTPException:
+        return
+    hub = db.query(Device).filter(Device.device_id == hub_id).first()
+    channel = frame.get("channel")
+    if (hub is None or not hub.house_id or hub.blocked or not hub.is_hub
+            or isinstance(channel, bool) or not isinstance(channel, int) or not 1 <= channel <= 14):
+        return
+    if hub.hub_channel == channel:
+        return
+    hub.hub_channel = channel
+    db.commit()
+    for g in peering.active_grants(db, hub_id):
+        if g.purpose == "relay" and g.to_device == hub_id:
+            await manager.send_personal_message(json.dumps({
+                "id": g.from_device, "type": "hub_channel", "hub": hub_id,
+                "channel": channel}), g.from_device)
+
+
+async def _note_hub_failed(db: Session, device: Device, hub_id: str):
+    """§5.9 rule 3: a sensor that had to give up on its hub says so, so a dead hub is
+    a message to the family rather than sensors that quietly go flat. Believed only
+    if the sensor really is paired to that hub, and said once per six hours."""
+    if not device.house_id:
+        return
+    paired = [g for g in peering.active_grants(db, device.device_id)
+              if g.purpose == "relay" and g.from_device == device.device_id and g.to_device == hub_id]
+    hub = db.query(Device).filter(Device.device_id == hub_id).first() if paired else None
+    if hub is None:
+        return
+    try:
+        HUB_FAILED_RATE.hit(f"{device.device_id}>{hub_id}")
+    except HTTPException:
+        return
+    summary = (f"{device.name} could not reach {hub.name} and is reporting on its own. "
+               f"Check that {hub.name} is powered and in range.")
+    log_activity(db, device.house_id, "device", None, device.name, "hub_failed", summary)
+    db.commit()
+    await manager.broadcast_to_house(device.house_id, {
+        "type": "hub_failed", "device_id": device.device_id, "hub": hub_id, "summary": summary})
+
+
 def _grant_in_house_or_404(db: Session, grant_ref: str, user: Account) -> PeerGrant:
     gid = peering.parse_grant_ref(grant_ref)
     grant = db.query(PeerGrant).filter(PeerGrant.grant_id == gid).first() if gid else None
@@ -1707,7 +1805,9 @@ async def create_peering(payload: dict, db: Session = Depends(get_db),
                          current_user: Account = Depends(get_current_user)):
     """Let one device address another: {"from", "to", "scope": [keys], "expires_days"}.
 
-    One-way, and `scope` names the *receiver's* keys (§7.1). Re-pairing a pair
+    One-way, and `scope` names the *receiver's* keys (§7.1). With
+    `"purpose": "relay"` the receiver is a hub that will carry the sender's readings
+    to the server, and `scope` names the *sender's* keys (§7.5). Re-pairing a pair
     replaces the old grant, which is how a key is rotated or a scope changed."""
     if not _user_can_manage_devices(db, current_user):
         raise HTTPException(status_code=403, detail="Only the house owner (or members they've authorized) can pair devices")
@@ -1716,20 +1816,23 @@ async def create_peering(payload: dict, db: Session = Depends(get_db),
     from_id, to_id = payload.get("from"), payload.get("to")
     if not isinstance(from_id, str) or not isinstance(to_id, str):
         raise HTTPException(status_code=400, detail="from and to (device ids) required")
+    purpose = payload.get("purpose", "control")
     replaced = [g for g in peering.active_grants(db, from_id)
-                if g.from_device == from_id and g.to_device == to_id]
+                if g.from_device == from_id and g.to_device == to_id and g.purpose == purpose]
     try:
         grant = peering.create_grant(
             db, house_id=current_user.house_id, from_id=from_id, to_id=to_id,
             scope=payload.get("scope"), expires_days=payload.get("expires_days"),
-            created_by=current_user.acc_id)
+            created_by=current_user.acc_id, purpose=purpose)
     except peering.PairingError as e:
         db.rollback()
         raise HTTPException(status_code=e.status, detail=e.detail)
     log_activity(db, current_user.house_id, "parent", current_user.acc_id, current_user.name,
                  "peering_created",
-                 f"{current_user.name} let {from_id} address {to_id}: "
-                 f"{', '.join(json.loads(grant.scope))}")
+                 (f"{current_user.name} let {to_id} carry the readings of {from_id}: "
+                  if purpose == "relay" else
+                  f"{current_user.name} let {from_id} address {to_id}: ")
+                 + f"{', '.join(json.loads(grant.scope))}")
     db.commit()
 
     await _push_revocations(replaced)
@@ -3243,6 +3346,9 @@ async def _handle_websocket(websocket: WebSocket):
                     # source address against. Replaced on every identify, so a
                     # board that moves to new hardware is not paired by a stale one.
                     device_db.mac = peering.parse_mac(json_data.get("mac"))
+                    # §5.9: whether it offers to carry other devices' reports. Only an
+                    # offer - a relay needs a person to pair it (§7.5).
+                    device_db.is_hub = json_data.get("hub") is True
                     if desc.shimmed:
                         # §4.1: this identify is the first moment "three
                         # channels" is a fact rather than a guess, so the v1
@@ -3283,6 +3389,8 @@ async def _handle_websocket(websocket: WebSocket):
                     _mirror_channels_to_relays(db, device_id, written)
                     db.commit()
                     print(f"State from {device_id}: {written}")
+                    if device_db and isinstance(json_data.get("hub_failed"), str):
+                        await _note_hub_failed(db, device_db, json_data["hub_failed"])
                     if device_db and device_db.house_id:
                         await manager.broadcast_to_house(device_db.house_id, {
                             "type": "device_update",
@@ -3297,6 +3405,14 @@ async def _handle_websocket(websocket: WebSocket):
                     # §8 - a device asking Maya for help. Answered from a background
                     # task so this loop keeps receiving while the model thinks.
                     await _handle_agent_request(db, device_id, json_data)
+
+                elif json_data.get("type") == "relay":
+                    # §7.5 - readings a hub carried up from a device that has no WiFi
+                    # of its own (or is asleep).
+                    await _handle_relay(db, websocket, device_id, json_data)
+
+                elif json_data.get("type") == "hub_status":
+                    await _handle_hub_status(db, device_id, json_data)
 
                 elif json_data.get("type") == "peer_log":
                     # §7.3 - what a device says its local link did. Rate limited

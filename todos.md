@@ -181,7 +181,25 @@ descriptors; shims protocol 1. Nothing else changes." Status and reasoning:
   always has one; a sleepy sensor may not. Decide whether a sleepy device should
   get relative expiry instead.
 - [ ] Peering UI in the app (pair, list, revoke, audit view) — needs the Flutter SDK.
-- [ ] Hub relay (§5.9) is a *user* of peering and is not started.
+- [x] **Step 7a — the hub relay, server half** (2026-10-11, spec revision 2.4, §7.5).
+  A device says `hub:true`; a person pairs a sensor to it with `purpose:"relay"`
+  (scope = the **sensor's** readable keys, `_batt` included); the sensor signs a
+  `report` frame, the hub forwards it verbatim in a `relay` message, and the server
+  checks the MAC, `(ep, seq)`, sender and scope itself. **The hub is never given the
+  key** (found in review: a shared key would have let a hub sign for a sensor, so the
+  server's check would have proved nothing about the hub). Also `hub_status`
+  (channel, pushed to dependants) and `hub_failed` (once per sensor and hub per 6 h).
+  `test_relay.py`; thirteen deliberate bugs each confirmed to fail it.
+- [ ] **Step 7b — the library's hub and sensor halves.** `maya.enableHub()`: allowlist
+  of relay senders by MAC, per-sender rate limit, bounded queue, `relay` message,
+  `hub_status`. Sensor side: `maya.report(...)`, ESP-NOW first, WiFi fallback after
+  3 failures with `hub_failed`, ring buffer with `age`. Then a hub firmware
+  (`hardware/smartextension_hub`) and a `HubSensor` example. Needs two boards to
+  mean anything; the host test can carry frames, as `test_peer_link.py` does.
+- [ ] The sleepy class's `pending` queue (a hub handing a battery device the commands
+  it missed) — unspecified; deliberately left out of revision 2.4.
+- [ ] The app: no UI to pair a sensor to a hub, nor to show "via Kitchen hub" or a
+  `hub_failed` notice.
 - [x] **Step 6 — device to Maya** (2026-10-10, spec revision 2.3). `agent` /
   `agent_reply`; permission off by default and set only by a person
   (`PUT /api/devices/{id}/agent`); reach = the device's outgoing peer grants, checked

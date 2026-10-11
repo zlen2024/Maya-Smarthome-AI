@@ -297,3 +297,39 @@ on other devices, read the house, or talk to the family. What stops it, all in c
 bytes) and always labelled with the device's name, but it is the one place untrusted text
 reaches a person. A hostile *firmware* can also spend its allowance every hour. And the
 quality of the model's behaviour under hostile text has not been tested with the real model.
+
+## 11. A hub carries other devices' words (step 7a, 2026-10-11)
+
+A hub forwards readings for sensors that cannot reach the server, so what it forwards
+becomes house state. It sits in a cupboard, listens to anyone in radio range, and is
+the least trustworthy device in the system. What the design does about that, in code:
+
+- **The hub is never given the key.** A first draft shared the grant key with the hub
+  (every §7.1 grant has one key for both ends) and had the server re-check the MAC "with
+  the same key". That proved nothing about the hub: holding the key, it could sign any
+  reading. `grant_frame` now omits `key` from a relay grant's hub end, and the test
+  asserts it. This was found in review, before the library existed.
+- **The server authenticates every relayed frame itself** (`ingest_relay`): the grant
+  must be a relay grant naming *this* hub, in this house, unexpired, with the hub still
+  declaring itself one; the MAC must verify; `from`, `kind`, `v` must match; `(ep, seq)`
+  must be strictly newer than what the server stored, which survives restarts, so a
+  captured frame cannot be replayed through any hub, ever.
+- **Scope is the person's.** Only keys in the grant, and still reportable now, are
+  stored; the rest are named and dropped. A relay grant is **not** reach under §8: a
+  sensor that may ask Maya gains nothing over the hub's same-named keys.
+- **A late reading never overwrites a fresher one**, and a reading may claim to be at
+  most 7 days old.
+- **Bounded.** 30 `relay` messages a minute per hub, 16 frames each; `hub_status` 6 a
+  minute; one `hub_failed` notice per sensor and hub per 6 hours.
+- **One answer for every reason a grant is unusable** (`unknown_grant`), so a hub cannot
+  probe which grants exist elsewhere.
+
+**Residual risks, stated:** a hub can **withhold, delay or drop** a sensor's readings —
+visible in the audit (the sensor's `out` count against what the server accepted), but a
+sensor that sleeps through the outage loses those readings unless it buffered them. It can
+forward out of order, which loses the older reading. Anyone who can spoof a paired sensor's
+radio address makes the hub forward junk to the server, which refuses it; the hub's
+per-sender rate limit and queue bound (spec, library not yet built) and the server's rate
+limit bound the cost. And `hub_failed` is the sensor's word: believed only for a real
+pairing, but a sensor that lies can make a family check a hub that is fine, once per six
+hours.

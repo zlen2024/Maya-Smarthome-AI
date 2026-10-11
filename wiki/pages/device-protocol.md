@@ -10,7 +10,7 @@ The goal the protocol exists for: a contributor builds new hardware, drops it in
 firmware to app — `ch1`/`ch2`/`ch3` appeared 76 times across 6 files when the
 migration was planned.
 
-## Status: steps 1, 3, 4, 5 and 6 done, step 2 server-complete, spec at revision 2.3 (2026-10-10)
+## Status: steps 1, 3, 4, 5 and 6 done, step 2 and step 7 server-complete, spec at revision 2.4 (2026-10-11)
 
 §10 defines a six-step migration order. Only the first is implemented.
 
@@ -22,6 +22,7 @@ migration was planned.
 | 4. Extract the Arduino library | **done** (compiles for ESP32; not yet flashed) |
 | 5. Peering: grants, local link, audit (§7) | spec done (2.2); **5a server done; 5b library done**; the ESP-NOW radio has never run |
 | 6. Device to Maya (§8) | **done** (spec 2.3); the app has no switch for it yet; the real model has not been tried |
+| 7. The hub relay (§5.9, §7.5) | spec done (2.4); **7a server done**; the library's hub and sensor halves, a hub firmware and the app are not built |
 
 **Steps 1–3 needed no firmware change.** The shipped ESP32 still speaks protocol 1 and
 is served by the shim — which is the point of the migration order, and what
@@ -438,3 +439,54 @@ model has never been run against this: how `gpt-oss:20b` behaves given hostile t
 untested, and while no server-side limit depends on it, the quality of its replies
 does. Chains (a device's command causing another device to ask Maya) are bounded by
 the limits and attributed, not detected.
+
+## Step 7a (2026-10-11): the hub relay, server half
+
+§5.9 described hubs as a goal. Revision 2.4 (§7.5) specifies how one is trusted, and
+`peering.py` / `main.py` implement it.
+
+**The trust model, and the mistake worth remembering.** The first draft let the hub
+verify each sensor's MAC and the server check it again "with the same grant key", and
+claimed a hub therefore could not make a sensor say something false. That was wrong:
+§7.1's key is shared by *both ends* of a grant, so a hub holding it could sign any
+reading it liked, and the server's check would pass. Found while writing the
+security notes, before any library code existed. The fix is that **a relay grant's key
+goes to the sensor and the server only**: `grant_frame` leaves `key` out of the hub's
+frame. The hub is then a true courier: it can drop or delay frames (the audit shows
+that), but it cannot alter, forge or replay one. It checks only what it can without a
+key (source MAC allowlist, size, per-sender rate, bounded queue) and the server does
+the authenticating.
+
+| Piece | Where |
+|---|---|
+| `Device.is_hub`, `Device.hub_channel`; `PeerGrant.purpose`, `relay_ep`, `relay_seq` | `models.py`, with ALTER migrations in `main.py` |
+| Pairing with `purpose:"relay"`; `reportable_keys`; key withheld from the hub | `peering.create_grant`, `grant_frame` |
+| Verify and apply a relayed frame | `peering.ingest_relay` |
+| `relay` / `relay_ack`, `hub_status` / `hub_channel`, `hub_failed` | `main.py` (`_handle_relay`, `_handle_hub_status`, `_note_hub_failed`) |
+| Late readings do not overwrite fresh ones | `capability_store.merge_state(..., at=)` |
+
+**A relay grant is not reach.** §8.3 defines a device's reach through Maya as its
+outgoing *control* grants. A relay grant's scope names the sensor's own keys, so reading
+it as reach would give an agent-capable sensor control of whatever key on the hub
+happens to share a name. `_device_reach` now skips non-control grants, and the test
+gives the hub a writable key with the same name as the sensor's.
+
+**Tests.** `test_relay.py` builds frames from the spec's recipe with Python's `hmac`, not
+the server's code. It covers: only a declared hub can be paired; scope is the sensor's
+readable keys (write-only, button and the hub's own keys refused); the key is not sent to
+the hub; a forged, wrongly-keyed, replayed, older-epoch, wrong-kind, wrong-sender, v1,
+oversize or malformed frame is refused; late readings; at most 16 frames; another hub, another
+house, a revoked or expired grant, a device that withdrew its hub flag; the rate limit;
+the channel push; and `hub_failed` believed only for a real pairing and said once. Thirteen
+deliberate bugs (trust the hub's MAC, no replay check, any hub, any house, no scope check,
+no sender check, no kind check, late overwrites fresh, relay counted as reach, `hub_failed`
+from anyone, non-hubs pairable, expired still relays, hub handed the key) each fail it.
+
+**Found by running it:** a writable switch *is* reportable (its state is reported), so my
+"write-only" example needed `access:"w"`; a `hub_status` rate limit of 6 a minute is hit by
+the seventh frame whether or not it was valid; a v2 device with a key named `ch1` has its
+state normalised to `"off"`/`"on"` by the shim.
+
+**Not done:** the library's side (the hub allowlist and queue, the sensor's ESP-NOW
+send, WiFi fallback and ring buffer), a hub firmware, the sleepy `pending` queue, and
+the app. No radio has carried any of it.

@@ -118,6 +118,10 @@ class Device(Base):
     # May this device ask Maya to act (§8.2)? Off by default, set only by a person
     # who can manage devices, and re-read before every action a request takes.
     can_invoke_agent = Column(Boolean, default=False, nullable=False)
+    # §5.9: a device that says it can carry other devices' reports. Self-declared at
+    # identify, and it grants nothing by itself - a relay needs a person's pairing.
+    is_hub = Column(Boolean, default=False, nullable=False)
+    hub_channel = Column(Integer, nullable=True)   # the hub's WiFi channel, as it last reported
 
     house = relationship("House", back_populates="devices")
     extensions = relationship("SmartExtension", back_populates="device", cascade="all, delete-orphan")
@@ -413,6 +417,14 @@ class PeerGrant(Base):
     created_by = Column(Integer, nullable=True)   # acc_id of the member who paired them
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     revoked_at = Column(DateTime, nullable=True)
+    # §7.5: "control" lets the sender `set` the receiver's keys; "relay" lets the
+    # receiver (a hub) carry the sender's `report` frames to the server, and then
+    # `scope` names the SENDER's keys, and the key is known only to the sender and
+    # this server - the hub is never given it - so the server authenticates relayed
+    # frames itself and keeps the highest (ep, seq) it has accepted.
+    purpose = Column(String, default="control", nullable=False)
+    relay_ep = Column(Integer, default=0, nullable=False)
+    relay_seq = Column(Integer, default=0, nullable=False)
 
 
 class PeerLogEntry(Base):
