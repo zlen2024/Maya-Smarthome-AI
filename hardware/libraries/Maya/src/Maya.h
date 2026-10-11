@@ -55,6 +55,36 @@ class Maya : public mayalib::Core {
   // already has a local-link grant for - asking her gains it nothing else.
   bool askMaya(const char* text, mayalib::AgentReplyFn onReply);
 
+  // ── a hub (PROTOCOL.md 5.9, 7.5) ──────────────────────────────────────────
+  // A mains-powered device that carries other devices' readings to the server:
+  //   maya.enableHub();      // before begin()
+  // That is all a sketch does. The library says `hub:true` at identify, takes the
+  // reports of the sensors a person has paired to it, forwards them to the server
+  // byte for byte, and tells the server its WiFi channel. It holds no key for its
+  // sensors, so it cannot read or alter what it carries; the server checks every frame.
+  // (enableHub() is Core's.)
+  //
+  // ── a battery sensor (5.9) ────────────────────────────────────────────────
+  // For a device that wakes, reads, reports and sleeps:
+  //   void setup() {
+  //     maya.addNumber("salt", "Salt left").readOnly().unit("%");
+  //     maya.beginSensor();               // not begin(): it does not join WiFi
+  //     maya.setNumber("salt", readSalt());
+  //     maya.reportNow();                 // the hub if it can, the server if it cannot
+  //     maya.sleepFor(300);               // does not return
+  //   }
+  //   void loop() {}
+  // Needs a bare ESP32 module, not a DevKit: a DevKit's USB chip draws more asleep than
+  // the whole design budget (5.9). The first wake joins WiFi and needs provisioning like
+  // any other device; after that WiFi is visited about once a day.
+  void beginSensor();
+  // Carries what changed to the hub (ESP-NOW, no WiFi); after three failures in a row,
+  // or on the daily visit, joins WiFi and reports through the server, saying why. True
+  // if the readings were delivered by either path.
+  bool reportNow();
+  // Deep sleep for this long, keeping what a sensor must remember. Does not return.
+  void sleepFor(uint32_t seconds);
+
   const char* id() const;
   bool connected() const;
 
@@ -70,4 +100,5 @@ class Maya : public mayalib::Core {
   unsigned long lastWiFiCheck_ = 0;
   unsigned long lastWarning_ = 0;
   void refreshHealth();
+  bool goOnline();
 };

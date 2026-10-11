@@ -55,4 +55,5 @@ python wiki/graph/lint_wiki.py       # lint:   links, anchors, orphans
 | `software/server` | 6 | 179 | `scope` | yes |
 | `software/mobile/lib` | 20 | 558 | `name` | yes |
 | `hardware/smartextension` | 1 (~70 lines, on the Maya library) | — | — | **no** (`.ino` unsupported) |
+| `hardware/smartextension_hub` | 1 (the extension plus `enableHub()`) | — | — | **no** (`.ino` unsupported) |
 | `hardware/libraries/Maya` | 4 | — | — | **no** (outside both graph roots; verified by `extras/test/test_library.py`, not queried) |

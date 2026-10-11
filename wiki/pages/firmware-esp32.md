@@ -5,6 +5,10 @@ Two layers, since 2026-10-10:
 - `hardware/smartextension/smartextension.ino` — **~70 lines**: three outputs on GPIO
   2, 4, 5 declared as switches `ch1`..`ch3`, plus a `RELAY_ACTIVE_LOW` option.
   Companion docs: `SETUP.md`, `WIRING.md`.
+- `hardware/smartextension_hub/smartextension_hub.ino` — the same board plus one line,
+  `maya.enableHub()`: it also carries battery sensors' readings to the server over ESP-NOW
+  ([device protocol §Step 7b](device-protocol.md#step-7b-2026-10-11-the-librarys-hub-and-sensor-halves)).
+  Its own `SETUP.md` and `WIRING.md` say only what differs.
 - `hardware/libraries/Maya` — everything else: BLE provisioning, WiFi, the server
   link, the capability descriptor, the local link, asking Maya. See
   [Device protocol v2 §Step 4](device-protocol.md#step-4-2026-10-10-the-arduino-library).
@@ -86,3 +90,14 @@ the code never did). Details of both vocabularies: `WIRING.md`.
 
 The device connects to `/ws` or `/` on the server — both routes exist for exactly this
 reason ([server backend](server-backend.md#websockets)).
+
+## A hub, and a battery sensor (2026-10-11)
+
+`maya.enableHub()` makes a board a hub; `examples/HubSensor` is a battery sensor that wakes,
+reads, hands the reading to its hub over ESP-NOW and deep-sleeps (`beginSensor()` →
+`reportNow()` → `sleepFor()`). A sensor needs WiFi and the server once, to be provisioned and
+paired, and about daily after that. The hub holds no key for its sensors, so it forwards frames
+it cannot check and the server authenticates them. **Compiled for ESP32 (both examples and the
+firmware, 54% flash, 25% RAM, unchanged from the plain extension because the hub's queue is
+allocated only when enabled); never run on a board.** A DevKit is the wrong board for a battery
+sensor: its USB chip draws milliamps asleep.

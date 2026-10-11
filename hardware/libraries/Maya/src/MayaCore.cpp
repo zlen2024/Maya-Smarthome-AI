@@ -370,6 +370,11 @@ bool Core::sendIdentify(const char* id, const char* pin, const char* ip, const c
   doc["pin"] = pin;
   if (ip && *ip) doc["ip"] = ip;
   if (mac && *mac) doc["mac"] = mac;   // 7.1: a device that can be paired says where it is on the air
+  if (hub_) doc["hub"] = true;         // 7.5: an offer to carry reports, not an authority
+  // A new connection starts the hub's conversation afresh: the channel is told again,
+  // and a relay message the old connection never answered is sent again.
+  hubStatusSent_ = false;
+  relayInflight_ = 0;
   if (model_) doc["model"] = model_;
   if (fw_) doc["fw"] = fw_;
 
@@ -411,11 +416,20 @@ bool Core::sendIdentify(const char* id, const char* pin, const char* ip, const c
   return sendDoc(doc, send);
 }
 
+// 5.9 rule 3: the first report after giving up on a hub says so, once.
+void Core::addHubFailed(JsonDocument& doc) {
+  if (!hubFailedPending_[0]) return;
+  doc["hub_failed"] = hubFailedPending_;      // copied: the buffer is cleared just below
+  hubFailedPending_[0] = 0;
+  hubAnnounced_ = true;
+}
+
 bool Core::sendFullState(const char* myId, uint32_t uptimeMs, Send send) {
   DynamicJsonDocument doc(MAYA_TX_BYTES);
   doc["id"] = myId;
   doc["type"] = "state";
   doc["uptime_ms"] = uptimeMs;
+  addHubFailed(doc);
   JsonObject state = doc.createNestedObject("state");
   for (size_t i = 0; i < n_; i++)
     if (caps_[i].hasValue_ && caps_[i].readable() && caps_[i].kind_ != BUTTON) {
@@ -426,11 +440,12 @@ bool Core::sendFullState(const char* myId, uint32_t uptimeMs, Send send) {
 }
 
 bool Core::flush(const char* myId, uint32_t uptimeMs, Send send) {
-  if (!hasPending()) return false;
+  if (!hasPending() && !hubFailedPending_[0]) return false;
   DynamicJsonDocument doc(MAYA_TX_BYTES);
   doc["id"] = myId;
   doc["type"] = "state";
   doc["uptime_ms"] = uptimeMs;
+  addHubFailed(doc);
   JsonObject state = doc.createNestedObject("state");
   for (size_t i = 0; i < n_; i++) {
     Cap& c = caps_[i];
@@ -618,7 +633,14 @@ Action Core::handleLegacy(JsonObjectConst root, const char* cmd, const char* myI
 }
 
 Action Core::onFrame(const char* data, size_t len, const char* myId, uint32_t uptimeMs, Send send) {
-  DynamicJsonDocument doc(MAYA_RX_BYTES);
+  // Most frames from the server are small. A hub's `relay_ack` carries one result for
+  // each of up to 16 frames and is several times the size of anything else, and
+  // ArduinoJson needs a few bytes of pool for every byte of text, so the pool grows
+  // with the frame rather than being sized for the common case and failing silently
+  // on the one that matters (found by test_relay_link.py: 16 results did not fit).
+  size_t pool = MAYA_RX_BYTES;
+  if (len * 4 > pool) pool = len * 4 < MAYA_TX_BYTES ? len * 4 : MAYA_TX_BYTES;
+  DynamicJsonDocument doc(pool);
   if (deserializeJson(doc, data, len)) return NONE;
   JsonObjectConst root = doc.as<JsonObjectConst>();
   if (root.isNull()) return NONE;
@@ -639,6 +661,8 @@ Action Core::onFrame(const char* data, size_t len, const char* myId, uint32_t up
     }
     if (!strncmp(type, "peer_", 5)) { handlePeerControl(root, type); return NONE; }
     if (!strcmp(type, "agent_reply")) { handleAgentReply(root); return NONE; }
+    if (!strcmp(type, "relay_ack")) { handleRelayAck(root); return NONE; }
+    if (!strcmp(type, "hub_channel")) { handleHubChannel(root); return NONE; }
     if (!strcmp(type, "reboot"))        { sendSimpleAck(myId, req, "ok", send); return REBOOT; }
     if (!strcmp(type, "factory_reset")) { sendSimpleAck(myId, req, "ok", send); return FACTORY_RESET; }
     return NONE;   // welcome, error, and anything newer than this library: not ours to act on

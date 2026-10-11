@@ -86,7 +86,7 @@ void Core::loadPeers() {
   for (auto& g : peers_) {
     // Counters that live in RAM only. `inFresh` is the 7.2 residual window: after
     // a reboot the next frame of the stored epoch is accepted whatever its seq.
-    g.inSeq = 0; g.inFresh = true; g.outSeq = 0;
+    g.inSeq = 0; g.inFresh = true; g.outSeq = 0; g.winStart = 0; g.winCount = 0;
     if (g.nScope > MAYA_PEER_SCOPE) g.used = false;
   }
 }
@@ -118,7 +118,7 @@ const PeerRec* Core::peerByGrant(const char* grant) const {
 PeerRec* Core::findSendGrant(const char* peer) {
   if (!peer) return nullptr;
   for (auto& g : peers_)
-    if (g.used && g.role == 1 && !strcmp(g.peer, peer) && !expired(g)) return &g;
+    if (g.used && g.role == 1 && g.purpose == 0 && !strcmp(g.peer, peer) && !expired(g)) return &g;
   return nullptr;
 }
 
@@ -158,14 +158,24 @@ void Core::handlePeerControl(JsonObjectConst root, const char* type) {
     const char* peerId = root["peer"]["id"] | (const char*)nullptr;
     const char* peerMac = root["peer"]["mac"] | (const char*)nullptr;
     const char* key = root["key"] | (const char*)nullptr;
+    const char* purpose = root["purpose"] | (const char*)nullptr;
     JsonArrayConst scope = root["scope"].as<JsonArrayConst>();
     uint8_t mac[6], keyBytes[40];
     // A malformed grant is dropped whole. Half a grant - a key without a scope, a
     // scope without a peer - is worse than none.
     if (!validGrantRef(ref) || !role || (strcmp(role, "send") && strcmp(role, "recv"))) return;
     if (!peerId || !*peerId || strlen(peerId) >= sizeof(PeerRec::peer) || !parseMac(peerMac, mac)) return;
-    if (!key || base64Decode(key, strlen(key), keyBytes, sizeof keyBytes) != 32) return;
     if (scope.isNull()) return;
+    // 7.1: a purpose this library does not know is ignored, never read as control -
+    // the two differ in whose keys `scope` names.
+    if (purpose && strcmp(purpose, "relay") && strcmp(purpose, "control")) return;
+    bool relay = purpose && !strcmp(purpose, "relay");
+    bool isSend = !strcmp(role, "send");
+    // 7.5: the hub end of a relay grant has no key, and must not keep one it is
+    // sent by mistake - a hub that held it could sign for the sensor. Every other
+    // grant needs its key.
+    bool wantKey = !(relay && !isSend);
+    if (wantKey && (!key || base64Decode(key, strlen(key), keyBytes, sizeof keyBytes) != 32)) return;
 
     PeerRec* slot = findPeer(ref);
     bool known = slot != nullptr;
@@ -176,11 +186,15 @@ void Core::handlePeerControl(JsonObjectConst root, const char* type) {
     PeerRec fresh;
     memset(&fresh, 0, sizeof fresh);
     fresh.used = true;
-    fresh.role = !strcmp(role, "send") ? 1 : 2;
+    fresh.role = isSend ? 1 : 2;
+    fresh.purpose = relay ? 1 : 0;
+    fresh.hasKey = wantKey;
+    int channel = root["peer"]["channel"] | 0;
+    fresh.channel = (channel >= 1 && channel <= 14) ? (uint8_t)channel : 0;
     copyStr(fresh.grant, sizeof fresh.grant, ref);
     copyStr(fresh.peer, sizeof fresh.peer, peerId);
     memcpy(fresh.mac, mac, 6);
-    memcpy(fresh.key, keyBytes, 32);
+    if (wantKey) memcpy(fresh.key, keyBytes, 32);
     for (JsonVariantConst k : scope) {
       const char* name = k.as<const char*>();
       if (name && strlen(name) < sizeof fresh.scope[0] && fresh.nScope < MAYA_PEER_SCOPE)
@@ -191,7 +205,8 @@ void Core::handlePeerControl(JsonObjectConst root, const char* type) {
       // The server re-sends every active grant at each identify. That must not
       // reopen the replay window, so the counters carry over - unless the key
       // changed, which is a different grant in all but its id.
-      bool sameKey = memcmp(slot->key, fresh.key, 32) == 0;
+      bool sameKey = slot->hasKey == fresh.hasKey && slot->purpose == fresh.purpose
+                     && memcmp(slot->key, fresh.key, 32) == 0;
       if (sameKey) { fresh.inEp = slot->inEp; fresh.inSeq = slot->inSeq; fresh.inFresh = slot->inFresh; fresh.outSeq = slot->outSeq; }
       else fresh.inFresh = true;
     } else {
@@ -405,6 +420,14 @@ void Core::onLocalFrame(const uint8_t* data, size_t len, const uint8_t srcMac[6]
   if (deserializeJson(doc, (const char*)data, dot)) return;
   PeerRec* g = findPeer(doc["grant"] | (const char*)nullptr);
   if (!g || expired(*g)) return;
+
+  // A relay grant (7.5). The sender holds the key and the server checks it; the hub
+  // end has none, so it cannot check the MAC and takes the other path. A sensor is
+  // never sent anything over a relay grant.
+  if (g->purpose == 1) {
+    if (g->role == 2) hubAccept(*g, data, len, doc, srcMac);
+    return;
+  }
 
   uint8_t want[32];
   hmacSha256(g->key, 32, data, dot, want);

@@ -80,7 +80,8 @@ def build_driver():
     out = Path(tempfile.mkdtemp()) / ("driver.exe" if os.name == "nt" else "driver")
     cmd = cxx + ["-std=c++17", "-w", f"-I{LIB / 'src'}", f"-I{aj}",
                  str(HERE / "host_driver.cpp"), str(LIB / "src" / "MayaCore.cpp"),
-                 str(LIB / "src" / "MayaPeer.cpp"), str(LIB / "src" / "MayaCrypto.cpp"), "-o", str(out)]
+                 str(LIB / "src" / "MayaPeer.cpp"), str(LIB / "src" / "MayaRelay.cpp"),
+                 str(LIB / "src" / "MayaCrypto.cpp"), "-o", str(out)]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0:
         print(r.stdout, r.stderr)

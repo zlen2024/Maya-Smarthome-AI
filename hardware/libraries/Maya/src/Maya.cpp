@@ -8,6 +8,7 @@
 #include <BLE2902.h>
 #include <WebSocketsClient.h>
 #include <esp_now.h>
+#include <esp_wifi.h>
 #include <time.h>
 
 // Provisioning, WiFi and the WebSocket link, moved out of the sketch they used
@@ -83,6 +84,25 @@ uint8_t espNowPeers[MAYA_MAX_PEERS][6];
 size_t espNowPeerCount = 0;
 uint32_t espNowPeersSeen = 0xFFFFFFFF;
 
+// A battery sensor's memory across deep sleep (5.9): how long it has been alive, how
+// often its hub has failed, and when it last joined WiFi to refresh its grants and the
+// hub's channel. RTC memory survives deep sleep and nothing else.
+RTC_DATA_ATTR uint32_t rtcSecs = 0;
+RTC_DATA_ATTR uint32_t rtcLastSync = 0;
+RTC_DATA_ATTR uint32_t rtcDownSince = 0;
+RTC_DATA_ATTR uint8_t rtcFails = 0;
+RTC_DATA_ATTR uint8_t rtcChannel = 0;
+RTC_DATA_ATTR bool rtcAnnounced = false;
+RTC_DATA_ATTR bool rtcSynced = false;
+const uint32_t SENSOR_SYNC_EVERY_S = 86400;   // 5.9: a daily visit to WiFi is enough
+uint32_t sensorSecs() { return rtcSecs + millis() / 1000; }
+
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+void onEspNowSent(const wifi_tx_info_t*, esp_now_send_status_t status);
+#else
+void onEspNowSent(const uint8_t*, esp_now_send_status_t status);
+#endif
+
 bool startEspNow() {
   if (espNowUp) return true;
   // ESP-NOW needs the radio on the access point's channel, which station mode
@@ -92,8 +112,31 @@ bool startEspNow() {
     return false;
   }
   esp_now_register_recv_cb(onEspNowRecv);
+  esp_now_register_send_cb(onEspNowSent);
   espNowUp = true;
   return true;
+}
+
+// Whether the last frame was acknowledged by the receiver's radio. This is what lets
+// a sensor know its hub is alive without a reply at the application layer (5.9 rule 1).
+volatile int sendResult = -1;
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && ESP_ARDUINO_VERSION_MAJOR >= 3
+void onEspNowSent(const wifi_tx_info_t*, esp_now_send_status_t status) { sendResult = status == ESP_NOW_SEND_SUCCESS; }
+#else
+void onEspNowSent(const uint8_t*, esp_now_send_status_t status) { sendResult = status == ESP_NOW_SEND_SUCCESS; }
+#endif
+
+// Sends one frame and waits for the radio's verdict. True means the peer's radio
+// acknowledged it; false means it was not sent or nobody answered. The core counts a
+// sensor's consecutive failures from this, so it must be the MAC layer's word and not
+// merely "esp_now_send did not complain".
+bool radioSend(const uint8_t* mac, const uint8_t* data, size_t len) {
+  if (!espNowUp) return false;
+  sendResult = -1;
+  if (esp_now_send(mac, data, len) != ESP_OK) return false;
+  uint32_t t = millis();
+  while (sendResult < 0 && millis() - t < 200) delay(1);
+  return sendResult == 1;
 }
 
 // Keep the radio's peer list equal to the grants held: every peer in a grant, and
@@ -543,9 +586,7 @@ void Maya::begin() {
     time_t t = time(nullptr);
     return t > 1700000000 ? (uint32_t)t : 0;   // 0 = SNTP has not answered: expiry is then not evaluable (7.1)
   });
-  setPeerTransport([](const uint8_t* mac, const uint8_t* data, size_t len) {
-    return espNowUp && esp_now_send(mac, data, len) == ESP_OK;
-  });
+  setPeerTransport(radioSend);
   beginPeering(&peerStorage, DEVICE_ID.c_str());
 
   if (wifi_ssid.length() == 0) {
@@ -627,6 +668,12 @@ void Maya::loop() {
     }
     // The audit of what the local link did (7.3). Buffered while offline, sent when due.
     flushPeerLog(DEVICE_ID.c_str(), sendFrame);
+    // A hub tells the server its channel (a router that moves silently breaks every
+    // pairing otherwise, 5.9) and carries what its sensors sent (7.5).
+    if (isHub()) {
+      sendHubStatus(DEVICE_ID.c_str(), (uint8_t)WiFi.channel(), sendFrame);
+      flushRelay(DEVICE_ID.c_str(), sendFrame);
+    }
     // A full report every 30s doubles as the keep-alive the server's
     // last-heartbeat time comes from.
     if (millis() - lastFull_ > 30000) {
@@ -637,4 +684,105 @@ void Maya::loop() {
   }
 
   delay(10);
+}
+
+// ---------------------------------------------------------------------------
+// a battery sensor that reports through a hub (PROTOCOL.md 5.9)
+// ---------------------------------------------------------------------------
+//
+// The shape of a wake: setup() declares capabilities, calls beginSensor(), sets the
+// values it read, calls reportNow(), then sleepFor(). Nothing here loops; the sensor
+// is awake for well under a second when its hub answers.
+//
+// Like the rest of this file, this has been compiled and never run on a board.
+
+void Maya::beginSensor() {
+  self = this;
+  Serial.begin(115200);
+  DEVICE_ID = "esp32-" + String((uint32_t)ESP.getEfuseMac(), HEX);
+  if (problem()) Serial.printf("[Maya] Declaration problem: %s\n", problem());
+
+  resetPrefsIfNewFirmware();
+  loadSettings();
+
+  setMillis([]() { return (uint32_t)millis(); });
+  setClock([]() -> uint32_t {
+    time_t t = time(nullptr);
+    return t > 1700000000 ? (uint32_t)t : 0;
+  });
+  setSecondsClock([]() { return sensorSecs(); });     // keeps counting through sleep
+  setPeerTransport(radioSend);
+  beginPeering(&peerStorage, DEVICE_ID.c_str());
+  restoreHubState(rtcFails, rtcDownSince, rtcAnnounced);
+
+  // The first time a sensor is switched on it needs WiFi and the server once, to be
+  // claimed and to be handed its pairing. After that it visits again only daily.
+  if (wifi_ssid.length() == 0) {
+    Serial.println("No WiFi config. Entering BLE provisioning.");
+    startBLEProvisioning();
+    loadSettings();
+  }
+}
+
+// Joins WiFi, connects to the server, and stays long enough to be told everything it
+// needs: its grants, the hub's channel, and (once) that the hub failed.
+bool Maya::goOnline() {
+  if (!connectToWiFiOnce()) return false;
+  startWebSocket();
+  uint32_t t = millis();
+  while (!wsConnected && millis() - t < 15000) { webSocket.loop(); delay(10); }
+  if (!wsConnected) return false;
+
+  // identify has gone; the server answers with peer_grant / peer_sync / hub_channel
+  t = millis();
+  while (millis() - t < 1500) { webSocket.loop(); delay(10); }
+
+  flush(DEVICE_ID.c_str(), (uint32_t)millis(), sendFrame);       // hub_failed, anything identify did not carry
+  flushPeerLog(DEVICE_ID.c_str(), sendFrame);
+  t = millis();
+  while (millis() - t < 400) { webSocket.loop(); delay(10); }
+
+  rtcSynced = true;
+  rtcLastSync = sensorSecs();
+  rtcChannel = (uint8_t)WiFi.channel();     // the hub is on the same router, so this is its channel too
+  return true;
+}
+
+bool Maya::reportNow() {
+  bool due = !rtcSynced || hubId() == nullptr || sensorSecs() - rtcLastSync >= SENSOR_SYNC_EVERY_S;
+
+  if (!due && hubUsable()) {
+    // Radio only: no association, no DHCP, no TLS - which is the whole of ESP-NOW's
+    // advantage (5.9), and why this path is a few hundred milliseconds.
+    uint8_t channel = hubChannel() ? hubChannel() : (rtcChannel ? rtcChannel : 1);
+    WiFi.persistent(false);
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect();
+    esp_wifi_set_promiscuous(true);       // the documented way to pin the channel while not associated
+    esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+    esp_wifi_set_promiscuous(false);
+    if (startEspNow()) {
+      syncEspNowPeers(*this);
+      if (report()) {
+        hubState(rtcFails, rtcDownSince, rtcAnnounced);
+        return true;
+      }
+    }
+  }
+
+  // The hub could not be reached, is being given up on, or it is simply the daily visit.
+  // Whatever is still buffered goes to the server instead - the latest value of each
+  // key, because a state frame has no timestamp - and if the hub is down the first
+  // report says so.
+  fallBackToServer();
+  bool ok = goOnline();
+  hubState(rtcFails, rtcDownSince, rtcAnnounced);
+  return ok;
+}
+
+void Maya::sleepFor(uint32_t seconds) {
+  hubState(rtcFails, rtcDownSince, rtcAnnounced);
+  rtcSecs += millis() / 1000 + seconds;
+  Serial.flush();
+  esp_deep_sleep((uint64_t)seconds * 1000000ULL);
 }

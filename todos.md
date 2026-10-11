@@ -190,12 +190,20 @@ descriptors; shims protocol 1. Nothing else changes." Status and reasoning:
   server's check would have proved nothing about the hub). Also `hub_status`
   (channel, pushed to dependants) and `hub_failed` (once per sensor and hub per 6 h).
   `test_relay.py`; thirteen deliberate bugs each confirmed to fail it.
-- [ ] **Step 7b — the library's hub and sensor halves.** `maya.enableHub()`: allowlist
-  of relay senders by MAC, per-sender rate limit, bounded queue, `relay` message,
-  `hub_status`. Sensor side: `maya.report(...)`, ESP-NOW first, WiFi fallback after
-  3 failures with `hub_failed`, ring buffer with `age`. Then a hub firmware
-  (`hardware/smartextension_hub`) and a `HubSensor` example. Needs two boards to
-  mean anything; the host test can carry frames, as `test_peer_link.py` does.
+- [x] **Step 7b — the library's hub and sensor halves** (2026-10-11). `maya.enableHub()`
+  (source-MAC allowlist, 12 frames a minute per sender, a queue of 32 that drops the
+  newest, `relay` messages of 16, the server's answer logged, `hub_status`); sensor:
+  `beginSensor()` / `reportNow()` / `sleepFor()`, ESP-NOW first with the MAC layer's
+  acknowledgement as the verdict, three failures then the server with `hub_failed`, a
+  16-reading buffer with `age`, a daily WiFi visit, state kept across deep sleep. Examples
+  `SmartExtensionHub` and `HubSensor`; firmware `hardware/smartextension_hub` with its own
+  `SETUP.md`/`WIRING.md`. `test_relay_link.py` (12 checks, twenty deliberate bugs caught).
+  Library 0.2.0.
+- [ ] **Put a hub and a sensor on a bench.** `SmartExtensionHub` on one board, `HubSensor`
+  on another; pair with `POST /api/peerings` `"purpose":"relay"`. First run of: ESP-NOW
+  acknowledgement as a failure signal, `esp_wifi_set_channel` while not associated, deep
+  sleep with RTC memory, and the radio between a real sensor and a real hub. Measure the
+  sleep current on a bare module, not a DevKit.
 - [ ] The sleepy class's `pending` queue (a hub handing a battery device the commands
   it missed) — unspecified; deliberately left out of revision 2.4.
 - [ ] The app: no UI to pair a sensor to a hub, nor to show "via Kitchen hub" or a

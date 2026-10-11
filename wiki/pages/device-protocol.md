@@ -10,7 +10,7 @@ The goal the protocol exists for: a contributor builds new hardware, drops it in
 firmware to app — `ch1`/`ch2`/`ch3` appeared 76 times across 6 files when the
 migration was planned.
 
-## Status: steps 1, 3, 4, 5 and 6 done, step 2 and step 7 server-complete, spec at revision 2.4 (2026-10-11)
+## Status: steps 1, 3, 4, 5, 6 and 7 done, step 2 server-complete, spec at revision 2.4 (2026-10-11)
 
 §10 defines a six-step migration order. Only the first is implemented.
 
@@ -22,7 +22,7 @@ migration was planned.
 | 4. Extract the Arduino library | **done** (compiles for ESP32; not yet flashed) |
 | 5. Peering: grants, local link, audit (§7) | spec done (2.2); **5a server done; 5b library done**; the ESP-NOW radio has never run |
 | 6. Device to Maya (§8) | **done** (spec 2.3); the app has no switch for it yet; the real model has not been tried |
-| 7. The hub relay (§5.9, §7.5) | spec done (2.4); **7a server done**; the library's hub and sensor halves, a hub firmware and the app are not built |
+| 7. The hub relay (§5.9, §7.5) | spec done (2.4); **7a server done; 7b library, examples and hub firmware done**; no radio has run; the app has no pairing screen |
 
 **Steps 1–3 needed no firmware change.** The shipped ESP32 still speaks protocol 1 and
 is served by the shim — which is the point of the migration order, and what
@@ -490,3 +490,42 @@ state normalised to `"off"`/`"on"` by the shim.
 **Not done:** the library's side (the hub allowlist and queue, the sensor's ESP-NOW
 send, WiFi fallback and ring buffer), a hub firmware, the sleepy `pending` queue, and
 the app. No radio has carried any of it.
+
+## Step 7b (2026-10-11): the library's hub and sensor halves
+
+**Hub.** `enableHub()` allocates a queue (32 slots of 250 bytes, only when called) and
+makes identify say `hub:true`. A frame from a sensor arrives through `onLocalFrame`, which
+now parses the grant id from the not-yet-trusted JSON, and a **relay grant** takes the hub
+path (`hubAccept`) instead of the MAC path: the hub holds no key, so it cannot check a MAC.
+It checks what it can — the radio address is the sensor it was paired with, `from`, `kind`
+is `report`, `v` is 2, `values` is a non-empty object, `ep` and `seq` are present, the bytes
+are well-formed UTF-8 — and queues the frame **exactly as received**. At most 12 a minute from
+one sender, and a full queue drops the **newest**, so what is kept is contiguous. Messages of
+up to 16 frames go out one at a time; the server's `relay_ack` removes them and each result is
+written to the audit as an `in` line — except `bad_mac`, `bad_frame` and `unknown_grant`, which
+are noise (§7.3). `rate_limited` keeps the queue and waits `retry_after`; no answer for 10 s
+resends.
+
+**Sensor.** `report()` moves what changed into a buffer of 16 readings, each stamped with a
+seconds clock that keeps counting through deep sleep, then sends them oldest first, readings
+taken together sharing a frame while it fits 250 bytes. The verdict on each frame is the radio's
+acknowledgement, not the send call's return: three in a row and the sensor stops using the air on
+that hub, retrying every half hour. `fallBackToServer()` hands the latest value of each key back
+to the state report and the first flush says `hub_failed`. A frame that was not acknowledged
+spends no sequence number, so a recovered hub sees an unbroken sequence. `restoreHubState` /
+`hubState` are how a deep-sleeping sensor carries all that across the sleep.
+
+**Glue (`Maya.cpp`, compiled, never run).** `radioSend` waits for the ESP-NOW send callback;
+`beginSensor` skips WiFi; `reportNow` pins the radio to the hub's channel with
+`esp_wifi_set_channel` and tries the hub, or goes online for the daily visit or after a failure;
+`sleepFor` saves state in RTC memory and deep-sleeps.
+
+**What testing found.** An incoming `relay_ack` with 16 results needs about 1.9 KB of JSON
+pool; the parse pool was a fixed 1.5 KB, so the frame would have failed to parse and been
+dropped silently — the hub would have resent the same 16 frames forever. The pool now scales
+with the frame. One of twenty-one deliberate bugs was not caught: it was redundant code (a
+second place that queued the `hub_failed` announcement), and it was removed instead of tested.
+
+**Not here:** the radio, the acknowledgement as a failure signal, `esp_wifi_set_channel` while
+not associated, and deep sleep have never run. The sleepy `pending` queue is unspecified. A hub
+holds at most 8 pairings (`MAYA_MAX_PEERS`, a library build setting).

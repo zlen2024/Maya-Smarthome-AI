@@ -39,6 +39,7 @@ assistant you can talk to, and child supervision (screen time and location).
 | [`software/server`](software/server) | FastAPI backend, AI agent loop, data models, web portals ([setup](software/server/README.md)) |
 | [`software/mobile`](software/mobile) | Flutter Parent/Child app ([design system](software/mobile/DESIGN.md)) |
 | [`hardware/smartextension`](hardware/smartextension) | The 3-channel Smart Extension firmware, a ~70-line sketch on the Maya library ([setup](hardware/smartextension/SETUP.md), [wiring](hardware/smartextension/WIRING.md)) |
+| [`hardware/smartextension_hub`](hardware/smartextension_hub) | The same board plus `enableHub()`: it also carries battery sensors' readings to the server over ESP-NOW ([setup](hardware/smartextension_hub/SETUP.md), [wiring](hardware/smartextension_hub/WIRING.md)) |
 | [`hardware/libraries/Maya`](hardware/libraries/Maya) | Arduino library for building your own Maya device: declare what it can do, the library speaks the protocol ([README](hardware/libraries/Maya/README.md)) |
 | [`software/skills/maya-open-api`](software/skills/maya-open-api) | Agent skill for driving Maya through the Open API |
 | [`wiki/`](wiki/index.md) | Code wiki: architecture, server, mobile, firmware, AI agent, data model, known gaps |

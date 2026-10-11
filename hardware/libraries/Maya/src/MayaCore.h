@@ -42,6 +42,19 @@
 #define MAYA_AGENT_TEXT_MAX 280    // bytes, a request and a reply (8.1)
 #define MAYA_AGENT_TIMEOUT_MS 45000   // a device gives up after this (8.1)
 #endif
+#ifndef MAYA_RELAY_QUEUE
+#define MAYA_RELAY_QUEUE 32   // a hub holds this many frames waiting for the server (7.5 RECOMMENDS 32)
+#endif
+#define MAYA_RELAY_BATCH 16   // frames in one `relay` message (7.5)
+#define MAYA_RELAY_RATE 12    // frames a minute a hub takes from one sender (7.5)
+#define MAYA_RELAY_ACK_MS 10000   // a hub sends again when the server has not answered in this long
+#ifndef MAYA_REPORT_BUFFER
+#define MAYA_REPORT_BUFFER 16 // readings a sensor keeps while its hub cannot be reached (5.9 rule 4)
+#endif
+#define MAYA_HUB_FAIL_LIMIT 3 // consecutive failures before a sensor gives up on its hub (5.9 rule 2)
+#ifndef MAYA_HUB_RETRY_S
+#define MAYA_HUB_RETRY_S 1800 // while on the fallback path, try the hub again this often (5.9 rule 5)
+#endif
 
 namespace mayalib {
 
@@ -124,6 +137,9 @@ class Storage {
 struct PeerRec {
   bool used;
   uint8_t role;               // 1 = send, 2 = recv
+  uint8_t purpose;            // 0 = control, 1 = relay (7.5)
+  uint8_t channel;            // the peer's WiFi channel when the server said so (5.9); 0 = unknown
+  bool hasKey;                // false only for the hub end of a relay grant: a hub is never given the key (7.5)
   char grant[16];             // "g-42"
   char peer[32];              // the other device's id
   uint8_t mac[6];             // ... and its radio address
@@ -136,6 +152,8 @@ struct PeerRec {
   uint32_t inSeq;
   bool inFresh;               // first frame since boot in inEp may carry any seq (7.2 residual window)
   uint32_t outSeq;
+  uint32_t winStart;          // a hub's per-sender rate window (7.5)
+  uint16_t winCount;
 };
 
 // A frame the transport must put on the air: where, and what.
@@ -265,6 +283,52 @@ class Core {
   uint32_t epoch() const { return ep_; }
   const PeerRec* peerByGrant(const char* grant) const;
 
+  // ── a hub (5.9, 7.5) ─────────────────────────────────────────────────────
+  // Offers to carry other devices' readings: identify says `"hub":true`. That is
+  // all it is - an offer. A person still has to pair a sensor to it. Call before
+  // the first identify. Allocates the queue, so a device that is not a hub pays
+  // nothing for this.
+  void enableHub();
+  bool isHub() const { return hub_; }
+  // Sends one `relay` message if frames are waiting and the last one has been
+  // answered. A hub holds no key for its sensors, so it cannot check a frame's MAC;
+  // it forwards what came from a sensor it was paired with and the server does the
+  // authenticating (7.5).
+  bool flushRelay(const char* myId, Send send);
+  // Tells the server the WiFi channel (5.9), once per identify and again whenever
+  // it changes. False when there is nothing new to say.
+  bool sendHubStatus(const char* myId, uint8_t channel, Send send);
+  size_t relayQueued() const { return relayCount_; }
+  uint32_t relayDropped() const { return relayDropped_; }
+
+  // ── a sensor that reports through a hub (5.9, 7.5) ───────────────────────
+  // Seconds that keep counting across deep sleep, so a reading can say how old it
+  // is (`age`) without a clock. Defaults to millis()/1000, which is right for a
+  // device that never sleeps.
+  void setSecondsClock(std::function<uint32_t()> fn) { secsFn_ = fn; }
+  // Moves what changed since the last report into a small buffer, then tries to
+  // carry the buffer to the hub, oldest first. True when nothing is left waiting;
+  // false when there is no hub, the hub is being given up on, or a frame was not
+  // acknowledged. Nothing is thrown away because the network was down: what does not
+  // fit the buffer drops the oldest and is counted in reportsLost().
+  bool report();
+  // False once the hub has failed MAYA_HUB_FAIL_LIMIT times in a row, until
+  // MAYA_HUB_RETRY_S has passed. The caller then reports through the server.
+  bool hubUsable() const;
+  bool hubDown() const { return hubFails_ >= MAYA_HUB_FAIL_LIMIT; }
+  const char* hubId() const;       // the hub this device reports through, or null
+  uint8_t hubChannel() const;      // its WiFi channel as the server last said, 0 if unknown
+  size_t reportsBuffered() const { return repCount_; }
+  uint32_t reportsLost() const { return repLost_; }
+  // Gives the buffered readings back to the state report, so the next flush()
+  // carries them to the server. Only the latest value of each key survives: a
+  // state frame has no timestamp. The first flush also says `hub_failed`.
+  size_t fallBackToServer();
+  // What a deep-sleeping sensor must keep across a wake: consecutive failures, when
+  // the hub was given up on, and whether the server has been told.
+  void hubState(uint8_t& fails, uint32_t& downSince, bool& announced) const;
+  void restoreHubState(uint8_t fails, uint32_t downSince, bool announced);
+
  private:
   Cap& add(const char* key, const char* label, Kind kind, bool reserved = false);
   Cap& refuse(const char* why);
@@ -290,6 +354,15 @@ class Core {
   void logPeer(const PeerRec& g, const char* dir, uint32_t ep, uint32_t seq, const char* kind,
                const char* summary, const char* result);
   uint32_t now() const { return millis_ ? millis_() : 0; }
+  void addHubFailed(JsonDocument& doc);
+  void handleRelayAck(JsonObjectConst root);
+  void handleHubChannel(JsonObjectConst root);
+  bool hubAccept(PeerRec& g, const uint8_t* data, size_t len, JsonDocument& doc, const uint8_t src[6]);
+  PeerRec* findRelaySendGrant();
+  void noteHubFailure();
+  void bufferDirty(PeerRec& g);
+  bool sendReadings(PeerRec& g);
+  uint32_t secs() const;
   Action handleLegacy(JsonObjectConst root, const char* cmd, const char* myId, uint32_t uptimeMs, Send send);
   void sendAck(const char* myId, const char* req, const char* status, const char* failed,
                Cap** applied, size_t nApplied, Send send);
@@ -325,6 +398,27 @@ class Core {
   uint32_t lastLogFlush_ = 0;
   bool logUrgent_ = false;
   bool peeringStarted_ = false;
+
+  // a hub (7.5): frames waiting for the server, oldest first
+  struct RelaySlot { char grant[16]; uint32_t ep, seq; char text[MAYA_LOCAL_FRAME_MAX + 1]; };
+  bool hub_ = false;
+  RelaySlot* relayQ_ = nullptr;
+  size_t relayHead_ = 0, relayCount_ = 0, relayInflight_ = 0;
+  uint32_t relaySentAt_ = 0, relayRetryAt_ = 0, relayDropped_ = 0;
+  bool hubStatusSent_ = false;
+  uint8_t hubStatusChannel_ = 0;
+
+  // a sensor (5.9)
+  struct Reading { Cap* cap; Value v; uint32_t takenAt; };
+  Reading* rep_ = nullptr;
+  size_t repHead_ = 0, repCount_ = 0;
+  uint32_t repLost_ = 0;
+  std::function<uint32_t()> secsFn_;
+  uint8_t hubFails_ = 0;
+  uint32_t hubDownSince_ = 0;
+  bool hubAnnounced_ = false;
+  char hubFailedPending_[32] = {0};
+
   AgentReplyFn agentCb_;
   bool agentPending_ = false;
   char agentReq_[16] = {0};

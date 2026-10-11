@@ -324,6 +324,15 @@ the least trustworthy device in the system. What the design does about that, in 
 - **One answer for every reason a grant is unusable** (`unknown_grant`), so a hub cannot
   probe which grants exist elsewhere.
 
+**The library follows the same rule (step 7b).** A hub's relay-grant path has no key to check
+a MAC with and does not pretend to: it drops what it can see is wrong (the wrong radio address, a
+different sender, any kind but `report`, malformed or non-UTF-8 text — which would otherwise close
+the server link for every sensor it carries), bounds each sender to 12 frames a minute and its own
+queue to 32 (dropping the newest), and forwards the rest exactly as received. That a hub is
+never sent the key is tested on the server (`test_relay.py`). The library also stores no key for
+the hub end of a relay grant even if one arrives, but that is not observable from outside and is
+not tested. A hub's audit lines are written only for what the server decided.
+
 **Residual risks, stated:** a hub can **withhold, delay or drop** a sensor's readings —
 visible in the audit (the sensor's `out` count against what the server accepted), but a
 sensor that sleeps through the outage loses those readings unless it buffered them. It can

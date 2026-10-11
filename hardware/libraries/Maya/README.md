@@ -24,9 +24,11 @@ void loop() {
 }
 ```
 
-Flash it, provision it from the app, and the three controls appear. Two complete
-sketches are in `examples/`: `MinimalSensor` (the one to copy) and
-`SmartExtension3ch` (the existing 3-relay board, on the library).
+Flash it, provision it from the app, and the three controls appear. Complete
+sketches are in `examples/`: `MinimalSensor` (the one to copy), `SmartExtension3ch`
+(the existing 3-relay board, on the library), `PeerButton` (a button that drives another
+device directly), `SmartExtensionHub` (the same board, also carrying other devices'
+readings) and `HubSensor` (a battery sensor that reports through a hub).
 
 ## Install
 
@@ -100,6 +102,56 @@ device must hear the time from SNTP for a grant to expire, and without it a gran
 lasts until it is revoked; a frame can only reach a peer on the same WiFi channel,
 which a device in station mode on the same router is.
 
+## Being a hub, and reporting through one
+
+A **hub** is a mains-powered device that carries other devices' readings to the server
+over ESP-NOW, so a battery sensor does not have to join WiFi every time it wakes
+(PROTOCOL.md 5.9: roughly three times the battery life).
+
+```cpp
+maya.enableHub();      // before begin() - that is all a hub sketch does
+```
+
+The library then says `hub:true` at identify, takes the reports of the sensors a person has
+paired to it, forwards them to the server byte for byte, and tells the server its WiFi
+channel. `examples/SmartExtensionHub` is the 3-channel extension with that one line added;
+`hardware/smartextension_hub` is the shipped firmware.
+
+**A hub holds no key for its sensors** (PROTOCOL.md 7.5), so it cannot check a frame's MAC
+and does not pretend to: it checks what it can without a key (the radio address is a sensor
+it was paired with, the frame is well-formed text under 250 bytes, the sender is within 12
+frames a minute, its queue of 32 is not full) and the server does the authenticating. The
+point is that a compromised hub still cannot forge, alter or replay a reading. It can only
+withhold or delay, and the app's audit shows that.
+
+A **sensor** that sleeps between readings:
+
+```cpp
+void setup() {
+  maya.addNumber("salt", "Salt left").readOnly().unit("%");
+  maya.addReserved("_batt");
+  maya.beginSensor();                 // not begin(): it does not join WiFi
+  maya.setNumber("salt", readSalt());
+  maya.setNumber("_batt", readBattery());
+  maya.reportNow();                   // the hub if it can, the server if it cannot
+  maya.sleepFor(300);                 // deep sleep; does not return
+}
+void loop() {}
+```
+
+`reportNow()` hands what changed to the hub (ESP-NOW, no WiFi), oldest first, each reading
+carrying how old it is. A frame the hub's radio does not acknowledge is kept and spends no
+sequence number. After three failures in a row the sensor stops using the air on it, reports
+through the server instead (the latest value of each key), and the first such report says
+`hub_failed` so the app can tell the family which hub to check, once. It tries the hub again
+every half hour. With both down it keeps the last 16 readings. It visits WiFi about once a day
+to refresh its pairing and learn the hub's channel. The first time it is switched on it needs
+WiFi and the server, like any Maya device.
+
+Use a bare ESP32 module, not a DevKit: a DevKit's USB chip draws more asleep than the design
+budget. `core.report()` / `hubUsable()` / `fallBackToServer()` are the platform-free pieces
+`reportNow()` is made of, if you need a different wake loop.
+
 ## Asking Maya for help
 
 ```cpp
@@ -152,6 +204,7 @@ unknown key or the wrong kind rather than guessing.
 ```
 python extras/test/test_library.py      # the protocol core against the real server
 python extras/test/test_peer_link.py    # the local link
+python extras/test/test_relay_link.py   # a hub and a sensor, then both through the real server
 ```
 
 It declares a 16-capability device, runs it through the server's own
@@ -180,6 +233,20 @@ could not build the driver, which is **not** a pass.
 - `askMaya` is tested for its frames, one-at-a-time rule, every reply status, the 280-byte
   limit and the 45 s timeout, and once end to end against the real server. The model on the
   other end was scripted, not real.
-- Not implemented yet: the hub relay (§5.9) and sleeping devices (`report_every`, §5.8).
+- **The hub and sensor halves** are tested by `extras/test/test_relay_link.py` (12 checks): a
+  hub fed frames by a script (forwarded byte for byte whatever their tag, because it cannot
+  check one; dropped for every defect it *can* see; rate and queue bounds; what the server's
+  answer causes to be logged), a sensor judged with Python's `hmac` (numbering, age, a dead
+  hub, the buffer, the fallback, `hub_failed` once), and then both through the real server:
+  a reading crosses as the sensor's own, a replay and a forgery are refused, a dead hub is
+  reported, revoking leaves the sensor nowhere to report. Twenty deliberate bugs each fail
+  it. It found one real bug: the JSON pool for incoming frames was too small for a
+  `relay_ack` with 16 results, which would have been dropped without a word.
+- **ESP-NOW acknowledgement and deep sleep are untested.** `Maya.cpp`'s `radioSend` (the
+  MAC layer's acknowledgement is what makes a sensor give up on a hub), `beginSensor`,
+  `reportNow` and `sleepFor` compile for ESP32 and have never run: they need a hub and a
+  sensor on a bench, and a bare module to measure the sleep current.
+- Not implemented yet: the sleepy class's `pending` queue (§5.9) and `report_every` (§5.8).
 - Cost: the local link adds ~18 KB of RAM (grant tables, the 64-entry audit buffer,
-  the receive queue) and ~25 KB of flash.
+  the receive queue) and ~25 KB of flash. A hub allocates ~9 KB for its queue, only when
+  `enableHub()` is called; a sensor ~2 KB for its buffer, on first use.

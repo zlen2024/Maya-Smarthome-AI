@@ -15,12 +15,22 @@
 //   full                       send a full state report
 //   problem                    print the declaration problem, if any
 //   local <srcmac> <text>      a radio frame arrives from that MAC (12 hex digits)
+//   localhex <srcmac> <hex>    the same, for bytes that are not text
 //   psw|pnum|ptxt <peer> <key> <v>   send a `set` to a peer; ppress <peer> <key>
 //   pmsg <peer> <kind>         send an event/msg with a small payload
 //   plog                       flush the audit buffer if it is due
 //   ms <n> / clock <n>         set the device's millis() / wall clock (0 = unknown)
 //   peers                      list held grants
 //   ask <text>                 ask Maya for help; tick = let a waiting request time out
+//   report                     a sensor carries what changed to its hub (REPORT ok buffered lost fails)
+//   relay                      a hub sends the frames it holds to the server (RELAYED 0|1)
+//   hubstatus <channel>        a hub tells the server its WiFi channel (HUBSTATUS 0|1)
+//   queued                     a hub's queue (QUEUED n dropped=n)
+//   fallback                   give the buffered readings back to the state report (FALLBACK n)
+//   hub                        what a sensor knows of its hub (HUB id usable down channel fails announced)
+//   restore <fails> <since> <announced>   a deep-sleeping sensor's saved hub state
+//   secs <n>                   the seconds clock (which keeps counting across sleep on a board)
+//   txok <0|1>                 whether the radio reports a frame as acknowledged (0 = dead hub)
 //   sync                       print SYNC, so the caller knows the lines above are complete
 //
 // stdout
@@ -41,7 +51,8 @@
 
 using namespace mayalib;
 
-static uint32_t g_ms = 0, g_clock = 0;
+static uint32_t g_ms = 0, g_clock = 0, g_secs = 0;
+static bool g_txok = true;
 
 // A directory standing in for NVS: one file per key.
 class FileStorage : public Storage {
@@ -111,6 +122,23 @@ static void profileLampFan(Core& m) {
   m.addReserved("_fw");
 }
 
+// A mains-powered extension that also carries other devices' readings (7.5).
+static void profileHub(Core& m) {
+  m.addSwitch("out1", "Output 1", [](bool on) { printf("HW out1=%d\n", on); return true; });
+  m.setSwitch("out1", false);
+  m.enableHub();
+}
+
+// A battery sensor: readings, one reserved health key, and a writable switch so the
+// scope of a relay grant has something it must leave out.
+static void profileSalt(Core& m) {
+  m.addNumber("salt", "Salt left").readOnly().unit("%");
+  m.addNumber("level", "Level").readOnly();
+  m.addText("note", "Note", 60).readOnly();
+  m.addSwitch("led", "Status LED", [](bool on) { printf("HW led=%d\n", on); return true; });
+  m.addReserved("_batt");
+}
+
 static void profileExt3(Core& m) {
   m.addSwitch("ch1", "Channel 1", [](bool on) { printf("HW ch1=%d\n", on); return true; });
   m.addSwitch("ch2", "Channel 2", [](bool on) { printf("HW ch2=%d\n", on); return true; });
@@ -147,6 +175,8 @@ int main(int argc, char** argv) {
   Core m("host_test", "9.9.9");
   if (!strcmp(profile, "lampfan")) profileLampFan(m);
   else if (!strcmp(profile, "ext3")) profileExt3(m);
+  else if (!strcmp(profile, "hub")) profileHub(m);
+  else if (!strcmp(profile, "salt")) profileSalt(m);
   else if (!strcmp(profile, "broken")) profileBroken(m);
   else if (!strcmp(profile, "toomany")) profileTooMany(m);
   else if (!strcmp(profile, "reserved")) profileReservedAbuse(m);
@@ -163,11 +193,12 @@ int main(int argc, char** argv) {
   Storage* store = argc > 2 ? (Storage*)&fileStore : (Storage*)&memStore;
   m.setMillis([]() { return g_ms; });
   m.setClock([]() { return g_clock; });
+  m.setSecondsClock([]() { return g_secs; });
   m.setPeerTransport([](const uint8_t* mac, const uint8_t* data, size_t len) {
     printf("LTX ");
     for (int i = 0; i < 6; i++) printf("%02X", mac[i]);
     printf(" %.*s\n", (int)len, (const char*)data);
-    return true;
+    return g_txok;
   });
   m.onPeerAck([](const char* peer, const char* status, const char* failed) {
     printf("PACK %s %s %s\n", peer, status, failed ? failed : "-");
@@ -213,6 +244,16 @@ int main(int argc, char** argv) {
         std::string f = line.substr(sp + 1);
         m.onLocalFrame((const uint8_t*)f.data(), f.size(), src);
       }
+    } else if (line.rfind("localhex ", 0) == 0) {
+      // Arbitrary bytes, for a frame that is not valid text and cannot go through a text pipe.
+      size_t sp = line.find(' ', 9);
+      uint8_t src[6];
+      if (sp == std::string::npos || !macFromHex(line.substr(9, sp - 9).c_str(), src)) { printf("BADCMD\n"); }
+      else {
+        std::string hex = line.substr(sp + 1), bytes;
+        for (size_t i = 0; i + 1 < hex.size(); i += 2) { unsigned v; sscanf(hex.c_str() + i, "%2x", &v); bytes.push_back((char)v); }
+        m.onLocalFrame((const uint8_t*)bytes.data(), bytes.size(), src);
+      }
     } else if (line.rfind("psw ", 0) == 0) {
       char peer[40], k[40]; int v; sscanf(line.c_str() + 4, "%39s %39s %d", peer, k, &v);
       printf("PSEND %d\n", m.peerSetSwitch(peer, k, v != 0));
@@ -245,6 +286,31 @@ int main(int argc, char** argv) {
       printf("AGENT %d\n", sent);
     } else if (line == "tick") {
       m.agentTick();
+    } else if (line == "report") {
+      bool ok = m.report();
+      uint8_t fails; uint32_t since; bool announced;
+      m.hubState(fails, since, announced);
+      printf("REPORT %d buffered=%d lost=%u fails=%d\n", ok, (int)m.reportsBuffered(), (unsigned)m.reportsLost(), fails);
+    } else if (line == "relay") {
+      printf("RELAYED %d\n", m.flushRelay(ID, tx));
+    } else if (line.rfind("hubstatus ", 0) == 0) {
+      printf("HUBSTATUS %d\n", m.sendHubStatus(ID, (uint8_t)atoi(line.c_str() + 10), tx));
+    } else if (line == "queued") {
+      printf("QUEUED %d dropped=%u\n", (int)m.relayQueued(), (unsigned)m.relayDropped());
+    } else if (line == "fallback") {
+      printf("FALLBACK %d\n", (int)m.fallBackToServer());
+    } else if (line == "hub") {
+      uint8_t fails; uint32_t since; bool announced;
+      m.hubState(fails, since, announced);
+      printf("HUB %s usable=%d down=%d channel=%d fails=%d announced=%d\n", m.hubId() ? m.hubId() : "-",
+             m.hubUsable(), m.hubDown(), m.hubChannel(), fails, announced);
+    } else if (line.rfind("restore ", 0) == 0) {
+      unsigned f, s, a; sscanf(line.c_str() + 8, "%u %u %u", &f, &s, &a);
+      m.restoreHubState((uint8_t)f, s, a != 0);
+    } else if (line.rfind("secs ", 0) == 0) {
+      g_secs = (uint32_t)strtoul(line.c_str() + 5, nullptr, 10);
+    } else if (line.rfind("txok ", 0) == 0) {
+      g_txok = atoi(line.c_str() + 5) != 0;
     } else if (line == "sync") {
       printf("SYNC\n");   // the caller reads until this, so it knows the command is done
     }

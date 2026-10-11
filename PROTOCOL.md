@@ -1754,7 +1754,12 @@ on its own and none of them breaks what is already deployed:
    `main.py`; `test_relay.py`, with thirteen deliberate bugs each confirmed to fail it).
    Review caught that a hub holding the grant key could sign for a sensor, so the
    key is withheld from the hub.
-   The library's hub and sensor halves and a hub firmware are not built yet.
+   **7b, the library's hub and sensor halves, done 2026-10-11** (`MayaRelay.cpp`,
+   `Maya::beginSensor/reportNow/sleepFor`, `hardware/smartextension_hub`;
+   `test_relay_link.py`, twenty deliberate bugs each caught). It found that an incoming
+   `relay_ack` with 16 results overflowed the JSON pool and would have been dropped
+   silently. The radio, the MAC layer's acknowledgement and deep sleep have never run:
+   they need two boards. The sleepy class's `pending` queue is still unspecified.
 
 Two pieces of this document sit outside that order because they depend on it
 rather than on each other: **§5.12 (history)** needs step 2 to have somewhere to

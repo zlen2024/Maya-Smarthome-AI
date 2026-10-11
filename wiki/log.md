@@ -367,3 +367,16 @@ else it could sign for a sensor. `test_relay.py` plus thirteen deliberate bugs, 
 All earlier server tests still pass. Updated `device-protocol`, `data-model`, `known-gaps`,
 `security-notes` §11, `todos.md`, the server README. Not built: the library's hub/sensor
 halves, a hub firmware, the sleepy `pending` queue, the app UI. No radio involved.
+
+## [2026-10-11] ingest | Hub relay, library halves and hub firmware (step 7b)
+
+`MayaRelay.cpp` (hub queue, forwarding, `relay_ack`, `hub_status`; sensor report, buffer, `age`,
+three-strikes fallback, `hub_failed`), `PeerRec` gains `purpose`/`channel`/`hasKey` (the hub end of a
+relay grant has no key), `onLocalFrame` routes a relay grant to the hub path, `Maya` gains
+`beginSensor`/`reportNow`/`sleepFor` and the hub loop. Examples `SmartExtensionHub` and `HubSensor`;
+firmware `hardware/smartextension_hub` (+ `SETUP.md`, `WIRING.md`). Library 0.2.0.
+`test_relay_link.py`: twelve checks against a script as the other end and then the real server;
+twenty deliberate bugs each fail it. **Found by it:** the parse pool for incoming frames was too small for
+a 16-result `relay_ack`. Updated `PROTOCOL.md` §10, the library README, `device-protocol`,
+`firmware-esp32`, `known-gaps`, `security-notes`, `todos.md`. **Not run:** ESP-NOW acknowledgement,
+`esp_wifi_set_channel`, deep sleep, any radio.
