@@ -38,7 +38,7 @@ assistant you can talk to, and child supervision (screen time and location).
 |---|---|
 | [`software/server`](software/server) | FastAPI backend, AI agent loop, data models, web portals ([setup](software/server/README.md)) |
 | [`software/mobile`](software/mobile) | Flutter Parent/Child app ([design system](software/mobile/DESIGN.md)) |
-| [`hardware/smartextension`](hardware/smartextension) | ESP32 firmware ([setup](hardware/smartextension/SETUP.md), [wiring](hardware/smartextension/WIRING.md)) |
+| [`hardware/smartextension`](hardware/smartextension) | The 3-channel Smart Extension firmware, a ~70-line sketch on the Maya library ([setup](hardware/smartextension/SETUP.md), [wiring](hardware/smartextension/WIRING.md)) |
 | [`hardware/libraries/Maya`](hardware/libraries/Maya) | Arduino library for building your own Maya device: declare what it can do, the library speaks the protocol ([README](hardware/libraries/Maya/README.md)) |
 | [`software/skills/maya-open-api`](software/skills/maya-open-api) | Agent skill for driving Maya through the Open API |
 | [`wiki/`](wiki/index.md) | Code wiki: architecture, server, mobile, firmware, AI agent, data model, known gaps |
@@ -49,9 +49,10 @@ assistant you can talk to, and child supervision (screen time and location).
 1. **Backend**: follow [`software/server/README.md`](software/server/README.md)
    (`uv venv`, `uv pip install -r requirements.txt`, `uv run uvicorn main:app --reload`).
    Production deploys use the root [`Dockerfile`](Dockerfile) and [`fly.toml`](fly.toml).
-2. **Firmware**: flash `smartextension.ino` with the Arduino IDE per
+2. **Firmware**: install the [Maya library](hardware/libraries/Maya/README.md) and flash
+   `smartextension.ino` with the Arduino IDE per
    [`SETUP.md`](hardware/smartextension/SETUP.md). With no saved Wi-Fi, the
-   device advertises over BLE as `Maya-Setup`.
+   device advertises over BLE as `Maya-<device id>`.
 3. **Mobile app**: `cd software/mobile && flutter pub get && flutter run`,
    then provision the Smart Extension from the Parent app.
 

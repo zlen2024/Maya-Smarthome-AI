@@ -20,13 +20,14 @@ This guide will walk you through setting up the Arduino IDE, installing necessar
 5. Search for `esp32` and install the package by **Espressif Systems**.
 
 ## 3. Install Required Libraries
-You need to install two third-party libraries for WebSockets and JSON parsing. 
+The sketch is built on the **Maya library** in this repository, which in turn needs two third-party libraries.
 
 1. Go to **Sketch** > **Include Library** > **Manage Libraries...**
-2. Search for and install **WebSockets** by Markus Sattler.
-3. Search for and install **ArduinoJson** by Benoit Blanchon (version 6.x or 7.x).
+2. Search for and install **WebSockets** by Markus Sattler (2.4 or newer).
+3. Search for and install **ArduinoJson** by Benoit Blanchon — **version 6.x** (6.21 is what this was built against; 7.x is not supported).
+4. Install the Maya library itself: copy the folder `hardware/libraries/Maya` from this repository into your Arduino libraries folder (`Documents/Arduino/libraries/` on Windows and macOS, `~/Arduino/libraries/` on Linux), so you end up with `.../libraries/Maya/library.properties`. Restart the Arduino IDE.
 
-*(Note: WiFi, Preferences, and BLE libraries are built into the ESP32 core and do not need separate installation.)*
+*(Note: WiFi, Preferences, BLE and ESP-NOW are built into the ESP32 core and do not need separate installation. Tested with the ESP32 core 2.0.17.)*
 
 ## 4. Open the Project
 1. Open the Arduino IDE.
@@ -49,4 +50,6 @@ You need to install two third-party libraries for WebSockets and JSON parsing.
 1. Once the upload says "Done uploading", open the **Serial Monitor** (Tools > Serial Monitor).
 2. Set the baud rate in the bottom right corner to **115200**.
 3. You should see logs indicating the ESP32 is starting up.
-4. If the device has no WiFi credentials saved, it will enter BLE provisioning mode and advertise as `Maya-Setup`. You can now connect via your provisioning app to supply Wi-Fi credentials!
+4. If the device has no WiFi credentials saved, it will enter BLE provisioning mode and advertise as `Maya-` followed by its device id (for example `Maya-esp32-9f83b1c1`; the id is also printed on the Serial Monitor at boot). Use the Parent app's *Add device* screen to supply Wi-Fi credentials, the server URL and a PIN.
+5. Every flash starts clean: saved Wi-Fi and PIN are wiped, so a freshly flashed board always begins in provisioning mode.
+6. After provisioning the board reboots, joins your Wi-Fi and connects to the server. In the app it appears with three switches, drawn from what the board reports about itself.

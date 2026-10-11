@@ -345,3 +345,12 @@ change house. `PROTOCOL.md` §4.1 updated. `test_peering.py`'s re-claim test was
 for the new rule and confirmed to fail with the guard removed; its `household` helper now
 releases an id before reusing it, standing in for the previous owner. All server
 self-checks and both library tests pass. Not reviewed: the app's wording of the 409.
+
+## [2026-10-11] ingest | Smart Extension firmware moved onto the Maya library
+
+`hardware/smartextension/smartextension.ino` is now ~70 lines on `hardware/libraries/Maya`
+(was 618), with a `RELAY_ACTIVE_LOW` option. Updated `SETUP.md` (library install, Huge APP,
+real BLE name), `WIRING.md` (protocol-2 and legacy command reference, state reports, pairing,
+polarity), top-level `README.md`, `pages/firmware-esp32.md` (rewritten), `architecture-overview`,
+`index`, `security-notes` (line references that no longer exist), `device-protocol`, `todos.md`.
+Compiled for ESP32 with both polarities (54% flash, 25% RAM). **Not flashed.**

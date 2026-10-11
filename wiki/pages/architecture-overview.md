@@ -10,7 +10,7 @@ Three deployables plus one integration surface:
 |---|---|---|---|
 | FastAPI backend | `software/server` | Python (6 files, 179 symbols) | yes, tier `scope` |
 | Flutter mobile app | `software/mobile/lib` | Dart (20 files, 558 symbols) | yes, tier **`name`** |
-| ESP32 firmware | `hardware/smartextension` | Arduino C++ (618 lines) | **no** — see [known-gaps §5](known-gaps.md#5-esp32-firmware-is-not-indexed-at-all) |
+| ESP32 firmware | `hardware/smartextension` + `hardware/libraries/Maya` | Arduino C++ (a ~70-line sketch on a library) |**no** — see [known-gaps §5](known-gaps.md#5-esp32-firmware-is-not-indexed-at-all) |
 | Open API skill | `software/skills/maya-open-api` | Markdown (agent skill) | n/a |
 
 ## Runtime topology

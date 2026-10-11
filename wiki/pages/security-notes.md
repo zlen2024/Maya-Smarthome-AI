@@ -182,10 +182,10 @@ Now:
   that both endpoints turn into a 400 (`main.py:896`, `main.py:1193`). There is
   no default to fall back to.
 - WS identify checks any stored PIN with `compare_digest` (`main.py:2225`).
-- Firmware: `isAcceptablePin` (`smartextension.ino:173`) refuses to *store* a PIN
-  that cannot protect the board, answering BLE status `9`; an empty PIN now means
-  "unclaimed" and is the only state that provisions without one
-  (`smartextension.ino:231`). The old `!= "0000"` exemption is gone.
+- Firmware: `isAcceptablePin` (now in `hardware/libraries/Maya/src/Maya.cpp`, moved
+  unchanged from `smartextension.ino` on 2026-10-10) refuses to *store* a PIN that
+  cannot protect the board, answering BLE status `9`; an empty PIN means "unclaimed"
+  and is the only state that provisions without one. The old `!= "0000"` exemption is gone.
 - App: no pre-filled PIN, and the same rule checked before anything is written
   over BLE.
 

@@ -159,8 +159,12 @@ descriptors; shims protocol 1. Nothing else changes." Status and reasoning:
   partition). `extras/test/test_library.py` checks the core against the real
   server's parser and app. **Not flashed to a board** — the radio half has only
   been compiled.
-- [ ] Flash `examples/SmartExtension3ch` to a real board and provision it; until
-  then `hardware/smartextension/smartextension.ino` stays as the shipped firmware.
+- [x] `hardware/smartextension/smartextension.ino` rewritten onto the library (2026-10-10),
+  with a `RELAY_ACTIVE_LOW` option; `SETUP.md` and `WIRING.md` updated. The old 618-line
+  sketch is `git show 76e0061:hardware/smartextension/smartextension.ino`.
+- [ ] **Flash the new `smartextension.ino` to a real board and provision it.** Nothing
+  built from this has run on hardware; if it misbehaves, the old sketch needs the Huge
+  APP scheme and a core other than 2.0.17 to build.
 - [x] **Step 5a — peering, server half** (2026-10-10, spec revision 2.2). One-way
   grants with an explicit finite scope, a server-generated key never returned to an
   app, `peer_grant` / `peer_revoke` / `peer_sync` pushed to devices, `peer_log`
@@ -199,10 +203,7 @@ descriptors; shims protocol 1. Nothing else changes." Status and reasoning:
   endpoint and Maya's house context.
 - [ ] `history:true` is stored; no series is retained (§5.12 now says what to
   retain), so no sparkline yet.
-- [ ] §4.1 is specified but not implemented: `register_device` still gives every
-  device a `SmartExtension` and three `Relay` rows, so a sensor-only device is
-  born with three relays it does not have. §10 assigns it to step 2 because it
-  touches the same tables as the permission and label conversions.
+- [x] §4.1 (claiming creates only the device record) — done in step 2; this item was left stale.
 - [ ] §12 v2 public API + per-key scoping — also closes the open half of security
   finding #4.
 

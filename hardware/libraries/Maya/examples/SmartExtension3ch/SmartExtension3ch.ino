@@ -1,8 +1,9 @@
 // The 3-channel smart extension, on the library.
 //
-// This is hardware/smartextension/smartextension.ino without the 650 lines of
-// provisioning, WiFi and WebSocket plumbing: the library owns those. What is left
-// is what is particular to this board - three outputs.
+// The smallest version of the shipped firmware, hardware/smartextension/smartextension.ino
+// (which adds a relay-polarity option). The 650 lines of provisioning, WiFi and
+// WebSocket plumbing it used to carry are the library's now. What is left is what is
+// particular to this board - three outputs.
 //
 // Swap the LED pins for relay IN pins when you wire the real thing.
 #include <Maya.h>

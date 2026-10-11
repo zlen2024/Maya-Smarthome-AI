@@ -291,8 +291,8 @@ descriptor over 4 KB. Nothing is sent in that case — the server would only rej
 it — so a wrong sketch fails loudly on the bench instead of silently on the wire.
 
 **Not in the library yet:** peering (§7), device→Maya (§8), `report_every`
-(§5.8). `hardware/smartextension/smartextension.ino` is untouched and remains the
-shipped firmware until `examples/SmartExtension3ch` has run on a real board.
+(§5.8). `hardware/smartextension/smartextension.ino` was rewritten onto the library on
+2026-10-10 (see [ESP32 firmware](firmware-esp32.md)); it has not yet run on a real board.
 
 ## Step 5a (2026-10-10): peering, the server's half
 
