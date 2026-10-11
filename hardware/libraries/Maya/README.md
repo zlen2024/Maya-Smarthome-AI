@@ -28,7 +28,7 @@ Flash it, provision it from the app, and the three controls appear. Complete
 sketches are in `examples/`: `MinimalSensor` (the one to copy), `SmartExtension3ch`
 (the existing 3-relay board, on the library), `PeerButton` (a button that drives another
 device directly), `SmartExtensionHub` (the same board, also carrying other devices'
-readings) and `HubSensor` (a battery sensor that reports through a hub).
+readings) and `HubSensor` (a battery sensor that reports through a hub). A complete device built on the library, with its own driver and calibration, is `hardware/smart_jar/`.
 
 ## Install
 

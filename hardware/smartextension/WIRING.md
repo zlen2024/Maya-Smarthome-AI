@@ -25,14 +25,20 @@ The ESP32 controls **3 output channels** — wired to LEDs (for prototyping) or 
 ## Prototype Wiring — 3 LEDs (Testing)
 
 ```
-ESP32 Board
-┌─────────────────────────────────┐
-│  GPIO 2 ──┬── [220Ω] ──┤► GND  │  ← CH1 (also built-in LED)
-│  GPIO 4 ──┼── [220Ω] ──┤► GND  │  ← CH2
-│  GPIO 5 ──┴── [220Ω] ──┤► GND  │  ← CH3
-│  GND    ──────────────────────  │
-│  VIN/3.3V (for power)           │
-└─────────────────────────────────┘
+   ESP32 (USB powered)
+  ┌─────────────────┐       220 Ω         LED
+  │                 │
+  │          GPIO 2 ├──────/\/\/\──────────▶|──────────┐    CH1 (also the built-in LED)
+  │                 │                                  │
+  │          GPIO 4 ├──────/\/\/\──────────▶|──────────┤    CH2
+  │                 │                                  │
+  │          GPIO 5 ├──────/\/\/\──────────▶|──────────┤    CH3
+  │                 │                                  │
+  │             GND ├──────────────────────────────────┘
+  │                 │
+  └─────────────────┘
+
+  LED:  ▶|  = long leg (+) on the left, short leg (−) on the right, toward GND
 ```
 
 ### Step-by-step (Breadboard)
@@ -69,22 +75,34 @@ Most 5V relay modules have 3 control pins:
 ### Relay Wiring Diagram
 
 ```
-                  ┌─────────────────────────────┐
-                  │     5V Relay Module          │
-                  │                              │
-ESP32 GPIO2 ─────►│ IN1   [RELAY 1] ──► Load 1  │
-ESP32 GPIO4 ─────►│ IN2   [RELAY 2] ──► Load 2  │
-ESP32 GPIO5 ─────►│ IN3   [RELAY 3] ──► Load 3  │
-ESP32 VIN   ─────►│ VCC                          │
-ESP32 GND   ─────►│ GND                          │
-                  └─────────────────────────────┘
-
-Relay contacts (per channel):
-    COM ──── Live (Mains)
-    NO  ──── Load Live In    (Normally Open — load OFF when ESP32 LOW)
-    NC  ──── (not used)
-    Load Neutral ──── Mains Neutral
+  ┌─────────────────┐                     ┌─────────────────────┐
+  │      ESP32      │                     │  5 V relay module   │
+  │                 │                     │                     │
+  │          GPIO 2 ├─────────────────────┤ IN1   ▸ relay 1     │
+  │          GPIO 4 ├─────────────────────┤ IN2   ▸ relay 2     │
+  │          GPIO 5 ├─────────────────────┤ IN3   ▸ relay 3     │
+  │   VIN (5 V USB) ├─────────────────────┤ VCC                 │
+  │             GND ├─────────────────────┤ GND                 │
+  │                 │                     │                     │
+  └─────────────────┘                     └─────────────────────┘
 ```
+
+Each relay's contacts, on the mains side (the same for all three channels):
+
+```
+                       relay contact
+                    COM             NO
+  Mains LIVE ────────●────  ╱  ─────●──────────┐
+                                             ┌─┴─┐
+                     open   = load OFF       │   │
+                     closed = load ON        │   │  LOAD
+                                             └─┬─┘
+  Mains NEUTRAL ───────────────────────────────┘
+
+                    NC ○   not connected
+```
+
+The load is **off** whenever the relay is not energised, including while the board boots.
 
 ### Active-LOW vs Active-HIGH Relays
 
