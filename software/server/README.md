@@ -106,6 +106,7 @@ uv run python test_maya.py           # protocol 2 step 3: Maya's set_capability,
 uv run python test_agent.py          # protocol 2 step 6: a device asking Maya for help
 uv run python test_peering.py        # protocol 2 step 5a: device pairing grants and the audit
 uv run python test_relay.py          # protocol 2 step 7a: a hub carrying a sensor's readings (the hub holds no key)
+uv run python test_open_api.py       # protocol 2 §12: scoped Open API keys, v1 and v2
 uv run python ../../hardware/libraries/Maya/extras/test/test_peer_link.py   # protocol 2 step 5b: the library's side of the local link
 uv run python ../../hardware/libraries/Maya/extras/test/test_library.py   # protocol 2 step 4: the Arduino library vs this server (needs a C++ compiler)
 ```

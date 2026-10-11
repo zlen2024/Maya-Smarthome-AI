@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from fastapi import (FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException,
                      Request, status as http_status)
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from sqlalchemy.orm import Session
@@ -22,7 +22,7 @@ from models import DeviceCapability, CapabilityState, CapabilityGrant, Capabilit
 from models import PeerGrant, PeerLogEntry, PeerLogCounter
 from auth import (
     hash_password, verify_password, create_access_token, get_current_user,
-    get_current_user_or_child, get_api_key_house, hash_api_key,
+    get_current_user_or_child, get_api_key_house, get_api_key_row, hash_api_key,
     SECRET_KEY, ALGORITHM
 )
 import secrets
@@ -30,6 +30,7 @@ import secrets
 import ai
 from ratelimit import RateLimit, FailureLock, client_ip
 import capability_store
+import open_api
 import peering
 from descriptor import (PROTO_MAX, DescriptorError, coerce_value, parse_identify,
                         v1_state)
@@ -106,6 +107,14 @@ def run_migrations():
         ):
             if col not in device_cols:
                 db.execute(text(ddl))
+                db.commit()
+
+        # PROTOCOL.md 12.1: an API key can be scoped. Keys that already exist get NULL,
+        # which is the whole house - what they have always meant.
+        if 'api_keys' in inspector.get_table_names():
+            key_cols = [c['name'] for c in inspector.get_columns('api_keys')]
+            if 'scope' not in key_cols:
+                db.execute(text('ALTER TABLE api_keys ADD COLUMN scope TEXT'))
                 db.commit()
 
         # The capability tables themselves. create_all() at import already makes
@@ -262,14 +271,18 @@ app = FastAPI(
     version="1.0.0",
     description=(
         "REST + WebSocket backend for the Maya smart-home ecosystem.\n\n"
-        "Third-party integrations should use the **Open API v1** endpoints, "
+        "Third-party integrations should use the **Open API** endpoints, "
         "authenticated with a house-scoped key in the `X-API-Key` header. "
         "Keys are issued by the house master in the Maya app (Settings → API Keys)."
     ),
     openapi_tags=[
         {"name": "Open API v1",
-         "description": "Stable, key-authenticated endpoints for third-party integrations. "
-                        "All data is scoped to the house the API key belongs to."},
+         "description": "Frozen, not deprecated: three switch channels per device. Keeps "
+                        "working for every integration already written against it."},
+        {"name": "Open API v2",
+         "description": "Self-describing devices: descriptors, state, and one generic `set`. "
+                        "A key may be scoped to some devices and capabilities, and to read only "
+                        "(PROTOCOL.md §12). All data is scoped to the key's house."},
     ],
 )
 
@@ -292,15 +305,27 @@ HUB_FAILED_RATE = RateLimit(1, 6 * 3600, "hub failed notice")    # per (sensor, 
 VOICE_RATE     = RateLimit(20, 60, "voice command")               # per caller
 VOICE_DAY_RATE = RateLimit(300, 86400, "voice command (daily)")   # per caller
 OPEN_API_RATE  = RateLimit(60, 60, "Open API")                    # per key
+OPEN_API_WRITE_RATE = RateLimit(20, 60, "Open API writes")        # per key: a set moves hardware (§12.1)
 
 
-async def api_key_house_limited(request: Request,
-                                house: House = Depends(get_api_key_house)) -> House:
-    """`get_api_key_house` plus a per-key rate limit. Open API keys are long-lived
-    and live in other people's scripts, so a loop there is the likeliest source of
-    load on this server."""
+class OpenKey:
+    """An authenticated Open API request: the house, the key and what it may reach."""
+
+    def __init__(self, house: House, row: ApiKey):
+        self.house, self.row = house, row
+        self.scope = open_api.load(row.scope)
+
+
+async def api_key_limited(request: Request, row: ApiKey = Depends(get_api_key_row),
+                          db: Session = Depends(get_db)) -> OpenKey:
+    """The v1 and v2 surfaces' dependency: rate limited per key - Open API keys are long-lived and live in other people's
+    scripts, so a loop there is the likeliest source of load on this server - and carrying the key's scope (§12.1). Resolving the key's house here means a key whose
+    house has gone is a 401 on every route, not just the ones that remember to check."""
     OPEN_API_RATE.hit(hash_api_key(request.headers.get("x-api-key", ""))[:16])
-    return house
+    house = db.query(House).filter(House.house_id == row.house_id).first()
+    if house is None:
+        raise HTTPException(status_code=401, detail="API key house no longer exists")
+    return OpenKey(house, row)
 
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -826,6 +851,15 @@ def _require_master(db: Session, current_user: Account, house_id: int):
 async def create_api_key(house_id: int, payload: dict, db: Session = Depends(get_db),
                          current_user: Account = Depends(get_current_user)):
     _require_master(db, current_user, house_id)
+    # §12.1: `scope` limits what the key reaches - {"devices": [...], "keys": [...],
+    # "write": false}, each list optional, write off unless asked for. Leaving `scope`
+    # out issues the legacy key (the whole house, read and command), which is what
+    # existing integrations were given; new ones should be scoped.
+    house_devices = {d.device_id for d in db.query(Device).filter(Device.house_id == house_id).all()}
+    try:
+        scope = open_api.parse(payload.get("scope"), house_devices)
+    except open_api.ScopeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     plaintext = "maya_" + secrets.token_urlsafe(32)
     key = ApiKey(
         house_id=house_id,
@@ -833,11 +867,13 @@ async def create_api_key(house_id: int, payload: dict, db: Session = Depends(get
         prefix=plaintext[:12],
         key_hash=hash_api_key(plaintext),
         created_by=current_user.acc_id,
+        scope=open_api.dump(scope),
     )
     db.add(key)
     db.commit()
     # The plaintext key is returned exactly once — only its hash is stored.
-    return {"key_id": key.key_id, "name": key.name, "prefix": key.prefix, "api_key": plaintext}
+    return {"key_id": key.key_id, "name": key.name, "prefix": key.prefix, "api_key": plaintext,
+            "scope": open_api.describe(open_api.load(key.scope))}
 
 
 @app.get("/api/houses/{house_id}/api-keys")
@@ -848,6 +884,7 @@ async def list_api_keys(house_id: int, db: Session = Depends(get_db),
     return {"api_keys": [{
         "key_id": k.key_id, "name": k.name, "prefix": k.prefix,
         "created_at": k.created_at.isoformat() if k.created_at else None,
+        "scope": open_api.describe(open_api.load(k.scope)),   # null = the whole house, read and command
     } for k in keys]}
 
 
@@ -865,15 +902,19 @@ async def revoke_api_key(house_id: int, key_id: int, db: Session = Depends(get_d
 
 # ─── Open API v1 (third-party, X-API-Key) ─────────────────────
 
-def _open_device_or_404(db: Session, house: House, device_id: str) -> Device:
+def _open_device_or_404(db: Session, house: House, device_id: str,
+                        scope: "open_api.Scope" = open_api.LEGACY) -> Device:
+    """A device in the key's house *and* in its scope. Out of scope reads as not found,
+    the same as another house's device: a scoped key must not learn what else exists."""
     device = db.query(Device).filter(
         Device.device_id == device_id, Device.house_id == house.house_id).first()
-    if not device:
+    if not device or not scope.sees_device(device_id):
         raise HTTPException(status_code=404, detail="Device not found in this house")
     return device
 
 
-def _open_device_dict(db: Session, device: Device) -> dict:
+def _open_device_dict(db: Session, device: Device,
+                      scope: "open_api.Scope" = open_api.LEGACY) -> dict:
     ext = db.query(SmartExtension).filter(SmartExtension.device_id == device.device_id).first()
     relays = db.query(Relay).filter(Relay.se_id == ext.se_id).all() if ext else []
     return {
@@ -883,37 +924,111 @@ def _open_device_dict(db: Session, device: Device) -> dict:
         "blocked": device.blocked,
         "channels": [{
             "channel": r.channel_number, "name": r.name, "is_on": r.is_on,
-        } for r in sorted(relays, key=lambda r: r.channel_number)],
+        } for r in sorted(relays, key=lambda r: r.channel_number)
+            if scope.sees_key(device.device_id, f"ch{r.channel_number}")],
     }
 
 
 @app.get("/api/open/v1/devices", tags=["Open API v1"])
 async def open_list_devices(db: Session = Depends(get_db),
-                            house: House = Depends(api_key_house_limited)):
-    """List every device in the key's house with channel states."""
-    devices = db.query(Device).filter(Device.house_id == house.house_id).all()
-    return {"devices": [_open_device_dict(db, d) for d in devices]}
+                            ctx: "OpenKey" = Depends(api_key_limited)):
+    """List the devices the key may see, with channel states."""
+    devices = db.query(Device).filter(Device.house_id == ctx.house.house_id).all()
+    return {"devices": [_open_device_dict(db, d, ctx.scope) for d in devices
+                        if ctx.scope.sees_device(d.device_id)]}
 
 
 @app.get("/api/open/v1/devices/{device_id}", tags=["Open API v1"])
 async def open_get_device(device_id: str, db: Session = Depends(get_db),
-                          house: House = Depends(api_key_house_limited)):
+                          ctx: "OpenKey" = Depends(api_key_limited)):
     """Get one device with channel states."""
-    return _open_device_dict(db, _open_device_or_404(db, house, device_id))
+    return _open_device_dict(db, _open_device_or_404(db, ctx.house, device_id, ctx.scope), ctx.scope)
 
 
 @app.post("/api/open/v1/devices/{device_id}/command", tags=["Open API v1"])
 async def open_send_command(device_id: str, payload: dict, db: Session = Depends(get_db),
-                            house: House = Depends(api_key_house_limited)):
+                            ctx: "OpenKey" = Depends(api_key_limited)):
     """Switch a channel: body {"cmd": "on"|"off"|"all_on"|"all_off", "channel": 1-3}."""
-    device = _open_device_or_404(db, house, device_id)
+    device = _open_device_or_404(db, ctx.house, device_id, ctx.scope)
     if device.blocked:
         return {"status": "blocked", "device_id": device_id}
     cmd = payload.get("cmd", "")
     channel = payload.get("channel", 1)
     if cmd not in ("on", "off", "all_on", "all_off"):
         raise HTTPException(status_code=400, detail="cmd must be on/off/all_on/all_off")
+
+    # §12.1 applies to the frozen surface too: it is the same key reaching the same
+    # capabilities. `ch1`..`ch3` are ordinary keys, so "all" means all three of them.
+    wanted = ["ch1", "ch2", "ch3"] if cmd in ("all_on", "all_off") else [f"ch{channel}"]
+    if not ctx.scope.write or not all(ctx.scope.sees_key(device_id, k) for k in wanted):
+        raise HTTPException(status_code=403, detail="This API key may not switch that channel")
+    declared = {c.key: c for c in capability_store.load_capabilities(db, device_id)}
+    if any(declared[k].confirm for k in wanted if k in declared):
+        # §5.4: a key is not a person. Before this the v1 route could switch a
+        # capability the firmware had asked a person to confirm.
+        raise HTTPException(status_code=403,
+                            detail="That channel needs a person to confirm it; an API key cannot")
     return await _dispatch_command(device_id, cmd, channel)
+
+
+# ─── Open API v2 (PROTOCOL.md §12): the capability surface ─────
+
+def _open_v2_device(db: Session, device: Device, scope: "open_api.Scope") -> dict:
+    """A device as this key may see it: only the capabilities in scope, each carrying
+    `may_write` for *this key*, and the state of those and nothing else."""
+    payload = open_api.view(scope, device.device_id,
+                            capability_store.descriptor_payload(db, device))
+    return {"device_id": device.device_id, "name": device.name,
+            "online": device.device_id in manager.active_connections,
+            "blocked": bool(device.blocked), **payload}
+
+
+@app.get("/api/open/v2/devices", tags=["Open API v2"])
+async def open_v2_list_devices(db: Session = Depends(get_db),
+                               ctx: "OpenKey" = Depends(api_key_limited)):
+    """Every device the key may see, as a descriptor plus current state (§5)."""
+    devices = db.query(Device).filter(Device.house_id == ctx.house.house_id).all()
+    return {"devices": [_open_v2_device(db, d, ctx.scope) for d in devices
+                        if ctx.scope.sees_device(d.device_id)]}
+
+
+@app.get("/api/open/v2/devices/{device_id}", tags=["Open API v2"])
+async def open_v2_get_device(device_id: str, db: Session = Depends(get_db),
+                             ctx: "OpenKey" = Depends(api_key_limited)):
+    return _open_v2_device(db, _open_device_or_404(db, ctx.house, device_id, ctx.scope), ctx.scope)
+
+
+@app.post("/api/open/v2/devices/{device_id}/set", tags=["Open API v2"])
+async def open_v2_set(device_id: str, payload: dict, db: Session = Depends(get_db),
+                      ctx: "OpenKey" = Depends(api_key_limited)):
+    """Set capabilities by key: {"values": {"ch1": "on", "speed": 60}} (§6.2).
+
+    The same validation and the same statuses as the app's `POST /capability`, behind
+    the key's scope. Nothing is sent unless the whole request is allowed, `confirm:true`
+    capabilities are refused outright (a key is not a person), and a `confirmed` flag in
+    the body is not looked at."""
+    device = _open_device_or_404(db, ctx.house, device_id, ctx.scope)
+    OPEN_API_WRITE_RATE.hit(str(ctx.row.key_id))
+    if device.blocked:
+        return {"status": "blocked", "device_id": device_id}
+
+    values = payload.get("values")
+    caps = {c.key: c for c in capability_store.load_capabilities(db, device_id)}
+    denial = open_api.set_denial(ctx.scope, device_id, values, caps)
+    if denial:
+        return JSONResponse(status_code=400 if denial["status"] == "bad_value" else 403,
+                            content={"device_id": device_id, **denial})
+
+    result = await _dispatch_set(db, device_id, values, confirmed=False)
+    if result.get("status") == "ok":
+        db.commit()
+        labels = {c.key: c.label for c in caps.values()}
+        labels.update(capability_store.house_labels(db, device_id))
+        described = ", ".join(f'"{labels.get(k, k)}" to {v}' for k, v in values.items())
+        log_activity(db, device.house_id, "api", ctx.row.key_id, f"API key {ctx.row.name}",
+                     "device_switch", f"API key {ctx.row.name} set {described} on {device.name}")
+        db.commit()
+    return result
 
 
 @app.get("/api/houses/{house_id}/chat")

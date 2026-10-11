@@ -93,10 +93,10 @@ which is the right shape. Revocation is a `revoked` flag checked in the same
 query.
 
 The remaining weakness was operational: no rate limiting, and no per-key scope
-narrower than the whole house. The first half is now closed — the routes depend
-on `api_key_house_limited` (`main.py:151`), which adds 60 requests/minute per
-key on top of resolving it. **Per-key scoping is still open**: a key grants full
-device read + command rights over every device in the house.
+narrower than the whole house. **Both are now closed.** Rate limiting came first (60
+requests a minute per key). Scoping came 2026-10-11 (§12.1): a key may be limited to some
+devices, some capability keys, and read-only; see
+[§12 below](#12-what-an-open-api-key-can-reach--scoped-2026-10-11).
 
 ## 5. Maya's tool permissions are enforced server-side — correctly
 
@@ -342,3 +342,39 @@ per-sender rate limit and queue bound (spec, library not yet built) and the serv
 limit bound the cost. And `hub_failed` is the sensor's word: believed only for a real
 pairing, but a sensor that lies can make a family check a hub that is fine, once per six
 hours.
+
+## 12. What an Open API key can reach — scoped 2026-10-11
+
+This closes the second half of §4. Until now a key granted read and command over **every
+device in its house**, and the frozen v1 surface could switch a channel the firmware had marked
+`confirm:true` — the one control a person is meant to approve. What is true now, in code
+(`open_api.py`, `main.py`):
+
+- **A key can be scoped** to a list of devices, a list of capability keys and read-only or
+  read-write. **`write` defaults to false**, an unknown field in the scope is refused (a typo
+  must not widen a key), and a list that is present may not be empty.
+- **Fail closed.** A stored scope that cannot be read back reaches **nothing**; only a key with
+  no scope at all — one issued before this existed — means the whole house. The migration adds
+  a nullable column, so nothing already issued changed meaning.
+- **Not found, not forbidden.** A device outside the scope is a `404`, indistinguishable from
+  one that does not exist or belongs to another house, so a scoped key cannot learn what else
+  is in the house. An out-of-scope capability and an undeclared one are refused identically for
+  the same reason.
+- **A set is judged whole before anything is sent.** One refused key and none of it applies.
+- **`confirm:true` is refused to every key**, v1 included, and a `confirmed` field in the body is
+  not read: it is evidence a person said yes, and a key is not one.
+- **Scope is applied against the descriptor as it is now**, per request, not recorded in the key
+  and trusted: a capability the device no longer declares is unreachable whatever the key says.
+- **Attribution.** An accepted set is logged as done by that key, by name — not as a parent.
+- **Limits per key:** 60 requests a minute, 20 of them `set`s.
+- **Never reachable by a key** (§12.2): children, pairing, other keys, reboot, reset. None of
+  those routes accepts an API key at all; the test checks eleven of them.
+
+**Residual risks, stated.** A **legacy key is still the whole house, read and command**; the
+master has to replace it to narrow it, and nothing yet tells them which keys are legacy beyond
+`"scope": null` in the listing — the app's key screen does not show it. The app and the web
+portal **cannot set a scope**, so in practice a scoped key is issued by API call today. A
+scoped key's scope **cannot be edited**; reissue and revoke. A key that may `set` a device may
+set anything on it that is not read-only or `confirm` — including something the firmware author
+would rather no automation touched, because `agent:"deny"` hides a capability from *Maya*, not
+from a key (§12 only excludes `confirm`). That is a decision worth revisiting.

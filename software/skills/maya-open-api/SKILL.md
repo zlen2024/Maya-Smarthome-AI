@@ -1,8 +1,9 @@
 ---
 name: maya-open-api
 description: >-
-  Control a Maya Smart Home house through its public Open API v1 — list devices
-  and relay channels, read their on/off state, and switch them. Authenticates
+  Control a Maya Smart Home house through its public Open API — list devices
+  and relay channels, read their state (v1), and switch them; and, on v2, read and
+  set any capability a device declares (speed, level, battery…). Authenticates
   with a house-scoped X-API-Key. Use whenever the user asks to turn something
   on/off, check whether a device/light/TV is on, or automate their Maya home
   (e.g. "turn on the living room TV", "is the fan on?", "switch everything off").
@@ -158,22 +159,73 @@ The command response `status` tells you what happened:
 
 ## HTTP errors
 
-- `401` / `403` — missing or invalid `X-API-Key`. Ask the user to re-check the
+- `401` — missing, invalid or revoked `X-API-Key`. Ask the user to re-check the
   key (it's shown only once at creation; they may need to make a new one).
-- `404` — `device_id` not in this key's house. Re-run `GET /devices`; don't
-  reuse a `device_id` from another house/key.
+- `403` — the key is valid but **may not do that**: it is read-only, or the
+  channel/capability is outside what the user allowed it. Don't retry; tell the
+  user what you were trying to change and that the key does not allow it (they
+  can issue a key with wider scope in the Maya app).
+- `404` — `device_id` not in this key's house, **or not one this key may see**
+  (the two look the same on purpose). Re-run `GET /devices`; don't reuse a
+  `device_id` from another house/key.
 - `400` — bad `cmd` (must be `on`/`off`/`all_on`/`all_off`).
 - `429` — the key's rate limit (60 requests/minute). The response carries a
   `Retry-After` header in seconds; wait that long before the next call rather
   than retrying straight away. Hitting this usually means a polling loop is too
   tight — read device state once and act on it, don't poll per channel.
 
+## Open API v2 — devices that are not three relays
+
+v1 only knows `ch1`–`ch3`. A device that describes itself (a fan with a speed, a
+salt jar with a level, a sensor with a battery) is only fully visible on **v2**,
+which lists what each device can do and its current values. It is the same key and
+the same header. A key may be **scoped**: only some devices, only some of their
+capabilities, and read-only unless the user said otherwise — so a v2 list can
+legitimately be shorter than what the user owns.
+
+```bash
+curl -s -H "X-API-Key: $MAYA_API_KEY" "$BASE/api/open/v2/devices"
+```
+
+```json
+{"devices": [{
+  "device_id": "esp32-9f83b1c1", "name": "Fan", "online": true, "blocked": false,
+  "capabilities": [
+    {"key": "ch1",   "kind": "switch", "label": "Fan",   "may_write": true},
+    {"key": "speed", "kind": "range",  "label": "Speed", "min": 0, "max": 100, "step": 5, "may_write": true},
+    {"key": "temp",  "kind": "number", "label": "Room temp", "unit": "C", "access": "r", "may_write": false}],
+  "state": {"ch1": "off", "speed": 0, "temp": 21}}]}
+```
+
+Read the list, then set by **capability key**. Only offer or attempt a capability whose
+`may_write` is `true`:
+
+```bash
+curl -s -X POST -H "X-API-Key: $MAYA_API_KEY" -H "Content-Type: application/json" \
+  "$BASE/api/open/v2/devices/esp32-9f83b1c1/set" -d '{"values": {"ch1": "on", "speed": 60}}'
+```
+
+The response `status` is `ok`, `bad_value` (the value is outside what the device declared),
+`busy`, `timeout`, `not_connected`, or `blocked`; `state` is what the device now reports and
+should be believed over what you asked for. A request is all-or-nothing on permission: if
+any key in it is refused, **none** of it is applied.
+
+Things a key can never do, however it is scoped — don't try, and don't offer to:
+
+- Set a capability marked as needing confirmation (a door lock, a child lock): that needs a
+  person in the Maya app. A `confirmed` field in the request is ignored.
+- Set a read-only capability (a sensor).
+- Anything about children, pairing devices, other keys, or rebooting/resetting a device.
+
+`set` is limited to 20 a minute per key, on top of the 60 requests a minute for everything.
+
 ## Safety
 
 - Switching real appliances is a physical action. For anything ambiguous or
   bulk ("turn everything off"), confirm the target with the user before POSTing.
-- One key controls one whole house — treat it like a password; never print it
-  back in full or send it anywhere except the `X-API-Key` header.
+- A key that was issued without a scope controls one whole house; a scoped one
+  controls only what it was given. Either way treat it like a password; never print
+  it back in full or send it anywhere except the `X-API-Key` header.
 - Channels named `"Channel N"` are unconfigured — tell the user to name them in
   the Maya app so matching works reliably.
 ```

@@ -56,8 +56,18 @@ never built. Full reasoning in `wiki/pages/security-notes.md`; the self-check is
 - [x] **`SECRET_KEY` fallback literal removed** (`auth.py`). Was already safe in the
   live deployment (set as a Fly secret) but was a trap for anyone forking a public
   repo. Absent now means a random per-process key plus a warning.
-- [ ] **Per-key Open API scoping** — a key still grants full rights over every device
-  in its house. Rate limiting closed the operational half of that finding only.
+- [x] **Per-key Open API scoping** (2026-10-11, spec revision 2.5, §12). A key may be scoped
+  to devices, capability keys and read-only/read-write; unscoped keys keep meaning the whole
+  house. Applied on v1 and the new `/api/open/v2/*`. `confirm:true` is refused to every key,
+  v1 included (it used to be switchable). Out of scope reads as not found. `test_open_api.py`,
+  twenty-one deliberate bugs each caught.
+- [ ] **The app's API-key screen cannot set a scope**, nor show one. A scoped key is issued
+  with `POST /api/houses/{id}/api-keys {"scope": {...}}` today. The web portal (`/integrate`)
+  likewise. Needs the Flutter SDK for the app half.
+- [ ] A key's scope cannot be edited: issue another and revoke the first. Decide whether the
+  master needs to change one in place.
+- [ ] Open API v2 has no history endpoint (§5.12 is not built) and no way to subscribe to
+  changes: an integration polls, inside 60 requests a minute.
 - [ ] **`list_children` shows GPS to any house member**, not only the master.
   Accepted deliberately: a co-parent given the join PIN is a legitimate viewer, and
   there is no role between `is_master` and plain member to express "may not see

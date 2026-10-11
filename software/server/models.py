@@ -1,5 +1,5 @@
 import enum
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, ForeignKey, Enum as SAEnum, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Float, ForeignKey, Text, Enum as SAEnum, UniqueConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 from database import Base
@@ -349,6 +349,10 @@ class ApiKey(Base):
     created_by = Column(Integer, ForeignKey("accounts.acc_id"), nullable=False)
     revoked = Column(Boolean, default=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    # PROTOCOL.md 12.1, as JSON: {"devices": [...]|null, "keys": [...]|null, "write": bool}.
+    # NULL is a key issued before scoping existed, and keeps meaning the whole house,
+    # read and command. A value that cannot be read back reaches nothing (open_api.load).
+    scope = Column(Text, nullable=True)
 
 
 class ActivityLog(Base):

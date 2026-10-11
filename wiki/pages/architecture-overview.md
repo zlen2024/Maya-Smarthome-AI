@@ -39,7 +39,7 @@ easiest way to introduce a hole, so they are listed together:
 | Mobile/web API | `/api/*` (~60 routes) | JWT bearer | `get_current_user`, `get_current_user_or_child` |
 | Mobile realtime | `WS /ws/mobile` | JWT in first frame | inline decode, `main.py:2303` |
 | Device realtime | `WS /ws`, `WS /` | device PIN in message | `_handle_websocket` |
-| Open API v1 | `/api/open/v1/*` | `X-API-Key` header | `get_api_key_house` |
+| Open API v1 / v2 | `/api/open/v1/*` (frozen), `/api/open/v2/*` | `X-API-Key` header, scoped (§12) | `api_key_limited` |
 
 Detail per component: [server backend](server-backend.md) ·
 [mobile app](mobile-app.md) · [firmware](firmware-esp32.md) ·

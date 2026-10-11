@@ -1,6 +1,6 @@
 # Maya Device Protocol
 
-**Version 2 (draft), document revision 2.4** · Status: §10 step 1 implemented
+**Version 2 (draft), document revision 2.5** · Status: §10 step 1 implemented
 2026-10-10; steps 2-6 proposed. The server stores descriptors and shims protocol 1; the app, Maya and
 the firmware are untouched and still speak protocol 1. See
 `wiki/pages/device-protocol.md` for what exists versus what is still on paper —
@@ -12,6 +12,14 @@ document: claiming (§4.1), permissions (§5.10), labels (§5.11), history (§5.
 the status vocabulary (§5.8), the public API surface (§12), and the smaller
 interop gaps marked there. `proto` stays **2** — one optional ack field was added
 (§6.2), which §11 classes as a free change.
+
+Revision 2.5 (2026-10-11) made §12 buildable: the public API surface. A key is scoped to
+some devices, some capability keys, and read-only or read-and-write; a key issued without a
+scope keeps its old meaning, the whole house; `confirm:true` is refused to every key, on
+the frozen v1 surface too; and what is outside a key's scope reads as *not found*. New
+endpoints under `/api/open/v2/`, an optional `scope` on key creation, and `may_write` on
+each capability a key is shown. Nothing was removed or renamed, and `proto` (the device
+link's version) is not involved.
 
 Revision 2.4 (2026-10-11) specified the hub relay (§7.5) that §5.9 had only
 described: a device declares itself a hub, a person pairs a sensor to it with a
@@ -1761,6 +1769,13 @@ on its own and none of them breaks what is already deployed:
    silently. The radio, the MAC layer's acknowledgement and deep sleep have never run:
    they need two boards. The sleepy class's `pending` queue is still unspecified.
 
+8. The Open API v2 and scoped keys (§12).
+   — **done 2026-10-11** (revision 2.5). `open_api.py`, `/api/open/v2/*`, `scope` on key
+   creation, scope applied to v1, `confirm:true` refused on v1. `test_open_api.py`, with
+   twenty-one deliberate bugs each confirmed to fail it. **The app's API-key screen cannot
+   set a scope yet**, so today a scoped key is issued with `POST /api/houses/{id}/api-keys`.
+   An existing key's scope is none, so nothing already issued changed meaning.
+
 Two pieces of this document sit outside that order because they depend on it
 rather than on each other: **§5.12 (history)** needs step 2 to have somewhere to
 draw a sparkline, and **§12 (the public API v2)** needs step 2's descriptor
@@ -1811,6 +1826,26 @@ takes `values`, with the same validation and the same ack statuses as §6.2. The
 is no v2 endpoint per capability kind: the whole point is that a kind is data, not
 a route.
 
+```
+GET  /api/open/v2/devices            -> {"devices": [ <device>, ... ]}
+GET  /api/open/v2/devices/{id}       -> <device>
+POST /api/open/v2/devices/{id}/set   {"values": {"ch1": "on", "speed": 60}}
+```
+
+A `<device>` is `{device_id, name, online, blocked, proto, model, fw, report_every,
+capabilities, state}`, the descriptor of §5 and the state of §6.1, cut to what *this key*
+may see (§12.1). Each capability carries one extra field, `may_write`, which is true only if
+the key may write it: false for a read-only key, a read-only capability, and every
+`confirm:true` capability, whatever the key's scope. A client can therefore draw its controls
+from the response and never offer one that will be refused.
+
+`set` answers as §6.2 does for anything that reached the device — `status` is `ok`, `busy`,
+`bad_value`, `timeout`, `not_connected` and the rest, with `state` and `failed` — and with an
+HTTP status for what never did: `400` for a malformed request, `403` with
+`{"status":"not_permitted", ...}` for a refusal on the key's account, `404` for a device the
+key may not see, `429` when a limit is hit. A `confirmed` field in the body is **not
+read**: it is evidence that a person said yes, and a key is not one.
+
 A v2 key reaching a v1-only concept, or the reverse, is not a special case —
 both speak capabilities underneath.
 
@@ -1832,6 +1867,49 @@ half of a recorded security finding, so:
   key is not a person, and no flag can make it one.
 - Rate limits are a separate concern and already apply per key.
 
+**Issuing one** (the house master only, as before):
+
+```
+POST /api/houses/{house_id}/api-keys
+{"name": "dashboard", "scope": {"devices": ["esp32-jar"], "keys": ["salt"], "write": false}}
+```
+
+- `devices` and `keys` are each optional; leaving one out leaves it unrestricted. A list that
+  is present MUST NOT be empty (a key that reaches nothing is a mistake, not a scope), at most
+  64 entries, devices must be in the key's house, and keys must be valid capability keys (§5.1,
+  reserved `_` keys included, so `["_batt"]` is a scope).
+- **`write` defaults to `false`.** A scope that does not say is read-only; a key that is to
+  command anything has to be issued with `"write": true`. An unknown field in `scope` is
+  refused, not ignored, so a typo cannot silently widen a key.
+- **Leaving out `scope` entirely issues a legacy key**: the whole house, read and command,
+  exactly what every key issued before this revision means. The response and the key listing
+  say `"scope": null` for it, so an app can show it for what it is. There is no edit: to change
+  what a key reaches, issue another and revoke the first, which is also how a leaked key is
+  replaced.
+
+**What a scope does, everywhere a key goes** — v2, and the frozen v1 too, because it is the
+same key reaching the same capabilities:
+
+- *Reading.* Only devices in scope are listed. Only capabilities in scope are shown, and only
+  their state. On v1, a channel is the capability `ch1`..`ch3` and is scoped as one.
+- *Not found, not forbidden.* A device outside the scope is `404`, exactly as a device that
+  does not exist and a device in another house are: a scoped key must not be able to learn
+  what else is in the house.
+- *Writing.* A read-only key writes nothing. A `set` is judged **whole before anything is
+  sent**: if any key in it is outside the scope, undeclared, read-only or `confirm:true`, none
+  of it is applied. An out-of-scope key and an undeclared one are refused identically, because
+  telling them apart would let a scoped key list capabilities it was never given. On v1 `all_on`
+  and `all_off` need all three channels in scope.
+- *`confirm:true`, on v1 as well.* The frozen surface used to be able to switch a channel the
+  firmware had asked a person to confirm. It no longer can: that was a hole, and closing it is
+  not a breaking change for anyone who was using it as intended.
+- *Unreadable means nothing.* A scope the server cannot read back reaches **nothing**, never
+  everything. Only a key with no scope at all is the whole house.
+- *Attribution.* An accepted `set` is written to the house activity log as done by that key,
+  by name, and not as a parent.
+- *Limits.* Per key: 60 requests a minute of any kind, and 20 of them `set`s, because a `set`
+  moves hardware and a loop in someone's script should not be able to hammer a relay.
+
 ### 12.2 What a key may never reach
 
 Stated as a list because it is easier to audit than prose, and because the
@@ -1845,6 +1923,10 @@ temptation to add "just one" convenience endpoint here is permanent:
 - `factory_reset`, `reboot`, and the provisioning path. A key that can wipe a
   device can erase the house's own hardware.
 - House membership, PINs, and other keys.
+
+These are not routes a key is refused on a case-by-case basis: none of them accepts an API key
+at all. They authenticate a person, and `test_open_api.py` checks that a key reaches none of
+them.
 
 ---
 

@@ -108,17 +108,26 @@ def hash_api_key(key: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()
 
 
-def get_api_key_house(
+def get_api_key_row(
     x_api_key: str = Security(api_key_header),
     db: Session = Depends(get_db),
-) -> House:
-    """Resolve an X-API-Key header to the house it is scoped to."""
+) -> ApiKey:
+    """Resolve an X-API-Key header to the key. A revoked or unknown one is a 401, and
+    the same 401: which of the two it was is not the caller's to learn."""
     row = db.query(ApiKey).filter(
         ApiKey.key_hash == hash_api_key(x_api_key),
         ApiKey.revoked == False,  # noqa: E712 — SQLAlchemy needs the comparison
     ).first()
     if row is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API key")
+    return row
+
+
+def get_api_key_house(
+    row: ApiKey = Depends(get_api_key_row),
+    db: Session = Depends(get_db),
+) -> House:
+    """Resolve an X-API-Key header to the house it is scoped to."""
     house = db.query(House).filter(House.house_id == row.house_id).first()
     if house is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="API key house no longer exists")

@@ -380,3 +380,15 @@ twenty deliberate bugs each fail it. **Found by it:** the parse pool for incomin
 a 16-result `relay_ack`. Updated `PROTOCOL.md` §10, the library README, `device-protocol`,
 `firmware-esp32`, `known-gaps`, `security-notes`, `todos.md`. **Not run:** ESP-NOW acknowledgement,
 `esp_wifi_set_channel`, deep sleep, any radio.
+
+## [2026-10-11] ingest | Open API v2 and scoped keys (spec 2.5, step 8)
+
+`PROTOCOL.md` revision 2.5 makes §12 buildable. `open_api.py` (scope rules, no I/O),
+`ApiKey.scope` (nullable JSON, ALTER migration), `/api/open/v2/devices`, `/{id}`, `/{id}/set`, `scope` on
+key creation and listing, the scope applied to v1, `confirm:true` refused to every key (v1 could switch
+one before), `OPEN_API_WRITE_RATE` 20/min, accepted sets attributed to the key. `auth.get_api_key_row`;
+`api_key_house_limited` replaced by `api_key_limited`. `test_open_api.py`, twenty-one deliberate bugs each
+caught. Updated the maya-open-api agent skill (v2, `may_write`, 403 and 404 meanings),
+`security-notes` §4 and new §12, `device-protocol`, `server-backend`, `architecture-overview`, `todos.md`,
+the server README. **Not done:** the app's and the web portal's key screens cannot set a scope; no
+editing of a key's scope; no v2 history or subscription.

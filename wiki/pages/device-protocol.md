@@ -10,7 +10,7 @@ The goal the protocol exists for: a contributor builds new hardware, drops it in
 firmware to app — `ch1`/`ch2`/`ch3` appeared 76 times across 6 files when the
 migration was planned.
 
-## Status: steps 1, 3, 4, 5, 6 and 7 done, step 2 server-complete, spec at revision 2.4 (2026-10-11)
+## Status: steps 1, 3, 4, 5, 6, 7 and 8 done, step 2 server-complete, spec at revision 2.5 (2026-10-11)
 
 §10 defines a six-step migration order. Only the first is implemented.
 
@@ -23,6 +23,7 @@ migration was planned.
 | 5. Peering: grants, local link, audit (§7) | spec done (2.2); **5a server done; 5b library done**; the ESP-NOW radio has never run |
 | 6. Device to Maya (§8) | **done** (spec 2.3); the app has no switch for it yet; the real model has not been tried |
 | 7. The hub relay (§5.9, §7.5) | spec done (2.4); **7a server done; 7b library, examples and hub firmware done**; no radio has run; the app has no pairing screen |
+| 8. Open API v2 and scoped keys (§12) | spec done (2.5); **server done**; the app and web portal cannot set a scope yet |
 
 **Steps 1–3 needed no firmware change.** The shipped ESP32 still speaks protocol 1 and
 is served by the shim — which is the point of the migration order, and what
@@ -224,8 +225,8 @@ Specified, not built — each has a section to build against:
   three call sites are `ConnectionManager`, the device list endpoint and Maya's
   house context.
 - **History** (§5.12). The flag is stored per capability; no series is retained.
-- **The public API's v2 surface** (§12). `/api/open/v1/*` is unchanged and still
-  speaks three channels through the shim.
+- ~~The public API's v2 surface (§12).~~ Built in step 8 (below). `/api/open/v1/*` is still
+  three channels through the shim, now scoped.
 - **Any of §7 or §8** — peering, the local ESP-NOW link, the audit plane, or
   device-to-Maya. Steps 5 and 6.
 
@@ -529,3 +530,35 @@ second place that queued the `hub_failed` announcement), and it was removed inst
 **Not here:** the radio, the acknowledgement as a failure signal, `esp_wifi_set_channel` while
 not associated, and deep sleep have never run. The sleepy `pending` queue is unspecified. A hub
 holds at most 8 pairings (`MAYA_MAX_PEERS`, a library build setting).
+
+## Step 8 (2026-10-11): the Open API v2, and keys that can be scoped
+
+`open_api.py` is the decision with no database and no HTTP in it; `main.py` supplies the key row
+and the descriptor and acts on the answer. `ApiKey.scope` is a nullable JSON column
+(`{"devices": [...]|null, "keys": [...]|null, "write": bool}`); NULL is a key from before scoping and
+keeps meaning the whole house. `api_key_limited` resolves the key, rate-limits it and hands the
+route an `OpenKey` carrying the scope.
+
+| Endpoint | What it does |
+|---|---|
+| `GET /api/open/v2/devices`, `/{id}` | Descriptor and state, cut to the key's scope, each capability carrying `may_write` for *this* key |
+| `POST /api/open/v2/devices/{id}/set` | §6.2's `set` behind the scope: judged whole before anything is sent; 403 for a refusal on the key's account, 404 out of scope |
+| `POST /api/houses/{id}/api-keys` | Gains `scope`; leaving it out issues a legacy key |
+| v1 routes | Unchanged in shape, now scoped, and no longer able to switch a `confirm:true` channel |
+
+**Two things a reader should not have to rediscover.** The `confirm` hole on v1 was real: the
+frozen route sent `output_on` to whatever `ch{n}` named without looking at the descriptor, so a
+control the firmware author wanted a person to approve could be switched by any key. It is closed,
+and the only integrations it can affect are ones using a key on exactly the thing the firmware said
+a person must approve. And `agent:"deny"` is **not** applied to keys — it hides a capability from
+Maya, and §12 excludes only `confirm`; that is stated as a residual risk in
+[security notes §12](security-notes.md#12-what-an-open-api-key-can-reach--scoped-2026-10-11).
+
+**Tests.** `test_open_api.py`: the scope rules alone (parse, storage that fails closed, what a view
+and a set allow), then the real app with real keys and boards that actually acknowledge a `set`: a
+legacy key sees the whole house; a dashboard key sees one device and one capability and everything
+else is 404; a refused set sends nothing (the next frame the board sees is the allowed one); the body's
+`confirmed` is ignored; a descriptor that loses a capability closes the key to it; an unreadable stored
+scope reaches nothing; v1 honours the scope; eleven routes that must never accept a key do not;
+write and read limits; revocation; another house; and a database from before scoping gains the column
+and its keys keep their meaning. Twenty-one deliberate bugs each fail it.

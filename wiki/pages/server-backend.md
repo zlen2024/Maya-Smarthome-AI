@@ -35,7 +35,7 @@ zero `callers`** because they are passed by reference into `Depends(...)`
 |---|---|---|
 | `get_current_user` (`auth.py:37`) | 36 | Parent/admin JSON API |
 | `get_current_user_or_child` (`auth.py:61`) | 20 | Routes a child may also call |
-| `get_api_key_house` (`auth.py:101`) | 4 (3 routes + import) | `/api/open/v1/*` only |
+| `get_api_key_house` (`auth.py:101`) | 4 (3 routes + import) | *(pre-2026-10-11 count: the Open API routes now depend on `api_key_limited`, which resolves the key row and its scope; this symbol is kept for callers that need only the house)* |
 | `get_db` (`database.py:17`) | 64 | Every DB-touching route |
 
 `get_api_key_house`'s three route sites are `open_list_devices` (`main.py:646`),
@@ -59,9 +59,10 @@ a tight, auditable surface.
   grant store, not a second store. See [device protocol](device-protocol.md).
 - **Houses** (12) — CRUD, join-by-PIN, switch, members, per-member device
   permission, kick, reset-pin, and API-key create/list/revoke.
-- **Open API v1** (3) — `X-API-Key`, `tags=["Open API v1"]` so they render as
-  their own section in the generated OpenAPI docs. Paired with the
-  `software/skills/maya-open-api` agent skill.
+- **Open API v1** (3) and **v2** (3, 2026-10-11) — `X-API-Key`, `tags=["Open API v1"]` /
+  `["Open API v2"]` so they render as their own sections in the generated OpenAPI docs. v1 is
+  frozen (three channels); v2 serves descriptors and one generic `set`; both honour the key's
+  scope (`open_api.py`). Paired with the `software/skills/maya-open-api` agent skill.
 - **Chat & mentions** (6) — history, mentionables, unseen, mark-seen, clear.
 - **Children / homework / screen time** (14) — including `POST /api/children/location`
   and `POST /api/screen-time/report`, the two endpoints child devices push to.
