@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme/accents.dart';
 import '../services/voice_service.dart';
 
 /// Full-screen voice UI opened by the mic button or the Quick Settings tile.
@@ -82,15 +83,8 @@ class _VoiceOverlayScreenState extends State<VoiceOverlayScreen>
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: const Color(0xFF05060A),
-      body: Container(
-        decoration: BoxDecoration(
-          gradient: RadialGradient(
-            radius: 1.1,
-            center: const Alignment(0, -0.15),
-            colors: [cs.primary.withOpacity(0.16), const Color(0xFF05060A)],
-          ),
-        ),
+      backgroundColor: context.pal.base,
+      body: SizedBox.expand(
         child: SafeArea(
           child: Stack(
             children: [
@@ -99,7 +93,7 @@ class _VoiceOverlayScreenState extends State<VoiceOverlayScreen>
                 alignment: Alignment.topRight,
                 child: IconButton(
                   iconSize: 28,
-                  icon: const Icon(Icons.close_rounded, color: Colors.white54),
+                  icon: Icon(Icons.close_rounded, color: context.pal.muted),
                   onPressed: () => Navigator.of(context).maybePop(),
                 ),
               ),
@@ -114,7 +108,7 @@ class _VoiceOverlayScreenState extends State<VoiceOverlayScreen>
                       builder: (context, state, _) => Text(
                         _statusLine(state),
                         style: TextStyle(
-                          color: Colors.white.withOpacity(0.55),
+                          color: context.pal.muted,
                           fontSize: 14,
                           letterSpacing: 0.3,
                         ),
@@ -141,9 +135,9 @@ class _VoiceOverlayScreenState extends State<VoiceOverlayScreen>
           return Container(
             padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.06),
+              color: context.pal.sunken,
               borderRadius: BorderRadius.circular(30),
-              border: Border.all(color: Colors.white.withOpacity(0.08)),
+              border: Border.all(color: context.pal.sunken),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -162,7 +156,7 @@ class _VoiceOverlayScreenState extends State<VoiceOverlayScreen>
                     child: Text(
                       l.label,
                       style: TextStyle(
-                        color: active ? Colors.white : Colors.white60,
+                        color: active ? context.pal.onInk : context.pal.muted,
                         fontWeight:
                             active ? FontWeight.w700 : FontWeight.w500,
                         fontSize: 13.5,
@@ -204,18 +198,7 @@ class _VoiceOverlayScreenState extends State<VoiceOverlayScreen>
                         height: 140,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          gradient: LinearGradient(
-                            colors: [cs.primary, cs.tertiary],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: cs.primary.withOpacity(0.5),
-                              blurRadius: 48,
-                              spreadRadius: 4,
-                            ),
-                          ],
+                          color: cs.primary,
                         ),
                         child: Icon(
                           state == VoiceState.thinking
@@ -224,7 +207,7 @@ class _VoiceOverlayScreenState extends State<VoiceOverlayScreen>
                                   ? Icons.graphic_eq_rounded
                                   : Icons.mic_rounded,
                           size: 52,
-                          color: Colors.white,
+                          color: context.pal.onInk,
                         ),
                       ),
                     ),
@@ -251,8 +234,8 @@ class _VoiceOverlayScreenState extends State<VoiceOverlayScreen>
               return Text(
                 '"$shown"',
                 textAlign: TextAlign.center,
-                style: const TextStyle(
-                    color: Colors.white,
+                style: TextStyle(
+                    color: context.pal.ink,
                     fontSize: 19,
                     height: 1.35,
                     fontWeight: FontWeight.w600),
@@ -264,15 +247,15 @@ class _VoiceOverlayScreenState extends State<VoiceOverlayScreen>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
               decoration: BoxDecoration(
-                color: cs.primary.withOpacity(0.12),
+                color: context.pal.surface,
                 borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: cs.primary.withOpacity(0.35)),
+                border: Border.all(color: context.pal.line),
               ),
               child: Text(
                 _reply,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                    color: Colors.white.withOpacity(0.95),
+                    color: context.pal.ink,
                     fontSize: 18,
                     height: 1.4),
               ),

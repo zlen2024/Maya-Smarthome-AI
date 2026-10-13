@@ -22,23 +22,22 @@ class MayaSmartHomeApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Rebuild the whole app when the user switches accent. Dark-only:
-    // glassmorphism is the fixed brand, the accent is the variable.
+    // Rebuild the whole app when the user switches palette (day / night).
+    // The brand is a minimalist house: plaster, ink, contrast.
     return ListenableBuilder(
       listenable: ThemeController.instance,
       builder: (context, _) {
-        final accent = ThemeController.instance.accent;
+        final palette = ThemeController.instance.palette;
         return MaterialApp(
           title: 'Maya Smart Home',
           navigatorKey: VoiceTrigger.navigatorKey,
           debugShowCheckedModeBanner: false,
-          theme: buildGlassTheme(accent),
-          darkTheme: buildGlassTheme(accent),
-          themeMode: ThemeMode.dark,
-          // Paint the aurora canvas behind every screen so the frosted glass
-          // surfaces have something to blur over.
+          theme: buildHouseTheme(palette),
+          darkTheme: buildHouseTheme(palette),
+          themeMode: palette.brightness == Brightness.dark ? ThemeMode.dark : ThemeMode.light,
+          // Paint the room behind every screen.
           builder: (context, child) => AuroraBackground(
-            accent: accent,
+            palette: palette,
             child: child ?? const SizedBox.shrink(),
           ),
           // Named route for OnboardingScreen to navigate back to

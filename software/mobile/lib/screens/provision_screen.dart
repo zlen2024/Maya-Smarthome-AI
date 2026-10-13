@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import '../theme/accents.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../services/api_service.dart';
@@ -809,11 +810,11 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
         // Connected info header
         Row(
           children: [
-            const Icon(Icons.check_circle_rounded, color: Colors.green, size: 20),
+            Icon(Icons.check_circle_rounded, color: context.pal.ok, size: 20),
             const SizedBox(width: 8),
             Text(
               'Connected to Maya BLE setup',
-              style: tt.bodyMedium?.copyWith(color: Colors.green, fontWeight: FontWeight.bold),
+              style: tt.bodyMedium?.copyWith(color: context.pal.ok, fontWeight: FontWeight.bold),
             ),
             const Spacer(),
             TextButton.icon(
@@ -948,10 +949,10 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
         child: Row(
           children: [
             if (done)
-              const CircleAvatar(
+              CircleAvatar(
                 radius: 12,
-                backgroundColor: Colors.green,
-                child: Icon(Icons.check, size: 14, color: Colors.white),
+                backgroundColor: context.pal.ok,
+                child: Icon(Icons.check, size: 14, color: context.pal.onInk),
               )
             else if (active)
               const SizedBox(
@@ -1031,7 +1032,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF0E1116),
+                  color: const Color(0xFF1A1917), // a console stays dark in both palettes
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: cs.outlineVariant.withOpacity(0.4)),
                 ),

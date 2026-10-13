@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../theme/accents.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/api_service.dart';
 import '../widgets/glass.dart';
@@ -563,7 +564,7 @@ class _HomeworkSheetState extends State<_HomeworkSheet> {
                                       ? Icons.check_circle_rounded
                                       : Icons.radio_button_unchecked_rounded,
                                   color:
-                                      done ? Colors.green : cs.onSurfaceVariant,
+                                      done ? context.pal.ok : cs.onSurfaceVariant,
                                 ),
                                 title: Text(hw['title'] ?? '',
                                     style: TextStyle(

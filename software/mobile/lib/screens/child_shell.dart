@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../theme/accents.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 import '../services/api_service.dart';
@@ -197,10 +198,10 @@ class _ChildShellState extends State<ChildShell> {
                   height: 9,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: _wsConnected ? Colors.green : cs.error,
+                    color: _wsConnected ? context.pal.ok : cs.error,
                     boxShadow: [
                       BoxShadow(
-                        color: (_wsConnected ? Colors.green : cs.error)
+                        color: (_wsConnected ? context.pal.ok : cs.error)
                             .withOpacity(0.5),
                         blurRadius: 6,
                       ),

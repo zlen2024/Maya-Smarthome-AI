@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme/accents.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/api_service.dart';
 
@@ -158,13 +159,7 @@ class _LoginScreenState extends State<LoginScreen>
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(24),
-                    boxShadow: [
-                      BoxShadow(
-                        color: cs.primary.withOpacity(0.35),
-                        blurRadius: 24,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
+                    border: Border.all(color: context.pal.line),
                   ),
                   clipBehavior: Clip.antiAlias,
                   child: Image.asset('assets/brand/maya_logo.png',
@@ -254,11 +249,11 @@ class _LoginScreenState extends State<LoginScreen>
         FilledButton(
           onPressed: _loading ? null : _loginParent,
           child: _loading
-              ? const SizedBox(
+              ? SizedBox(
                   width: 22,
                   height: 22,
                   child: CircularProgressIndicator(
-                      strokeWidth: 2.5, color: Colors.white),
+                      strokeWidth: 2.5, color: context.pal.onInk),
                 )
               : const Text('Sign In'),
         ),
@@ -325,11 +320,11 @@ class _LoginScreenState extends State<LoginScreen>
         FilledButton(
           onPressed: _loading ? null : _loginChild,
           child: _loading
-              ? const SizedBox(
+              ? SizedBox(
                   width: 22,
                   height: 22,
                   child: CircularProgressIndicator(
-                      strokeWidth: 2.5, color: Colors.white),
+                      strokeWidth: 2.5, color: context.pal.onInk),
                 )
               : const Text('Access Dashboard'),
         ),

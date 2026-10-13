@@ -278,11 +278,11 @@ class _ParentShellState extends State<ParentShell> {
                       }
                     },
               child: loading
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 20,
                       height: 20,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
+                          strokeWidth: 2, color: context.pal.onInk))
                   : const Text('Create'),
             ),
           ],
@@ -395,11 +395,11 @@ class _ParentShellState extends State<ParentShell> {
                       }
                     },
               child: loading
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 20,
                       height: 20,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
+                          strokeWidth: 2, color: context.pal.onInk))
                   : const Text('Join'),
             ),
           ],
@@ -485,16 +485,16 @@ class _ParentShellState extends State<ParentShell> {
               style: TextStyle(
                 fontSize: 12.5,
                 fontWeight: FontWeight.w500,
-                color: Colors.white.withOpacity(0.55),
+                color: context.pal.muted,
               ),
             ),
             const SizedBox(height: 2),
             Text(
               ApiService.activeHouse?['location'] ?? 'My Home',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 21,
                 fontWeight: FontWeight.w800,
-                color: Colors.white,
+                color: context.pal.ink,
                 letterSpacing: -0.3,
               ),
             ),
@@ -524,10 +524,10 @@ class _ParentShellState extends State<ParentShell> {
                 height: 7,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: _wsConnected ? Colors.green : cs.error,
+                  color: _wsConnected ? context.pal.ok : cs.error,
                   boxShadow: [
                     BoxShadow(
-                      color: (_wsConnected ? Colors.green : cs.error)
+                      color: (_wsConnected ? context.pal.ok : cs.error)
                           .withOpacity(0.5),
                       blurRadius: 4,
                     ),
@@ -549,7 +549,7 @@ class _ParentShellState extends State<ParentShell> {
           ListenableBuilder(
             listenable: ThemeController.instance,
             builder: (context, _) {
-              final accent = ThemeController.instance.accent;
+              final accent = ThemeController.instance.palette;
               final name = ApiService.userName.isEmpty ? 'there' : ApiService.userName;
               final initials = name.trim().isEmpty
                   ? 'ME'
@@ -558,36 +558,27 @@ class _ParentShellState extends State<ParentShell> {
               return PopupMenuButton<dynamic>(
                 offset: const Offset(0, 50),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                color: const Color(0xFF1A1F35),
+                color: context.pal.surface,
                 child: Container(
                   width: 36,
                   height: 36,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    gradient: LinearGradient(
-                      colors: [accent.accent, accent.orbs.first],
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: accent.accent.withOpacity(0.3),
-                        blurRadius: 8,
-                        spreadRadius: -1,
-                      ),
-                    ],
+                    color: context.pal.ink,
                   ),
                   child: Text(
                     initials,
                     style: TextStyle(
                       fontWeight: FontWeight.w800,
-                      color: accent.onAccent,
+                      color: context.pal.onInk,
                       fontSize: 11,
                     ),
                   ),
                 ),
                 itemBuilder: (ctx) => [
                   // Houses section
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     enabled: false,
                     height: 32,
                     child: Text('HOUSES',
@@ -595,7 +586,7 @@ class _ParentShellState extends State<ParentShell> {
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
                             letterSpacing: 1.5,
-                            color: Colors.white38)),
+                            color: context.pal.faint)),
                   ),
                   ...ApiService.houses.map((h) {
                     final isActive = h['house_id'] == ApiService.houseId;
@@ -606,20 +597,20 @@ class _ParentShellState extends State<ParentShell> {
                           Icon(
                             isActive ? Icons.home_rounded : Icons.home_outlined,
                             size: 18,
-                            color: isActive ? accent.accent : Colors.white54,
+                            color: isActive ? context.pal.ink : context.pal.muted,
                           ),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Text(
                               h['location'] ?? 'House ${h['house_id']}',
                               style: TextStyle(
-                                color: isActive ? accent.accent : Colors.white,
+                                color: context.pal.ink,
                                 fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
                               ),
                             ),
                           ),
                           if (isActive)
-                            Icon(Icons.check_rounded, size: 16, color: accent.accent),
+                            Icon(Icons.check_rounded, size: 16, color: context.pal.ink),
                         ],
                       ),
                     );
@@ -628,9 +619,9 @@ class _ParentShellState extends State<ParentShell> {
                     value: 'create',
                     child: Row(
                       children: [
-                        Icon(Icons.add_rounded, size: 18, color: Colors.white.withOpacity(0.6)),
+                        Icon(Icons.add_rounded, size: 18, color: context.pal.muted),
                         const SizedBox(width: 10),
-                        Text('Create House', style: TextStyle(color: Colors.white.withOpacity(0.7))),
+                        Text('Create House', style: TextStyle(color: context.pal.muted)),
                       ],
                     ),
                   ),
@@ -638,15 +629,15 @@ class _ParentShellState extends State<ParentShell> {
                     value: 'join',
                     child: Row(
                       children: [
-                        Icon(Icons.group_add_outlined, size: 18, color: Colors.white.withOpacity(0.6)),
+                        Icon(Icons.group_add_outlined, size: 18, color: context.pal.muted),
                         const SizedBox(width: 10),
-                        Text('Join House', style: TextStyle(color: Colors.white.withOpacity(0.7))),
+                        Text('Join House', style: TextStyle(color: context.pal.muted)),
                       ],
                     ),
                   ),
                   const PopupMenuDivider(),
                   // Theme section
-                  const PopupMenuItem(
+                  PopupMenuItem(
                     enabled: false,
                     height: 32,
                     child: Text('THEME',
@@ -654,11 +645,11 @@ class _ParentShellState extends State<ParentShell> {
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
                             letterSpacing: 1.5,
-                            color: Colors.white38)),
+                            color: context.pal.faint)),
                   ),
-                  ...kAccentPresets.map((p) {
+                  ...kPalettes.map((p) {
                     final active = p.id == accent.id;
-                    return PopupMenuItem<AccentPreset>(
+                    return PopupMenuItem<Palette>(
                       value: p,
                       child: Row(
                         children: [
@@ -667,21 +658,19 @@ class _ParentShellState extends State<ParentShell> {
                             height: 18,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: p.accent,
+                              // Each swatch shows its own wall with its own ink.
+                              color: p.base,
                               border: Border.all(
-                                color: active ? Colors.white : Colors.transparent,
-                                width: 2,
+                                color: active ? context.pal.ink : p.ink,
+                                width: active ? 5 : 1.5,
                               ),
-                              boxShadow: active
-                                  ? [BoxShadow(color: p.accent.withOpacity(0.5), blurRadius: 8)]
-                                  : null,
                             ),
                           ),
                           const SizedBox(width: 10),
                           Text(
                             p.label,
                             style: TextStyle(
-                              color: active ? accent.accent : Colors.white,
+                              color: context.pal.ink,
                               fontWeight: active ? FontWeight.w700 : FontWeight.w500,
                             ),
                           ),
@@ -697,8 +686,8 @@ class _ParentShellState extends State<ParentShell> {
                     _showCreateHouseDialog();
                   } else if (value == 'join') {
                     _showJoinHouseDialog();
-                  } else if (value is AccentPreset) {
-                    ThemeController.instance.setAccent(value);
+                  } else if (value is Palette) {
+                    ThemeController.instance.setPalette(value);
                   }
                 },
               );

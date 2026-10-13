@@ -262,7 +262,7 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final accent = ThemeController.instance.accent;
+    final accent = context.pal;
 
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
@@ -298,13 +298,13 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
 
 
 
-  Widget _statusRow(AccentPreset accent) {
+  Widget _statusRow(Palette accent) {
     final total = _devices.length;
     final online = _onlineCount;
     return Row(
       children: [
         GlassPill(
-          dot: online > 0 ? accent.accent : Colors.grey,
+          dot: online > 0 ? context.pal.ink : context.pal.faint,
           child: Text('$online of $total online'),
         ),
         const SizedBox(width: 10),
@@ -313,7 +313,7 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
     );
   }
 
-  Widget _allOffCard(AccentPreset accent) {
+  Widget _allOffCard(Palette accent) {
     return GlassSurface(
       onTap: _allOff,
       child: Row(
@@ -323,40 +323,40 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
             height: 46,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: accent.accent.withOpacity(0.18),
+              color: context.pal.ink,
               borderRadius: BorderRadius.circular(14),
             ),
-            child: Icon(Icons.power_settings_new_rounded, color: accent.accent),
+            child: Icon(Icons.power_settings_new_rounded, color: context.pal.onInk),
           ),
           const SizedBox(width: 14),
-          const Expanded(
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('All off',
                     style: TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)),
-                SizedBox(height: 2),
+                        fontSize: 16, fontWeight: FontWeight.w700, color: context.pal.ink)),
+                const SizedBox(height: 2),
                 Text('Turn everything off',
-                    style: TextStyle(fontSize: 12.5, color: Colors.white54)),
+                    style: TextStyle(fontSize: 12.5, color: context.pal.muted)),
               ],
             ),
           ),
-          Icon(Icons.chevron_right_rounded, color: Colors.white.withOpacity(0.4)),
+          Icon(Icons.chevron_right_rounded, color: context.pal.faint),
         ],
       ),
     );
   }
 
   // ── Device (room) card ─────────────────────────────────────────────────
-  Widget _deviceCard(dynamic device, AccentPreset accent) {
+  Widget _deviceCard(dynamic device, Palette accent) {
     final deviceId = device['device_id'] as String;
     final name = device['name'] ?? deviceId;
     final online = device['online'] == true;
     final onCount = [1, 2, 3].where((c) => device['ch$c'] == 'on').length;
 
     return GlassSurface(
-      glow: onCount > 0 && online ? accent.accent : null,
+      glow: onCount > 0 && online ? context.pal.ink : null,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -367,11 +367,14 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
                 height: 40,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.08),
+                  color: onCount > 0 && online ? context.pal.ink : context.pal.sunken,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(Icons.bolt_rounded,
-                    color: online ? accent.accent : Colors.white38, size: 22),
+                    color: onCount > 0 && online
+                        ? context.pal.onInk
+                        : online ? context.pal.ink : context.pal.faint,
+                    size: 22),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -379,26 +382,26 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(name,
-                        style: const TextStyle(
-                            fontSize: 16, fontWeight: FontWeight.w700, color: Colors.white)),
+                        style: TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w700, color: context.pal.ink)),
                     Text('$deviceId',
                         style: TextStyle(
                             fontSize: 11,
-                            color: Colors.white.withOpacity(0.35),
+                            color: context.pal.faint,
                             fontFamily: 'monospace')),
                   ],
                 ),
               ),
               GlassPill(
-                dot: online ? const Color(0xFF34D399) : Colors.redAccent,
+                dot: online ? context.pal.ok : context.pal.danger,
                 child: Text(online ? 'Online' : 'Offline'),
               ),
               // ⋮ menu — delete device (parent/master only)
               if (ApiService.canManageDevices)
                 PopupMenuButton<String>(
                   icon: Icon(Icons.more_vert_rounded,
-                      size: 20, color: Colors.white.withOpacity(0.4)),
-                  color: const Color(0xFF1A1F35),
+                      size: 20, color: context.pal.faint),
+                  color: context.pal.surface,
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12)),
                   onSelected: (v) {
@@ -410,10 +413,10 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
                       child: Row(
                         children: [
                           Icon(Icons.delete_outline_rounded,
-                              size: 18, color: Colors.redAccent),
+                              size: 18, color: context.pal.danger),
                           const SizedBox(width: 8),
-                          const Text('Remove device',
-                              style: TextStyle(color: Colors.redAccent)),
+                          Text('Remove device',
+                              style: TextStyle(color: context.pal.danger)),
                         ],
                       ),
                     ),
@@ -428,7 +431,7 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
     );
   }
 
-  Widget _channelRow(dynamic device, int ch, AccentPreset accent, bool online) {
+  Widget _channelRow(dynamic device, int ch, Palette accent, bool online) {
     final deviceId = device['device_id'] as String;
     final isOn = device['ch$ch'] == 'on';
     final allowed = _isChannelAllowed(deviceId, ch);
@@ -443,9 +446,9 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
             height: 9,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: isOn ? accent.accent : Colors.white.withOpacity(0.2),
+              color: isOn ? context.pal.ink : context.pal.faint,
               boxShadow: isOn
-                  ? [BoxShadow(color: accent.accent.withOpacity(0.6), blurRadius: 8)]
+                  ? [BoxShadow(color: context.pal.ink.withOpacity(0.6), blurRadius: 8)]
                   : null,
             ),
           ),
@@ -464,14 +467,14 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
                       style: TextStyle(
                         fontSize: 14.5,
                         fontWeight: FontWeight.w600,
-                        color: enabled ? Colors.white : Colors.white38,
+                        color: enabled ? context.pal.ink : context.pal.faint,
                       ),
                     ),
                   ),
                   if (ApiService.canManageDevices) ...[
                     const SizedBox(width: 6),
                     Icon(Icons.edit_outlined,
-                        size: 12, color: Colors.white.withOpacity(0.3)),
+                        size: 12, color: context.pal.faint),
                   ],
                 ],
               ),
@@ -481,12 +484,12 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
             Padding(
               padding: const EdgeInsets.only(right: 6),
               child: Icon(Icons.lock_outline_rounded,
-                  size: 15, color: Colors.white.withOpacity(0.4)),
+                  size: 15, color: context.pal.faint),
             ),
           Switch.adaptive(
             value: isOn,
-            activeColor: accent.onAccent,
-            activeTrackColor: accent.accent,
+            activeColor: context.pal.onInk,
+            activeTrackColor: context.pal.ink,
             onChanged: enabled ? (v) => _toggleChannel(deviceId, ch, v) : null,
           ),
         ],
@@ -494,17 +497,17 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
     );
   }
 
-  Widget _askMaya(AccentPreset accent) {
+  Widget _askMaya(Palette accent) {
     return GlassSurface(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       radius: 30,
       onTap: widget.onAskMaya,
       child: Row(
         children: [
-          Icon(Icons.auto_awesome_rounded, color: accent.accent, size: 20),
+          Icon(Icons.auto_awesome_rounded, color: context.pal.ink, size: 20),
           const SizedBox(width: 12),
           Text('Ask Maya…',
-              style: TextStyle(fontSize: 15, color: Colors.white.withOpacity(0.55))),
+              style: TextStyle(fontSize: 15, color: context.pal.muted)),
         ],
       ),
     );
@@ -513,9 +516,9 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
   Widget _errorCard() => GlassSurface(
         child: Row(
           children: [
-            const Icon(Icons.error_outline_rounded, color: Colors.redAccent),
+            Icon(Icons.error_outline_rounded, color: context.pal.danger),
             const SizedBox(width: 12),
-            Expanded(child: Text(_error!, style: const TextStyle(color: Colors.white70))),
+            Expanded(child: Text(_error!, style: TextStyle(color: context.pal.muted))),
             TextButton(
               onPressed: () {
                 setState(() => _loading = true);
@@ -531,17 +534,17 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
         padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 18),
         child: Column(
           children: [
-            Icon(Icons.sensors_off_rounded, size: 44, color: Colors.white.withOpacity(0.3)),
+            Icon(Icons.sensors_off_rounded, size: 44, color: context.pal.faint),
             const SizedBox(height: 12),
-            const Text('No devices yet',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white)),
+            Text('No devices yet',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: context.pal.ink)),
             const SizedBox(height: 4),
             Text(
               ApiService.isChild
                   ? 'Ask your parent to add devices.'
                   : 'Add one from the Device tab.',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, color: Colors.white.withOpacity(0.5)),
+              style: TextStyle(fontSize: 13, color: context.pal.muted),
             ),
           ],
         ),

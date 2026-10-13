@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme/accents.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../services/api_service.dart';
 import '../widgets/glass.dart';
@@ -186,7 +187,7 @@ class _DeviceManagementTabState extends State<DeviceManagementTab>
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
                     color: online
-                        ? Colors.green.withOpacity(0.12)
+                        ? context.pal.ok.withOpacity(0.12)
                         : cs.error.withOpacity(0.12),
                     borderRadius: BorderRadius.circular(20),
                   ),
@@ -194,7 +195,7 @@ class _DeviceManagementTabState extends State<DeviceManagementTab>
                     online ? 'Online' : 'Offline',
                     style: tt.labelSmall?.copyWith(
                       fontWeight: FontWeight.w700,
-                      color: online ? Colors.green : cs.error,
+                      color: online ? context.pal.ok : cs.error,
                     ),
                   ),
                 ),

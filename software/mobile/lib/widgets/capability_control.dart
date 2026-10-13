@@ -138,9 +138,6 @@ class _CapabilityControlState extends State<CapabilityControl> {
       decoration: BoxDecoration(
         shape: BoxShape.circle,
         color: lit ? accent : cs.onSurfaceVariant.withOpacity(0.25),
-        boxShadow: lit
-            ? [BoxShadow(color: accent.withOpacity(0.5), blurRadius: 8)]
-            : null,
       ),
     );
   }

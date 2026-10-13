@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../theme/accents.dart';
 import '../services/api_service.dart';
 import '../widgets/glass.dart';
 
@@ -450,7 +451,7 @@ class _MessageBubble extends StatelessWidget {
                   Text(
                     text,
                     style: tt.bodyMedium?.copyWith(
-                      color: Colors.white,
+                      color: context.pal.ink,
                     ),
                   ),
                   if (timeStr.isNotEmpty) ...[
@@ -459,7 +460,7 @@ class _MessageBubble extends StatelessWidget {
                       timeStr,
                       style: tt.labelSmall?.copyWith(
                         fontSize: 10,
-                        color: Colors.white.withOpacity(0.55),
+                        color: context.pal.muted,
                       ),
                     ),
                   ],

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../theme/accents.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../services/api_service.dart';
@@ -74,7 +75,7 @@ class _SettingsTabState extends State<SettingsTab> {
                             horizontal: 10, vertical: 3),
                         decoration: BoxDecoration(
                           color: ApiService.isChild
-                              ? Colors.green.withOpacity(0.12)
+                              ? context.pal.ok.withOpacity(0.12)
                               : cs.primary.withOpacity(0.12),
                           borderRadius: BorderRadius.circular(20),
                         ),
@@ -83,7 +84,7 @@ class _SettingsTabState extends State<SettingsTab> {
                           style: tt.labelSmall?.copyWith(
                             fontWeight: FontWeight.w700,
                             color: ApiService.isChild
-                                ? Colors.green
+                                ? context.pal.ok
                                 : cs.primary,
                           ),
                         ),

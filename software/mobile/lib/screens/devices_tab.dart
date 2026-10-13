@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../theme/accents.dart';
 import '../services/api_service.dart';
 import '../widgets/capability_control.dart';
 
@@ -334,16 +335,6 @@ class _DevicesTabState extends State<DevicesTab>
     );
   }
 
-  /// Colours cycle so neighbouring controls stay distinguishable. They are
-  /// decoration only — nothing reads meaning into the order, because the
-  /// descriptor decides what is in the list.
-  static const _accents = [
-    Color(0xFFEF4444),
-    Color(0xFF10B981),
-    Color(0xFF3B82F6),
-    Color(0xFFF59E0B),
-    Color(0xFF8B5CF6),
-  ];
 
   Widget _deviceCard(dynamic device, ColorScheme cs, TextTheme tt) {
     final deviceId = device['device_id'] as String;
@@ -429,7 +420,7 @@ class _DevicesTabState extends State<DevicesTab>
               )
             else
               for (int i = 0; i < controls.length; i++)
-                _control(deviceId, controls[i], _accents[i % _accents.length],
+                _control(deviceId, controls[i], cs.primary,
                     online),
           ],
         ),
@@ -462,12 +453,12 @@ class _DevicesTabState extends State<DevicesTab>
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: online
-            ? Colors.green.withOpacity(0.12)
+            ? context.pal.ok.withOpacity(0.12)
             : cs.error.withOpacity(0.12),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: online
-              ? Colors.green.withOpacity(0.3)
+              ? context.pal.ok.withOpacity(0.3)
               : cs.error.withOpacity(0.3),
         ),
       ),
@@ -479,7 +470,7 @@ class _DevicesTabState extends State<DevicesTab>
             height: 7,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: online ? Colors.green : cs.error,
+              color: online ? context.pal.ok : cs.error,
             ),
           ),
           const SizedBox(width: 5),
@@ -487,7 +478,7 @@ class _DevicesTabState extends State<DevicesTab>
             online ? 'Online' : 'Offline',
             style: tt.labelSmall?.copyWith(
               fontWeight: FontWeight.w700,
-              color: online ? Colors.green : cs.error,
+              color: online ? context.pal.ok : cs.error,
             ),
           ),
         ],

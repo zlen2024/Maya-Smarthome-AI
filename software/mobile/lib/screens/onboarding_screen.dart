@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import '../theme/accents.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../services/api_service.dart';
 
@@ -26,22 +27,11 @@ class OnboardingScreen extends StatelessWidget {
                   width: 88,
                   height: 88,
                   decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [cs.primary, cs.tertiary],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
+                    color: context.pal.ink,
                     borderRadius: BorderRadius.circular(24),
-                    boxShadow: [
-                      BoxShadow(
-                        color: cs.primary.withOpacity(0.35),
-                        blurRadius: 28,
-                        offset: const Offset(0, 10),
-                      ),
-                    ],
                   ),
-                  child: const Icon(Icons.home_rounded,
-                      size: 48, color: Colors.white),
+                  child: Icon(Icons.home_rounded,
+                      size: 48, color: context.pal.onInk),
                 ),
                 const SizedBox(height: 24),
 
@@ -142,11 +132,11 @@ class OnboardingScreen extends StatelessWidget {
                       }
                     },
               child: loading
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 20,
                       height: 20,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
+                          strokeWidth: 2, color: context.pal.onInk),
                     )
                   : const Text('Create'),
             ),
@@ -260,11 +250,11 @@ class OnboardingScreen extends StatelessWidget {
                       }
                     },
               child: loading
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 20,
                       height: 20,
                       child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white),
+                          strokeWidth: 2, color: context.pal.onInk),
                     )
                   : const Text('Join'),
             ),
