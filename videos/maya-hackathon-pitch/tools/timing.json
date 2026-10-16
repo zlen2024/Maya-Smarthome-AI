@@ -1,5 +1,5 @@
 {
-  "total_seconds": 174.59,
+  "total_seconds": 224.42,
   "overlap": 0.4,
   "voice_offset": 0.35,
   "frames": [
@@ -7,7 +7,6 @@
       "frame": 1,
       "slug": "01-hook",
       "start": 0.0,
-      "duration": 8.24,
       "lines": [
         {
           "id": "01-hook",
@@ -23,13 +22,13 @@
             "And where is your child": 4.96
           }
         }
-      ]
+      ],
+      "duration": 8.24
     },
     {
       "frame": 2,
       "slug": "02-title",
       "start": 7.84,
-      "duration": 11.32,
       "lines": [
         {
           "id": "02-title",
@@ -46,13 +45,13 @@
             "one family app": 9.6
           }
         }
-      ]
+      ],
+      "duration": 11.32
     },
     {
       "frame": 3,
       "slug": "03-problem",
       "start": 18.76,
-      "duration": 15.28,
       "lines": [
         {
           "id": "03-problem",
@@ -69,13 +68,13 @@
             "unsupervised": 13.86
           }
         }
-      ]
+      ],
+      "duration": 15.28
     },
     {
       "frame": 4,
       "slug": "04-pain",
       "start": 33.64,
-      "duration": 11.64,
       "lines": [
         {
           "id": "04-pain",
@@ -91,13 +90,13 @@
             "almost ten percent": 8.24
           }
         }
-      ]
+      ],
+      "duration": 11.64
     },
     {
       "frame": 5,
       "slug": "05-shortcomings",
       "start": 44.88,
-      "duration": 12.85,
       "lines": [
         {
           "id": "05-shortcomings",
@@ -113,13 +112,13 @@
             "And parental apps": 10.0
           }
         }
-      ]
+      ],
+      "duration": 12.85
     },
     {
       "frame": 6,
       "slug": "06-concept",
       "start": 57.331,
-      "duration": 9.17,
       "lines": [
         {
           "id": "06-concept",
@@ -136,13 +135,13 @@
             "in one family-centred hub": 4.8
           }
         }
-      ]
+      ],
+      "duration": 9.17
     },
     {
       "frame": 7,
       "slug": "07-hardware",
       "start": 66.102,
-      "duration": 11.29,
       "lines": [
         {
           "id": "07-hardware",
@@ -158,40 +157,92 @@
             "and it stays synced": 7.64
           }
         }
-      ]
+      ],
+      "duration": 11.29
     },
     {
       "frame": 8,
-      "slug": "08-ai-child",
+      "slug": "08-demo",
       "start": 76.993,
-      "duration": 11.05,
       "lines": [
         {
-          "id": "08-ai-child",
+          "id": "08-demo-lead",
           "voice": "Puck",
-          "path": "assets/voice/08-ai-child.wav",
+          "path": "assets/voice/08-demo-lead.wav",
           "local_start": 0.35,
-          "seconds": 10.451,
+          "seconds": 4.48,
           "estimated": false,
           "cues": {
-            "Just say": 0.35,
-            "the AI agent finds": 2.38,
-            "The child app": 5.38,
-            "and parents set": 8.03
+            "Here it is": 0.67,
+            "one spoken command": 2.6
           }
         }
-      ]
+      ],
+      "media": "assets/media/voice-demo.mp4",
+      "media_start": 0.6,
+      "beats": [
+        {
+          "t": 0.8,
+          "label": "Voice assistant \u00b7 listening"
+        },
+        {
+          "t": 3.8,
+          "label": "\u201cBuka lampu\u201d \u00b7 turn on the lamp"
+        },
+        {
+          "t": 10.8,
+          "label": "Relay clicks \u00b7 lamp ON"
+        },
+        {
+          "t": 16.0,
+          "label": "\u201cTutup lampu lepas tu buka channel no. 1\u201d"
+        },
+        {
+          "t": 22.0,
+          "label": "Lamp OFF"
+        },
+        {
+          "t": 27.5,
+          "label": "\u201cLampu dimatikan dan Channel 1 dinyalakan\u201d"
+        },
+        {
+          "t": 33.2,
+          "label": "One outlet off, another on \u00b7 independent control"
+        }
+      ],
+      "duration": 38.5
     },
     {
       "frame": 9,
-      "slug": "09-benefits",
-      "start": 87.644,
-      "duration": 10.56,
+      "slug": "09-ai-child",
+      "start": 115.093,
       "lines": [
         {
-          "id": "09-benefits",
+          "id": "09-child",
           "voice": "Sulafat",
-          "path": "assets/voice/09-benefits.wav",
+          "path": "assets/voice/09-child.wav",
+          "local_start": 0.35,
+          "seconds": 10.52,
+          "estimated": false,
+          "cues": {
+            "That was Maya": 0.65,
+            "The child app": 3.16,
+            "screen time": 5.54,
+            "outlet permissions": 8.39
+          }
+        }
+      ],
+      "duration": 11.12
+    },
+    {
+      "frame": 10,
+      "slug": "10-benefits",
+      "start": 125.813,
+      "lines": [
+        {
+          "id": "10-benefits",
+          "voice": "Sulafat",
+          "path": "assets/voice/10-benefits.wav",
           "local_start": 0.35,
           "seconds": 9.96,
           "estimated": false,
@@ -203,55 +254,55 @@
             "and no rewiring": 8.54
           }
         }
-      ]
-    },
-    {
-      "frame": 10,
-      "slug": "10-sdg-esg",
-      "start": 97.804,
-      "duration": 23.74,
-      "lines": [
-        {
-          "id": "10a-sdg",
-          "voice": "Puck",
-          "path": "assets/voice/10a-sdg.wav",
-          "local_start": 0.35,
-          "seconds": 10.731,
-          "estimated": false,
-          "cues": {
-            "four S-D-Gs": 2.07,
-            "eleven": 3.08,
-            "three,": 5.18,
-            "seven,": 6.65,
-            "and twelve": 8.28
-          }
-        },
-        {
-          "id": "10b-esg",
-          "voice": "Sulafat",
-          "path": "assets/voice/10b-esg.wav",
-          "local_start": 11.281,
-          "seconds": 12.211,
-          "estimated": false,
-          "cues": {
-            "E-S-G pillars": 13.09,
-            "Environmental": 14.44,
-            "Social": 17.61,
-            "Governance": 19.78
-          }
-        }
-      ]
+      ],
+      "duration": 10.56
     },
     {
       "frame": 11,
-      "slug": "11-market",
-      "start": 121.146,
-      "duration": 11.65,
+      "slug": "11-sdg-esg",
+      "start": 135.973,
       "lines": [
         {
-          "id": "11-market",
+          "id": "11a-sdg",
           "voice": "Puck",
-          "path": "assets/voice/11-market.wav",
+          "path": "assets/voice/11a-sdg.wav",
+          "local_start": 0.35,
+          "seconds": 7.24,
+          "estimated": false,
+          "cues": {
+            "four S-D-Gs": 1.77,
+            "safer communities": 2.64,
+            "well-being": 3.92,
+            "clean energy": 4.72,
+            "responsible consumption": 5.67
+          }
+        },
+        {
+          "id": "11b-esg",
+          "voice": "Sulafat",
+          "path": "assets/voice/11b-esg.wav",
+          "local_start": 7.79,
+          "seconds": 8.44,
+          "estimated": false,
+          "cues": {
+            "E-S-G pillars": 9.51,
+            "less standby waste": 10.75,
+            "safer children": 12.4,
+            "open and secure": 13.73
+          }
+        }
+      ],
+      "duration": 16.48
+    },
+    {
+      "frame": 12,
+      "slug": "12-market",
+      "start": 152.053,
+      "lines": [
+        {
+          "id": "12-market",
+          "voice": "Puck",
+          "path": "assets/voice/12-market.wav",
           "local_start": 0.35,
           "seconds": 11.051,
           "estimated": false,
@@ -262,18 +313,41 @@
             "and parental-control": 8.39
           }
         }
-      ]
+      ],
+      "duration": 11.65
     },
     {
-      "frame": 12,
-      "slug": "12-evidence",
-      "start": 132.397,
-      "duration": 16.85,
+      "frame": 13,
+      "slug": "13-commercial",
+      "start": 163.304,
       "lines": [
         {
-          "id": "12-evidence",
+          "id": "13-commercial",
           "voice": "Puck",
-          "path": "assets/voice/12-evidence.wav",
+          "path": "assets/voice/13-commercial.wav",
+          "local_start": 0.35,
+          "seconds": 18.72,
+          "estimated": false,
+          "cues": {
+            "working families": 3.35,
+            "a kit": 6.33,
+            "one hundred and ninety-nine": 9.61,
+            "online marketplaces": 12.05,
+            "ten ringgit a month": 16.25
+          }
+        }
+      ],
+      "duration": 19.32
+    },
+    {
+      "frame": 14,
+      "slug": "14-evidence",
+      "start": 182.224,
+      "lines": [
+        {
+          "id": "14-evidence",
+          "voice": "Puck",
+          "path": "assets/voice/14-evidence.wav",
           "local_start": 0.35,
           "seconds": 16.251,
           "estimated": false,
@@ -286,18 +360,18 @@
             "iteration four": 13.5
           }
         }
-      ]
+      ],
+      "duration": 16.85
     },
     {
-      "frame": 13,
-      "slug": "13-ip",
-      "start": 148.848,
-      "duration": 7.93,
+      "frame": 15,
+      "slug": "15-ip",
+      "start": 198.675,
       "lines": [
         {
-          "id": "13-ip",
+          "id": "15-ip",
           "voice": "Sulafat",
-          "path": "assets/voice/13-ip.wav",
+          "path": "assets/voice/15-ip.wav",
           "local_start": 0.35,
           "seconds": 7.331,
           "estimated": false,
@@ -307,18 +381,18 @@
             "built on research": 4.84
           }
         }
-      ]
+      ],
+      "duration": 7.93
     },
     {
-      "frame": 14,
-      "slug": "14-close",
-      "start": 156.379,
-      "duration": 18.21,
+      "frame": 16,
+      "slug": "16-close",
+      "start": 206.206,
       "lines": [
         {
-          "id": "14a-close",
+          "id": "16a-close",
           "voice": "Sulafat",
-          "path": "assets/voice/14a-close.wav",
+          "path": "assets/voice/16a-close.wav",
           "local_start": 0.35,
           "seconds": 2.931,
           "estimated": false,
@@ -327,9 +401,9 @@
           }
         },
         {
-          "id": "14b-close",
+          "id": "16b-close",
           "voice": "Puck",
-          "path": "assets/voice/14b-close.wav",
+          "path": "assets/voice/16b-close.wav",
           "local_start": 3.431,
           "seconds": 2.691,
           "estimated": false,
@@ -338,9 +412,9 @@
           }
         },
         {
-          "id": "14c-close",
+          "id": "16c-close",
           "voice": "Sulafat",
-          "path": "assets/voice/14c-close.wav",
+          "path": "assets/voice/16c-close.wav",
           "local_start": 6.422,
           "seconds": 7.811,
           "estimated": false,
@@ -352,9 +426,9 @@
           }
         },
         {
-          "id": "14d-close",
+          "id": "16d-close",
           "voice": "Puck",
-          "path": "assets/voice/14d-close.wav",
+          "path": "assets/voice/16d-close.wav",
           "local_start": 14.533,
           "seconds": 1.931,
           "estimated": false,
@@ -362,7 +436,8 @@
             "Maya: home, handled.": 14.84
           }
         }
-      ]
+      ],
+      "duration": 18.21
     }
   ]
 }

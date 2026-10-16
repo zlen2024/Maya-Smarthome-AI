@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>Hye</title>
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,wght@0,700;0,900;1,900&family=Inter:wght@500&display=swap" rel="stylesheet" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      :root {
+        --bg1: #ff7a59;
+        --bg2: #ffb347;
+        --night: #2b1b3d;
+        --ink: #fff6e9;
+        --pop: #ffe066;
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--night); }
+      #root {
+        position: relative; width: 1920px; height: 1080px; overflow: hidden;
+        background: var(--night); color: var(--ink); font-family: "Fraunces", serif;
+      }
+      #shell { position: absolute; inset: 0; }
+      #bg { position: absolute; inset: 0; background: linear-gradient(135deg, var(--bg1), var(--bg2)); }
+      .blob { position: absolute; border-radius: 50%; opacity: 0.18; }
+      #b1 { width: 700px; height: 700px; left: -200px; top: -250px; background: var(--pop); }
+      #b2 { width: 520px; height: 520px; right: -160px; bottom: -200px; background: var(--ink); }
+      .scene {
+        position: absolute; inset: 0; display: flex; flex-direction: column;
+        align-items: center; justify-content: center; padding: 120px 160px; gap: 28px; text-align: center;
+      }
+      .giant { font-size: 400px; font-weight: 900; line-height: 0.9; letter-spacing: -12px; }
+      .big { font-size: 180px; font-weight: 900; line-height: 1; letter-spacing: -4px; }
+      .mid { font-size: 110px; font-weight: 700; line-height: 1.05; }
+      .sub { font-family: "Inter", sans-serif; font-size: 44px; font-weight: 500; letter-spacing: 4px; }
+      .row { display: flex; gap: 10px; justify-content: center; }
+      .letter { display: inline-block; font-size: 380px; font-weight: 900; line-height: 0.9; }
+      .em { color: var(--pop); font-style: italic; }
+      .dark { color: var(--night); }
+      #wave { display: inline-block; font-size: 300px; transform-origin: 70% 90%; }
+      .greet-stack { position: relative; width: 1400px; height: 260px; }
+      .greet {
+        position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+        font-size: 200px; font-weight: 900;
+      }
+      .greet small { font-family: "Inter", sans-serif; font-size: 36px; font-weight: 500; margin-left: 24px; opacity: 0.7; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="30" data-fps="30" data-width="1920" data-height="1080">
+      <div id="shell" class="clip" data-start="0" data-duration="30" data-track-index="0">
+        <div id="bg"></div>
+        <div id="b1" class="blob"></div>
+        <div id="b2" class="blob"></div>
+
+        <!-- S1 Hook 0-4.9 -->
+        <div id="s1" class="scene">
+          <div id="s1-word" class="giant">hye<span class="em">.</span></div>
+        </div>
+
+        <!-- S2 Build 4.9-11 -->
+        <div id="s2" class="scene">
+          <div class="row">
+            <span class="letter" id="l1">h</span><span class="letter em" id="l2">y</span><span class="letter" id="l3">e</span>
+          </div>
+          <div id="s2-sub" class="sub">THREE LETTERS. ONE BIG SMILE.</div>
+        </div>
+
+        <!-- S3 Build 11-18 -->
+        <div id="s3" class="scene">
+          <div id="s3-lead" class="sub">EVERYWHERE, SOMEONE IS SAYING</div>
+          <div class="greet-stack">
+            <div class="greet" id="g1">hello<small>EN</small></div>
+            <div class="greet" id="g2">hola<small>ES</small></div>
+            <div class="greet" id="g3">bonjour<small>FR</small></div>
+            <div class="greet" id="g4">ciao<small>IT</small></div>
+            <div class="greet" id="g5">salam<small>MY</small></div>
+            <div class="greet em" id="g6">hye!</div>
+          </div>
+        </div>
+
+        <!-- S4 Punch 18-24 -->
+        <div id="s4" class="scene">
+          <div id="s4-a" class="mid">one small word.</div>
+          <div id="s4-b" class="big">big <span class="em" id="warm">warmth</span>.</div>
+        </div>
+
+        <!-- S5 Resolve 24-30 -->
+        <div id="s5" class="scene">
+          <div id="s5-word" class="giant dark">hye <span id="wave">👋</span></div>
+          <div id="s5-sub" class="sub dark">SAY IT BACK.</div>
+        </div>
+      </div>
+    </div>
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      const HIDDEN = [
+        "#bg", "#s1-word", "#l1", "#l2", "#l3", "#s2-sub", "#s3-lead",
+        "#g1", "#g2", "#g3", "#g4", "#g5", "#g6", "#s4-a", "#s4-b", "#s5-word", "#s5-sub",
+      ];
+      tl.set(HIDDEN, { autoAlpha: 0 }, 0);
+
+      const show = (sel, t, from, dur = 0.8, ease = "power3.out") =>
+        tl.fromTo(
+          sel,
+          Object.assign({ autoAlpha: 0, x: 0, y: 0, scale: 1, rotation: 0 }, from),
+          { autoAlpha: 1, x: 0, y: 0, scale: 1, rotation: 0, filter: "blur(0px)", duration: dur, ease },
+          t,
+        );
+      const hide = (sel, t, to = {}, dur = 0.5) =>
+        tl.to(sel, Object.assign({ autoAlpha: 0, duration: dur, ease: "power2.in" }, to), t);
+
+      // ambient drift
+      tl.fromTo("#b1", { x: 0, y: 0 }, { x: 260, y: 140, duration: 30, ease: "sine.inOut" }, 0);
+      tl.fromTo("#b2", { x: 0, y: 0 }, { x: -220, y: -120, duration: 30, ease: "sine.inOut" }, 0);
+
+      // S1 — slam + shake
+      show("#s1-word", 0.2, { scale: 2.6, filter: "blur(20px)" }, 0.6, "expo.out");
+      tl.fromTo("#shell", { x: 0 }, { keyframes: [{ x: -14 }, { x: 12 }, { x: -6 }, { x: 0 }], duration: 0.3 }, 0.75);
+      tl.to("#s1-word", { scale: 1.06, duration: 3.4, ease: "sine.inOut" }, 0.9);
+      hide("#s1-word", 4.4, { scale: 0.6 });
+
+      // S2 — warm bg, letters bounce in
+      tl.fromTo("#bg", { autoAlpha: 0 }, { autoAlpha: 1, duration: 1.2, ease: "sine.inOut" }, 4.6);
+      ["#l1", "#l2", "#l3"].forEach((id, i) =>
+        show(id, 5.1 + i * 0.25, { y: -500, rotation: (i - 1) * 20 }, 0.9, "bounce.out"),
+      );
+      show("#s2-sub", 6.6, { y: 40 });
+      tl.to("#l2", { y: -40, duration: 0.35, yoyo: true, repeat: 5, ease: "sine.inOut" }, 7.6);
+      hide(["#l1", "#l2", "#l3", "#s2-sub"], 10.4, { y: 120 });
+
+      // S3 — greetings flip, land on hye!
+      show("#s3-lead", 11.0, { y: 30 });
+      ["#g1", "#g2", "#g3", "#g4", "#g5"].forEach((id, i) => {
+        const t = 11.5 + i * 0.9;
+        show(id, t, { y: 120 }, 0.35);
+        hide(id, t + 0.7, { y: -120 }, 0.25);
+      });
+      show("#g6", 16.1, { scale: 0.3, rotation: -12 }, 0.7, "back.out(2.5)");
+      hide(["#s3-lead", "#g6"], 17.5, { scale: 1.3 });
+
+      // S4 — punch
+      show("#s4-a", 18.2, { x: -200 });
+      show("#s4-b", 19.4, { scale: 0.7 }, 0.8, "back.out(1.8)");
+      tl.fromTo(
+        "#warm",
+        { textShadow: "0 0 0px rgba(255,224,102,0)" },
+        { textShadow: "0 0 60px rgba(255,224,102,0.9)", duration: 0.6, yoyo: true, repeat: 3, ease: "sine.inOut" },
+        20.4,
+      );
+      hide(["#s4-a", "#s4-b"], 23.4, { y: -80 });
+
+      // S5 — resolve with a wave
+      show("#s5-word", 24.2, { y: 200 }, 1.0, "expo.out");
+      tl.fromTo(
+        "#wave",
+        { rotation: 0 },
+        { keyframes: [{ rotation: 22 }, { rotation: -10 }, { rotation: 22 }, { rotation: -10 }, { rotation: 0 }], duration: 1.6, ease: "sine.inOut" },
+        25.2,
+      );
+      show("#s5-sub", 26.2, { y: 30 });
+      hide(["#s5-word", "#s5-sub", "#bg", "#b1", "#b2"], 29.0, {}, 0.9);
+
+      window.__timelines["main"] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>

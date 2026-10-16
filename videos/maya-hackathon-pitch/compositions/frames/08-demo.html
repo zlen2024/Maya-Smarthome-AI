@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <title>F8 · Live demo: voice command switches one outlet</title>
+  </head>
+  <body>
+    <template>
+      <style>
+        #root[data-composition-id="f08-demo"] { position: absolute; inset: 0; overflow: hidden; }
+        [data-composition-id="f08-demo"] .stage { position: absolute; inset: 0; overflow: hidden; background: #E5E4E2; font-family: "Montserrat", sans-serif; color: #0A0A0A; }
+        [data-composition-id="f08-demo"] .haze { position: absolute; left: -80px; top: -80px; width: 2080px; height: 1240px; background: radial-gradient(42% 48% at 96% -6%, rgba(10, 10, 10, 0.38) 0%, rgba(10, 10, 10, 0) 70%), radial-gradient(62% 62% at 80% 0%, rgba(83, 104, 120, 0.48) 0%, rgba(83, 104, 120, 0) 72%), radial-gradient(55% 60% at 0% 100%, rgba(255, 255, 255, 0.75) 0%, rgba(255, 255, 255, 0) 70%); }
+        [data-composition-id="f08-demo"] .label { font-family: "JetBrains Mono", monospace; font-size: 24px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #3E4F5C; }
+        [data-composition-id="f08-demo"] .pad { position: absolute; inset: 0; padding: 84px 120px; box-sizing: border-box; display: flex; flex-direction: column; gap: 20px; }
+        [data-composition-id="f08-demo"] .head { display: flex; align-items: baseline; gap: 22px; }
+        [data-composition-id="f08-demo"] .h1 { font-size: 52px; font-weight: 900; letter-spacing: -0.02em; line-height: 1.05; }
+        [data-composition-id="f08-demo"] .row { display: flex; gap: 40px; flex: 1; align-items: flex-start; }
+        [data-composition-id="f08-demo"] .screen { position: relative; width: 1160px; height: 652px; flex: none; border-radius: 26px; border: 4px solid rgba(10, 10, 10, 0.18); box-shadow: 0 30px 70px rgba(10, 10, 10, 0.22); overflow: hidden; background: #0A0A0A; }
+        [data-composition-id="f08-demo"] .rail { flex: 1; display: flex; flex-direction: column; gap: 14px; padding-top: 4px; }
+        [data-composition-id="f08-demo"] .beat { display: flex; gap: 14px; align-items: flex-start; padding: 14px 16px; border-radius: 16px; border: 3px solid rgba(10, 10, 10, 0.12); background: rgba(255, 255, 255, 0.55); box-sizing: border-box; opacity: 0; }
+        [data-composition-id="f08-demo"] .beat i { display: block; width: 14px; height: 14px; border-radius: 50%; background: #536878; flex: none; margin-top: 7px; }
+        [data-composition-id="f08-demo"] .beat span { font-size: 25px; font-weight: 700; line-height: 1.25; }
+        [data-composition-id="f08-demo"] .key { border-color: #536878; background: rgba(83, 104, 120, 0.12); }
+        [data-composition-id="f08-demo"] .note { margin-top: auto; font-family: "JetBrains Mono", monospace; font-size: 21px; line-height: 1.35; color: rgba(10, 10, 10, 0.66); }
+      </style>
+      <div data-hf-id="hf-4r1h" id="root" data-composition-id="f08-demo" data-width="1920" data-height="1080">
+        <div data-hf-id="hf-tan6" class="stage">
+          <div data-hf-id="hf-s723" class="haze" data-layout-allow-overflow=""></div>
+          <div data-hf-id="hf-tjp3" class="pad">
+            <div data-hf-id="hf-z992" class="head">
+              <div data-hf-id="hf-jpsc" class="label">Live demo · the real app</div>
+              <div data-hf-id="hf-uhkv" class="h1">One spoken command, one outlet</div>
+            </div>
+            <div data-hf-id="hf-thy4" class="row">
+              <div data-hf-id="hf-cdmk" class="screen">
+                <video data-hf-id="hf-9ak9" id="f08-demo-clip" src="assets/media/voice-demo.mp4" data-start="0.6" data-duration="37.4" data-track-index="0" style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;" muted playsinline></video>
+              </div>
+              <div data-hf-id="hf-qzq8" class="rail">
+                <div data-hf-id="hf-7lfe" class="beat b0"><i data-hf-id="hf-wt6k"></i><span data-hf-id="hf-kewd">Voice assistant · listening</span></div>
+                <div data-hf-id="hf-bjjf" class="beat b1"><i data-hf-id="hf-zeb8"></i><span data-hf-id="hf-c46e">“Buka lampu” · turn on the lamp</span></div>
+                <div data-hf-id="hf-2vnk" class="beat b2"><i data-hf-id="hf-y7e5"></i><span data-hf-id="hf-spzl">Relay clicks · lamp ON</span></div>
+                <div data-hf-id="hf-3nbd" class="beat b3"><i data-hf-id="hf-ylp6"></i><span data-hf-id="hf-30s5">“Tutup lampu lepas tu buka channel no. 1”</span></div>
+                <div data-hf-id="hf-uzfi" class="beat b4"><i data-hf-id="hf-0l8b"></i><span data-hf-id="hf-ifei">Lamp OFF</span></div>
+                <div data-hf-id="hf-25l6" class="beat b5 key"><i data-hf-id="hf-0zjc"></i><span data-hf-id="hf-v3wg">“Lampu dimatikan dan Channel 1 dinyalakan”</span></div>
+                <div data-hf-id="hf-sqkp" class="beat b6 key"><i data-hf-id="hf-zsm9"></i><span data-hf-id="hf-804f">One outlet off, another on · independent control</span></div>
+                <div data-hf-id="hf-m1gv" class="note">Unedited screen recording of the Maya app driving the 3-channel smart extension.</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- The clip's own sound is mounted at the root in index.html so it joins the voiceover group
+           and the music bed ducks under it like any other narration. -->
+      <script>
+        (function () {
+          var ID = "f08-demo";
+          var DUR = 38.5;
+          var all = document.querySelectorAll('[data-composition-id="' + ID + '"]');
+          var R = all[all.length - 1];
+          function q(s) { return R.querySelector(s); }
+          var tl = gsap.timeline({ paused: true });
+          function rise(el, at, o) {
+            o = o || {};
+            tl.fromTo(el, { opacity: 0, x: o.x || 0, y: o.y == null ? 36 : o.y, scale: o.s || 1 }, { opacity: 1, x: 0, y: 0, scale: 1, duration: o.d || 0.5, ease: o.e || "power3.out" }, at);
+          }
+
+          tl.fromTo(q(".stage"), { opacity: 0, filter: "blur(10px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.45, ease: "power2.out" }, 0);
+          tl.fromTo(q(".haze"), { x: 0, y: 0 }, { x: -60, y: 30, duration: DUR, ease: "none" }, 0);
+          rise(q(".label"), 0.15, { x: -24, y: 0, d: 0.45 });
+          rise(q(".h1"), 0.3, { y: 26, d: 0.5 });
+          rise(q(".screen"), 0.35, { y: 40, s: 0.98, d: 0.6 });
+          rise(q(".note"), 1.2, { y: 14, d: 0.45 });
+
+          // Beat rail — each caption lands on its moment in the recording (clip time + 0.6s lead-in).
+          var beats = [0.8, 3.8, 10.8, 16.0, 22.0, 27.5, 33.2];
+          beats.forEach(function (t, i) {
+            var el = q(".b" + i);
+            rise(el, t, { x: 26, y: 0, d: 0.42 });
+            tl.fromTo(el.querySelector("i"), { scale: 0.6, opacity: 0.4 }, { scale: 1, opacity: 1, duration: 0.3, ease: "power2.out", immediateRender: false }, t + 0.1);
+          });
+
+          window.__timelines["f08-demo"] = tl;
+        })();
+      </script>
+    </template>
+  </body>
+</html>

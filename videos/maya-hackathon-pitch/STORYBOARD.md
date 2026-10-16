@@ -1,13 +1,13 @@
 ---
 format: 1920x1080
-duration: 174.6s
+duration: 224.4s
 message: "Maya turns an ordinary extension socket into a family-centred AI home that saves power and keeps children safe while parents work."
-arc: Hook → Title & objectives → Problem → Shortcomings → Solution concept → Product (hardware, AI + child app) → Benefits → SDG & ESG → Market → Evidence → IP & research → X-factor close
+arc: Hook → Title & objectives → Problem → Shortcomings → Solution concept → Product (hardware, live demo, child app) → Benefits → SDG & ESG → Market → Commercial opportunity → Evidence → IP & research → X-factor close
 audience: hackathon judges
 mode: collaborative
-segments: "Intro 0:00–0:19 (11%) · Contents 0:19–2:36 (79%) · Conclusion 2:36–2:55 (10%)"
+segments: "Intro 0:00–0:19 (9%) · Contents 0:19–3:26 (83%) · Conclusion 3:26–3:44 (8%)"
 music: "warm, hopeful modern tech underscore; soft piano and airy synth pads; gentle pulse; rises into an uplifting final lift"
-design: frame.md (Obsidian Chrome light theme — Alabaster Grey #E5E4E2 canvas, Onyx #0A0A0A ink, Blue Slate #536878 accent, soft chrome gradient; user feedback 2026-09-15)
+design: frame.md (Obsidian Chrome light theme — Alabaster Grey #E5E4E2 canvas, Onyx #0A0A0A ink, Blue Slate #536878 accent, soft chrome gradient)
 ---
 
 ## Frame 1 — Hook: 3 P.M.
@@ -15,8 +15,8 @@ design: frame.md (Obsidian Chrome light theme — Alabaster Grey #E5E4E2 canvas,
 - type: hook
 - segment: introduction
 - scene: A clock ticks to 3:00 PM; two questions snap in beside a glowing outlet and a location pin
+- start: 0:00 (0.00s)
 - duration: 8.24s
-- poster: 6s
 - transition_in: cut
 - status: animated
 - blueprint: kinetic-type-beats
@@ -25,260 +25,268 @@ design: frame.md (Obsidian Chrome light theme — Alabaster Grey #E5E4E2 canvas,
 - voice: Sulafat
 - src: compositions/frames/01-hook.html
 
-Cold open in the parent's own language, no product vocabulary. Beat 1 "3:00 PM" huge
-monospace clock; beat 2 "Is the TV still on?" with an outlet glyph glowing cyan; beat 3
-"Where is your child?" with a pulsing map pin. Hooks the judges in under 10s.
+Cold open in the parent's own language, no product vocabulary. Hooks the judges inside 10s.
 
 ## Frame 2 — Title, objectives & outline
 
 - type: product_intro
 - segment: introduction
 - scene: Maya logo blooms; full project title, Project ID CBN8426079 and four objective chips assemble
+- start: 0:08 (7.84s)
 - duration: 11.32s
-- poster: 9s
 - transition_in: crossfade
 - status: animated
 - blueprint: logo-assemble-lockup
 - rules: spring-pop-entrance, waterfall-entry
-- voiceover: "This is MAYA — a family-centred AIoT ecosystem for smarter and safer home management. One smart socket, one AI assistant, one family app."
+- voiceover: "This is Maya — a family-centred A-I-o-T ecosystem for smarter and safer home management. One smart socket, one AI assistant, one family app."
 - voice: Puck
 - src: compositions/frames/02-title.html
 
-States the official title verbatim (guideline: title, core objectives, brief outline).
-Objective chips from the report: ① independent outlet control ② AI voice & chat assistant
-③ child location & screen-time tracking ④ secure Open API. A thin outline rail along the
-bottom: Problem · Solution · Impact · Proof.
+Guideline requirement: project title, core objectives, brief outline.
 
 ## Frame 3 — The problem: parents are stretched
 
 - type: pain_point
 - segment: contents
 - scene: Two hero stats count up — 56.6% women in the workforce, 80% of children 2h+ unsupervised
+- start: 0:19 (18.76s)
 - duration: 15.28s
-- poster: 10s
-- transition_in: wipe
+- transition_in: crossfade
 - status: animated
 - blueprint: dataviz-countup
 - rules: counting-dynamic-scale, stat-bars-and-fills
-- voiceover: "Malaysian women's workforce participation just hit a record 56.6 percent. In our survey of 73 working parents, 80 percent said their children spend two hours or more a day unsupervised."
+- voiceover: "Malaysian women's workforce participation just hit a record fifty-six point six percent. In our survey of seventy-three working parents, eighty percent said their children spend two hours or more a day unsupervised."
 - voice: Sulafat
 - src: compositions/frames/03-problem.html
 
-Sources on screen: "DOSM, Q4 2025" and "MAYA survey, n=73 working parents, Klang Valley".
-Split frame: stat left, stat right; a day-timeline bar fills to show the unsupervised window.
+Sources on screen: DOSM Q4 2025 and the project's own 73-parent survey.
 
 ## Frame 4 — The problem: app fatigue & wasted power
 
 - type: pain_point
 - segment: contents
-- scene: App icons pile up around a phone (70% app fatigue); a standby meter glows at ~10%
+- scene: App tiles pile up around a phone (70% app fatigue); a standby meter reads ~10%
+- start: 0:34 (33.64s)
 - duration: 11.64s
-- poster: 8s
 - transition_in: crossfade
 - status: animated
 - blueprint: overwhelm-surround
 - rules: depth-scatter-assemble, counting-dynamic-scale
-- voiceover: "Parents juggle separate apps — 70 percent feel app fatigue — while devices on standby quietly waste almost ten percent of home electricity."
+- voiceover: "Parents juggle separate apps — seventy percent feel app fatigue — while devices on standby quietly waste almost ten percent of home electricity."
 - voice: Sulafat
 - src: compositions/frames/04-pain.html
 
-Sources: "MAYA survey, n=73" and "Lawrence Berkeley National Laboratory, cited by US DOE".
-Generic app tiles (plug, map, chat, camera, timer) — no real brand logos.
+Second pain: fragmentation plus the energy angle that carries SDG 7 and 12 later.
 
 ## Frame 5 — Current shortcomings
 
 - type: pain_point
 - segment: contents
-- scene: Comparison table assembles row by row — smart plugs, voice assistants, parental apps vs what families need
+- scene: Comparison table assembles row by row; the MAYA row stays a question mark
+- start: 0:45 (44.88s)
 - duration: 12.85s
-- poster: 11s
 - transition_in: crossfade
 - status: animated
 - blueprint: grid-card-assemble
-- rules: waterfall-entry, css-marker-patterns
+- rules: waterfall-entry, spring-pop-entrance
 - voiceover: "Today's options fall short. Most smart plugs handle a single socket. Voice assistants follow commands, but aren't linked to your child's screen time or location. And parental apps rarely connect to the home."
 - voice: Puck
 - src: compositions/frames/05-shortcomings.html
 
-Columns: Per-outlet control · AI understanding · Parental tools. Rows: Smart plugs (SHAS-style),
-Voice assistants (Alexa), LLM agents (IoTGPT), Parental apps — ✗/partial marks from the
-report's case-study comparison. The MAYA row stays hidden here; it lands in Frame 6.
+Guideline requirement: why existing market solutions fall short.
 
 ## Frame 6 — The potential solution: one family hub
 
 - type: product_intro
 - segment: contents
-- scene: Home, Parent and Child nodes orbit and connect into a glowing MAYA hub
+- scene: Home, Parent and Child nodes connect into a glowing MAYA hub; the missing row lands ✓✓✓
+- start: 0:57 (57.33s)
 - duration: 9.17s
-- poster: 8s
 - transition_in: crossfade
 - status: animated
 - blueprint: constellation-hub
-- rules: orbit-3d-entry, svg-path-draw
-- voiceover: "MAYA connects all three — home, parent and child — in one family-centred hub that can act on context."
+- rules: spring-pop-entrance, svg-path-draw
+- voiceover: "Maya connects all three — home, parent and child — in one family-centred hub that can act on context."
 - voice: Sulafat
 - src: compositions/frames/06-concept.html
 
-The conceptual framework before the product: context flows (screen time, location, device
-state) drawn as lines into the hub; the comparison table's missing MAYA row ✓✓✓ flashes in.
+The conceptual framework, before any product detail.
 
 ## Frame 7 — Your product: the smart extension
 
 - type: feature_showcase
 - segment: contents
-- scene: The 3-channel ESP32 socket; outlets light one by one; BLE setup → cloud → family phones pan
+- scene: Block diagram assembles; three outlets switch on one by one; camera pans to setup, cloud, apps
+- start: 1:06 (66.10s)
 - duration: 11.29s
-- poster: 9s
 - transition_in: crossfade
 - status: animated
 - blueprint: spatial-pan-stations
-- rules: svg-path-draw, press-release-spring
-- voiceover: "An ESP32 three-channel smart extension switches each outlet independently. Set it up over Bluetooth once, and it stays synced with every family phone in real time."
+- rules: viewport-change, svg-path-draw
+- voiceover: "An E-S-P thirty-two, three-channel smart extension switches each outlet independently. Set it up over Bluetooth once, and it stays synced with every family phone in real time."
 - voice: Puck
 - src: compositions/frames/07-hardware.html
 
-Stations: [Smart Extension — CH1 TV · CH2 Decoder · CH3 Wi-Fi] → [Bluetooth setup] →
-[Cloud server — FastAPI on Fly.io] → [Parent & Child apps]. Built from the report's
-hardware block diagram and architecture diagram.
+How it works: ESP32, 3-channel relay, BLE provisioning, live WebSocket sync.
 
-## Frame 8 — Your product: @maya AI + child app
+## Frame 8 — Live demo: one spoken command, one outlet
 
 - type: feature_showcase
 - segment: contents
-- scene: Chat types "@maya turn off the TV" → agent tool call → CH1 switches off; child app shows screen time, location, permissions
-- duration: 11.05s
-- poster: 7s
+- scene: Unedited screen recording: voice command → Maya processes → lamp switches, other channel unaffected
+- start: 1:17 (76.99s)
+- duration: 38.50s
 - transition_in: crossfade
 - status: animated
-- blueprint: prompt-type-submit-generate
-- rules: discrete-text-sequence, video-text-pivot
-- voiceover: "Just say, 'Maya, turn off the TV' — the AI agent finds the right outlet and switches it. The child app shares screen time and location, and parents set which outlets each child may use."
+- blueprint: device-surface-showcase
+- rules: (real footage; caption rail on the cue beats)
+- voiceover: "Here it is on the real hardware — one spoken command, one outlet."
 - voice: Puck
-- src: compositions/frames/08-ai-child.html
-- asset: assets/media/ui-dashboard.png (real app Home screens, user-supplied)
+- media: assets/media/voice-demo.mp4 (user recording, starts 0.6s into the scene)
+- src: compositions/frames/08-demo.html
 
-Left: phone with the real app demo (assets/media/app-demo.mp4) or chat recreation; the
-agent reply "Done — I turned off the TV." Right: child card — screen time 1h 42m / 2h limit
-ring, last location pin, outlet permission toggles.
+The real app on the real hardware (user recording, 3:37–4:15). Beat rail marks: listening, “Buka lampu”, relay click and lamp ON, “tutup lampu lepas tu buka channel no. 1”, lamp OFF, and the reply proving one outlet off while another goes on. The clip's own sound carries the scene; the music bed ducks under it.
 
-## Frame 9 — User benefits
+## Frame 9 — The child companion app
+
+- type: feature_showcase
+- segment: contents
+- scene: Child card: screen-time ring counts to 1h 42m, last known location, outlet permissions toggle
+- start: 1:55 (115.09s)
+- duration: 11.12s
+- transition_in: crossfade
+- status: animated
+- blueprint: grid-card-assemble
+- rules: stat-bars-and-fills, spring-pop-entrance
+- voiceover: "That was Maya's own voice assistant. The child app adds the other half: screen time, last known location, and the outlet permissions parents set."
+- voice: Sulafat
+- src: compositions/frames/09-ai-child.html
+
+The other half of the ecosystem, after the demo has proved the voice control.
+
+## Frame 10 — User benefits
 
 - type: benefit_highlight
 - segment: contents
-- scene: Five benefit cards stack in: one app, hands-free, peace of mind, less wasted power, no rewiring
+- scene: Five benefit cards land on their spoken phrases
+- start: 2:06 (125.81s)
 - duration: 10.56s
-- poster: 8s
 - transition_in: crossfade
 - status: animated
 - blueprint: grid-card-assemble
 - rules: spring-pop-entrance, ambient-glow-bloom
 - voiceover: "One app instead of many. Hands-free control. Peace of mind at work. Less wasted power — and no rewiring."
 - voice: Sulafat
-- src: compositions/frames/09-benefits.html
+- src: compositions/frames/10-benefits.html
 
-Each card lands on its spoken phrase.
+Guideline requirement: practical advantages for the user.
 
-## Frame 10 — Impact: SDGs & ESG, equal weight
+## Frame 11 — Impact: SDGs & ESG, equal weight
 
 - type: benefit_highlight
 - segment: contents
-- scene: Split stage of equal halves — four SDG tiles (11, 3, 7, 12) left, three ESG pillar tiles (E, S, G) right, same card style, each landing on its spoken word
-- duration: 23.74s
-- poster: 13s
-- transition_in: wipe
+- scene: Four SDG tiles, then three ESG tiles in identical styling, side by side
+- start: 2:16 (135.97s)
+- duration: 16.48s
+- transition_in: crossfade
 - status: animated
 - blueprint: grid-card-assemble
 - rules: waterfall-entry, spring-pop-entrance
-- voiceover: "MAYA delivers on four SDGs: 11, safer communities; 3, well-being; 7, clean energy; and 12, responsible consumption. And on all three ESG pillars: Environmental, less standby waste; Social, safer children; Governance, secure and open by design."
-- voice: Puck (SDGs) + Sulafat (ESG)
-- src: compositions/frames/10-sdg-esg.html
+- voiceover: "Maya delivers on four S-D-Gs: safer communities, well-being, clean energy, responsible consumption."
+- voice: Puck
+- voiceover: "And on all three E-S-G pillars: less standby waste, safer children, open and secure governance."
+- voice: Sulafat
+- src: compositions/frames/11-sdg-esg.html
 
-ESG is treated exactly like the SDGs (storyboard feedback): two matching panels with
-identical headers ("UN Sustainable Development Goals" · "ESG Pillars"), identical tile size,
-glow and entrance, and equal screen time in the voiceover. SDG tiles in official goal colours
-with number + short name (no UN emblem): SDG 11 Sustainable Cities & Communities (primary,
-marked "Primary") · SDG 3 Good Health & Well-being · SDG 7 Affordable & Clean Energy ·
-SDG 12 Responsible Consumption & Production. ESG tiles, letter + name + one proof line:
-E — Environmental: cuts standby power, responsible energy use · S — Social: child safety,
-working-parent well-being, affordable access · G — Governance: Apache 2.0 open source,
-JWT + bcrypt + hashed API keys, parent-set permissions.
+Shortened at the user's request to make room for the demo and the commercial section; ESG keeps the same tile treatment as the SDGs.
 
-## Frame 11 — Market value & opportunity
+## Frame 12 — Market value & opportunity
 
 - type: social_proof
 - segment: contents
-- scene: Three growth bars rise with count-up values — smart homes, smart plugs, parental-control software
+- scene: Three growth bars rise with count-up values and their sources
+- start: 2:32 (152.05s)
 - duration: 11.65s
-- poster: 11s
 - transition_in: crossfade
 - status: animated
 - blueprint: dataviz-countup
 - rules: counting-dynamic-scale, stat-bars-and-fills
-- voiceover: "The market is ready. Smart homes are heading to 450 billion US dollars by 2032, smart plugs to 30 billion, and parental-control software to over 4 billion."
+- voiceover: "The market is ready. Smart homes are heading to four hundred and fifty billion US dollars by twenty thirty-two, smart plugs to thirty billion, and parental-control software to over four billion."
 - voice: Puck
-- src: compositions/frames/11-market.html
+- src: compositions/frames/12-market.html
 
-On screen with sources: Global smart home US$213.7B (2025) → US$450.2B (2032), CAGR 11.8%,
-APAC fastest (~17%) — MarketsandMarkets 2026 · Smart plugs US$3.5B (2024) → US$30.5B (2034),
-CAGR 24.1% — Market.us 2025 · Parental control software US$1.57B (2025) → US$4.12B (2034),
-CAGR 11.2% — Fortune Business Insights 2026 · footnote: ASEAN smart homes US$5.29B → US$12.56B
-(2031) — Mordor Intelligence 2026.
+Third-party market figures, one firm per claim, source on screen.
 
-## Frame 12 — Evidence, social proof & active development
+## Frame 13 — Commercial opportunity: buyers, price, channel
 
 - type: social_proof
 - segment: contents
-- scene: Survey rings (84%, 82%), a 40/40 tests-passed badge, a cost card, then an iteration timeline lights up to "Iteration 4 — in progress"
+- scene: Three cards: who buys, the kit at a proposed RM199 with an optional RM5/month plan, and the sales channels
+- start: 2:43 (163.30s)
+- duration: 19.32s
+- transition_in: crossfade
+- status: animated
+- blueprint: grid-card-assemble
+- rules: counting-dynamic-scale, spring-pop-entrance
+- voiceover: "If we take this to market, the natural buyers would be working families with school-age children. Our suggestion is a kit — the three-channel socket with the app included — at around one hundred and ninety-nine ringgit, sold through online marketplaces and school and community partners, with an optional cloud plan at ten ringgit a month, or a hundred ringgit a year."
+- voice: Puck
+- src: compositions/frames/13-commercial.html
+
+Guideline requirement: target users, proposed pricing and route to market. Pricing is labelled as a proposal and sits against the ≈RM95 hardware cost shown in the next scene.
+
+## Frame 14 — Evidence, social proof & active development
+
+- type: social_proof
+- segment: contents
+- scene: Survey rings, 40/40 tests, real cost, the prototype photo, and the iteration strip
+- start: 3:02 (182.22s)
 - duration: 16.85s
-- poster: 15s
 - transition_in: crossfade
 - status: animated
 - blueprint: dataviz-countup
-- rules: stat-bars-and-fills, counting-dynamic-scale, svg-path-draw
-- voiceover: "84 percent of parents find smart extensions useful, and 82 percent would install a child monitoring app. Our prototype passed all 40 tests on about 95 ringgit of hardware — and development is active: iteration four, for sensors and hubs, is underway."
+- rules: stat-bars-and-fills, counting-dynamic-scale
+- voiceover: "Eighty-four percent of parents find smart extensions useful, and eighty-two percent would install a child monitoring app. Our prototype passed all forty tests on about ninety-five ringgit of hardware — and development is active: iteration four, for sensors and hubs, is underway."
 - voice: Puck
-- src: compositions/frames/12-evidence.html
-- asset: assets/media/user-photo-2026-09-15.jpeg (prototype at UNISEL showcase, user-supplied)
+- src: compositions/frames/14-evidence.html
 
-Also on screen: "62% prefer AI automation", "≈RM2/month hosting · live on Fly.io (Singapore)",
-"UAT with a real client user". Active-development strip (storyboard feedback), drawn left to
-right as a progress line: Iteration 1 Hardware control ✓ · 2 Profiles & permissions ✓ ·
-3 AI agent & Open API ✓ · 3.5 Voice assistant & screen-time automation ✓ ·
-4 Device Protocol v2 — self-describing devices, sensors, hubs (ESP-NOW) — in progress (pulsing).
+Guideline requirement: evidence, real-world example, implementation cost.
 
-## Frame 13 — IP & research
+## Frame 15 — IP & research
 
 - type: social_proof
 - segment: contents
-- scene: Apache 2.0 license card with the GitHub repo; UNISEL research badge
+- scene: Apache 2.0 licence card with the repo, and the UNISEL research card
+- start: 3:19 (198.68s)
 - duration: 7.93s
-- poster: 5s
 - transition_in: crossfade
 - status: animated
 - blueprint: titlecard-reveal
-- rules: ambient-glow-bloom
-- voiceover: "MAYA is open source under the Apache 2.0 license, built on research at Universiti Selangor."
+- rules: ambient-glow-bloom, svg-path-draw
+- voiceover: "Maya is open source under the Apache two point zero license, built on research at Universiti Selangor."
 - voice: Sulafat
-- src: compositions/frames/13-ip.html
+- src: compositions/frames/15-ip.html
 
-Card text: "Open source · Apache License 2.0 · github.com/zlen2024/Maya-Smarthome-AI" and
-"Research: Final Year Project, Universiti Selangor (UNISEL) · survey of 73 working parents".
-No patent claims.
+Guideline requirement: IP status and research base. No patent claims.
 
-## Frame 14 — Conclusion: the X-factor
+## Frame 16 — Conclusion: the X-factor
 
 - type: cta
 - segment: conclusion
-- scene: The whole family hub glows; three words land — Affordable · Intelligent · Open; Maya logo lockup with title and Project ID
+- scene: Statement beats, then the logo lockup with title, Project ID and thank you
+- start: 3:26 (206.21s)
 - duration: 18.21s
-- poster: 14s
 - transition_in: crossfade
 - status: animated
 - blueprint: kinetic-type-beats
 - rules: kinetic-beat-slam, logo-assemble-lockup
-- voiceover: "Other smart homes switch things on and off. MAYA understands your family. Affordable, intelligent and open — so every working parent can breathe easy, knowing home is in good hands. MAYA: home, handled."
-- voice: Sulafat + Puck, alternating
-- src: compositions/frames/14-close.html
+- voiceover: "Other smart homes switch things on and off."
+- voice: Sulafat
+- voiceover: "Maya understands your family."
+- voice: Puck
+- voiceover: "Affordable, intelligent and open — so every working parent can breathe easy, knowing home is in good hands."
+- voice: Sulafat
+- voiceover: "Maya: home, handled."
+- voice: Puck
+- src: compositions/frames/16-close.html
 
-X-factor: the only smart home here that joins per-outlet power, an AI agent and child safety.
-Ends on the logo, full title, Project ID CBN8426079 and "Thank you" — music lifts and resolves.
+The standout point: other smart homes switch things on and off; Maya understands the family.

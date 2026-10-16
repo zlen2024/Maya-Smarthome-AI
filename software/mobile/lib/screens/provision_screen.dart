@@ -253,7 +253,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
 
       setState(() {
         _connecting = false;
-        _nameCtrl.text = 'Smart Socket ${_deviceId!.split('-').last.toUpperCase()}';
+        _nameCtrl.text = 'Maya Device ${_deviceId!.split('-').last.toUpperCase()}';
       });
     } catch (e) {
       setState(() {
@@ -760,7 +760,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
                   Text('No devices found', style: tt.bodyMedium?.copyWith(color: cs.onSurfaceVariant)),
                   const SizedBox(height: 4),
                   Text(
-                    'Ensure your Smart Socket is in BLE setup mode.',
+                    'Ensure your Maya device is in BLE setup mode.',
                     style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
                     textAlign: TextAlign.center,
                   ),
@@ -780,7 +780,7 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
                   child: Icon(Icons.settings_remote_rounded, color: cs.primary, size: 20),
                 ),
                 title: Text(
-                  name == 'Maya-Setup' ? 'Maya Smart Socket (Setup Mode)' : name,
+                  name == 'Maya-Setup' ? 'Maya device (Setup Mode)' : name,
                   style: tt.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
                 ),
                 subtitle: Text(

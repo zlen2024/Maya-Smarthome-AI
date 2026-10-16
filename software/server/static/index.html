@@ -4,9 +4,16 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Maya Smart Home</title>
-  <link rel="icon" type="image/png" href="/static/media/favicon.png">
+  <script>
+    // The FastAPI landing route is `/`, while this file also remains usable
+    // when opened directly from disk. Only the server route needs this base.
+    if (location.protocol !== 'file:' && (location.pathname === '/' || location.pathname === '/index.html')) {
+      document.write('<base href="/static/">');
+    }
+  </script>
+  <link rel="icon" type="image/png" href="media/favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=Press+Start+2P&family=Special+Elite&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -795,140 +802,220 @@
   </style>
   <style>
     /* ============================================================
-       SCROLL LANDING  (light hero -> dark aurora story)
-       Scoped under .landing / .ls-* so nothing leaks to the app.
+       MAYA SIGNAL // RETRO PIXEL LANDING
+       A code-built creature-feature mood: no monster artwork or film IP.
+       Scoped under .landing / .ls-* so the authenticated app is unchanged.
        ============================================================ */
-    :root{ --cyan:#22d3ee; --cyan-deep:#0891b2; --violet:#6d28d9; }
+    :root{ --cyan:#72f6ff; --cyan-deep:#0aa2b8; --violet:#7c3aed; --amber:#ffb547; --cream:#f4e7c3; --ink:#071015; }
     html{ scroll-behavior:smooth; }
+    .landing{ width:100vw; margin-left:calc(50% - 50vw); margin-top:-2rem; margin-bottom:-2rem; background:#071015; isolation:isolate; }
+    .landing .ls-sec{ position:relative; padding:7rem 1.5rem; overflow:hidden; }
+    .landing .ls-inner{ max-width:1180px; margin:0 auto; position:relative; z-index:4; }
+    .landing::after{ content:""; position:fixed; inset:0; z-index:30; pointer-events:none; opacity:.18; mix-blend-mode:soft-light;
+      background-image:repeating-linear-gradient(0deg,transparent 0 3px,rgba(255,255,255,.055) 3px 4px); }
 
-    .landing{ width:100vw; margin-left:calc(50% - 50vw); margin-top:-2rem; margin-bottom:-2rem; }
-    .landing .ls-sec{ position:relative; padding:6.5rem 1.5rem; overflow:hidden; }
-    .landing .ls-inner{ max-width:1180px; margin:0 auto; position:relative; z-index:2; }
-
-    /* ---- Light hero ---- */
-    .ls-hero{
-      background:
-        radial-gradient(1200px 620px at 82% -12%, rgba(34,211,238,.20), transparent 60%),
-        radial-gradient(950px 520px at -5% 105%, rgba(139,92,246,.16), transparent 55%),
-        linear-gradient(180deg,#eef1fb 0%, #e7ebff 50%, #dfe6ff 100%);
-      background-color:#e9edfb; color:#0b1020; padding-top:5rem; padding-bottom:6.5rem;
-    }
-    .ls-hero-grid{ display:grid; grid-template-columns:1.1fr .9fr; gap:3rem; align-items:center; }
-    .ls-eyebrow{ font-family:'Outfit',sans-serif; letter-spacing:.28em; text-transform:uppercase;
-      font-size:.72rem; font-weight:700; color:#5b6480; margin-bottom:1.3rem; }
-    .ls-hero h1{ font-family:'Outfit',sans-serif; font-weight:800; letter-spacing:-.03em; line-height:.96;
-      font-size:clamp(3rem,7vw,5.6rem); color:#0b1020; margin:0 0 1.4rem; }
-    .ls-hero h1 em{ font-style:italic; font-weight:500;
-      background:linear-gradient(120deg,#0891b2,#6d28d9); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
-    .ls-sub{ font-size:1.12rem; line-height:1.6; color:#3a4260; max-width:33rem; margin-bottom:2.2rem; }
+    /* Hero: giant broadcast typography over a hand-coded pixel skyline. */
+    .ls-hero{ min-height:calc(100svh - 80px); display:grid; align-items:center; color:var(--cream); padding-top:4.5rem; padding-bottom:3.5rem;
+      background:radial-gradient(circle at 72% 30%,rgba(114,246,255,.13),transparent 23%),radial-gradient(circle at 16% 13%,rgba(255,181,71,.11),transparent 28%),linear-gradient(155deg,#13292b 0%,#081317 52%,#05090c 100%); }
+    .ls-hero::before{ content:""; position:absolute; inset:-15%; z-index:1; opacity:.35; pointer-events:none;
+      background:repeating-radial-gradient(ellipse at 50% 110%,transparent 0 28px,rgba(114,246,255,.13) 29px 30px); transform:perspective(540px) rotateX(66deg) translateY(29%); }
+    .ls-hero-canvas{ position:absolute; inset:0; width:100%; height:100%; z-index:0; image-rendering:pixelated; opacity:.92; }
+    .ls-hero-vignette{ position:absolute; inset:0; z-index:2; pointer-events:none; background:radial-gradient(ellipse at center,transparent 40%,rgba(0,0,0,.72) 100%); }
+    .ls-film-scratch{ position:absolute; top:0; bottom:0; left:18%; width:1px; z-index:3; background:rgba(255,255,255,.2); opacity:.24; box-shadow:41vw 0 rgba(255,255,255,.08),63vw 0 rgba(255,255,255,.14); animation:ls-scratch 2.8s steps(2) infinite; pointer-events:none; }
+    @keyframes ls-scratch{ 0%,100%{ transform:translateX(0); opacity:.08 } 37%{ transform:translateX(7px); opacity:.3 } 39%{ transform:translateX(-4px); opacity:.06 } }
+    .ls-bulletin{ position:absolute; top:1.15rem; left:50%; z-index:5; transform:translateX(-50%) rotate(-1deg); width:min(760px,92vw); overflow:hidden;
+      border:2px solid rgba(244,231,195,.55); background:rgba(6,13,15,.8); color:var(--cream); box-shadow:8px 8px 0 rgba(0,0,0,.28); font:400 .72rem/1 'Special Elite',serif; letter-spacing:.15em; text-transform:uppercase; }
+    .ls-bulletin-track{ width:max-content; padding:.62rem 0; animation:ls-marquee 20s linear infinite; }
+    .ls-bulletin-track span{ margin-right:4rem; }
+    @keyframes ls-marquee{ to{ transform:translateX(-50%); } }
+    .ls-hero-grid{ display:grid; grid-template-columns:1.12fr .88fr; gap:3rem; align-items:center; }
+    .ls-hero-copy{ position:relative; z-index:4; }
+    .ls-eyebrow{ display:inline-flex; align-items:center; gap:.65rem; font-family:'Press Start 2P',monospace; letter-spacing:.12em; text-transform:uppercase; font-size:.58rem; color:var(--cyan); margin-bottom:1.45rem; padding:.58rem .72rem; border:1px solid rgba(114,246,255,.35); background:rgba(6,21,24,.72); box-shadow:4px 4px 0 rgba(114,246,255,.13); }
+    .ls-eyebrow::before{ content:""; width:7px; height:7px; background:var(--amber); box-shadow:0 0 14px var(--amber); animation:ls-blink 1.1s steps(1) infinite; }
+    @keyframes ls-blink{ 50%{ opacity:.18; } }
+    .ls-hero h1{ max-width:760px; margin:0 0 1.3rem; font:400 clamp(4.2rem,9.3vw,8.5rem)/.78 'Anton',Impact,sans-serif; letter-spacing:-.025em; text-transform:uppercase; color:var(--cream); transform:skewX(-3deg); text-shadow:3px 3px 0 #17393d,7px 7px 0 #0c262a,12px 12px 28px rgba(0,0,0,.5); }
+    .ls-hero h1 .ls-hot{ display:block; color:var(--amber); text-shadow:2px 2px 0 #fff4d4,5px 5px 0 #9b4f21,9px 9px 0 #3c1f17,0 0 30px rgba(255,181,71,.35); }
+    .ls-sub{ font-size:1.08rem; line-height:1.65; color:#b9c7c7; max-width:35rem; margin-bottom:2rem; }
+    .ls-signal-row{ display:flex; align-items:center; gap:.9rem; margin-bottom:1.4rem; font-family:'Press Start 2P',monospace; font-size:.52rem; color:#8ca7a8; text-transform:uppercase; }
+    .ls-signal-bars{ display:flex; align-items:flex-end; gap:3px; height:16px; }
+    .ls-signal-bars i{ display:block; width:4px; background:var(--cyan); box-shadow:0 0 8px rgba(114,246,255,.7); animation:ls-meter .8s steps(4) infinite alternate; }
+    .ls-signal-bars i:nth-child(1){ height:5px }.ls-signal-bars i:nth-child(2){ height:9px;animation-delay:-.2s }.ls-signal-bars i:nth-child(3){ height:13px;animation-delay:-.4s }.ls-signal-bars i:nth-child(4){ height:16px;animation-delay:-.6s }
+    @keyframes ls-meter{ to{ transform:scaleY(.42); transform-origin:bottom; } }
     .ls-cta-row{ display:flex; gap:1rem; flex-wrap:wrap; align-items:center; }
-    .ls-btn{ display:inline-flex; align-items:center; gap:.55rem; font-weight:700; font-size:.95rem;
-      padding:.95rem 1.6rem; border-radius:999px; cursor:pointer; text-decoration:none; border:none;
-      transition:transform .25s, box-shadow .25s; font-family:inherit; }
-    .ls-btn-dark{ background:#0b1020; color:#fff; box-shadow:0 10px 30px rgba(11,16,32,.25); }
-    .ls-btn-dark:hover{ transform:translateY(-2px); box-shadow:0 16px 42px rgba(11,16,32,.38); }
-    .ls-btn-ghost{ background:rgba(11,16,32,.05); color:#0b1020; border:1px solid rgba(11,16,32,.14); }
-    .ls-btn-ghost:hover{ background:rgba(11,16,32,.1); }
-    .ls-btn-cyan{ background:linear-gradient(135deg,#22d3ee,#0891b2); color:#04222b; box-shadow:0 10px 30px rgba(34,211,238,.35); }
-    .ls-btn-cyan:hover{ transform:translateY(-2px); box-shadow:0 16px 42px rgba(34,211,238,.5); }
+    .ls-btn{ position:relative; display:inline-flex; align-items:center; justify-content:center; gap:.55rem; min-height:49px; padding:.95rem 1.45rem; border:0; border-radius:3px; cursor:pointer; text-decoration:none; overflow:hidden; font:400 .7rem/1.2 'Press Start 2P',monospace; transition:transform .2s,box-shadow .2s,background .2s; }
+    .ls-btn::after{ content:""; position:absolute; inset:0; transform:translateX(-120%); background:linear-gradient(100deg,transparent,rgba(255,255,255,.35),transparent); transition:transform .5s; }
+    .ls-btn:hover::after{ transform:translateX(120%); }
+    .ls-btn-dark{ background:var(--amber); color:#17100a; box-shadow:5px 5px 0 #713d22,0 0 28px rgba(255,181,71,.25); }
+    .ls-btn-dark:hover{ transform:translate(-2px,-2px); box-shadow:8px 8px 0 #713d22,0 0 36px rgba(255,181,71,.4); }
+    .ls-btn-ghost{ background:rgba(8,25,28,.76); color:var(--cream); border:1px solid rgba(244,231,195,.32); box-shadow:4px 4px 0 rgba(0,0,0,.3); }
+    .ls-btn-ghost:hover{ transform:translate(-2px,-2px); background:rgba(14,42,45,.92); }
+    .ls-btn-cyan{ background:var(--cyan); color:#042126; box-shadow:5px 5px 0 #08798a,0 0 28px rgba(114,246,255,.25); }
+    .ls-btn-cyan:hover{ transform:translate(-2px,-2px); box-shadow:8px 8px 0 #08798a,0 0 36px rgba(114,246,255,.42); }
 
-    /* ---- Phone mockup ---- */
-    .ls-phone{ position:relative; justify-self:center; width:min(300px,78vw); aspect-ratio:9/19.5;
-      border-radius:44px; padding:11px; background:linear-gradient(160deg,#20242e,#0a0c12);
-      box-shadow:0 40px 90px rgba(20,20,60,.35), inset 0 0 0 2px rgba(255,255,255,.06);
-      animation:ls-float 6s ease-in-out infinite; }
-    .ls-phone img,.ls-phone video{ width:100%; height:100%; object-fit:cover; border-radius:34px; display:block; background:#05070d; }
-    @keyframes ls-float{ 0%,100%{ transform:translateY(0) } 50%{ transform:translateY(-16px) } }
-    .ls-phone-wrap{ position:relative; }
-    .ls-phone-glow{ position:absolute; inset:-16%; z-index:0; filter:blur(55px);
-      background:radial-gradient(circle at 50% 42%, rgba(34,211,238,.55), transparent 62%); }
-    /* pre-rendered angled phone (transparent PNG) used in the hero */
-    .ls-hero-render{ position:relative; z-index:1; display:block; width:min(330px,78vw); margin:0 auto;
-      filter:drop-shadow(0 38px 55px rgba(15,15,50,.5)); animation:ls-float 6s ease-in-out infinite; }
-    /* pre-composed promo video scene (has its own aurora background).
-       Feather the edges to transparent so the starfield margins melt into
-       the black section instead of reading as a hard rectangle. */
-    .ls-scene{ width:100%; max-width:380px; margin:0 auto; display:block;
-      -webkit-mask-image:radial-gradient(ellipse 74% 92% at 50% 50%, #000 40%, transparent 96%);
-      mask-image:radial-gradient(ellipse 74% 92% at 50% 50%, #000 40%, transparent 96%); }
+    .ls-phone-wrap{ position:relative; min-height:590px; display:grid; place-items:center; perspective:1100px; }
+    .ls-phone-glow{ position:absolute; width:84%; aspect-ratio:1; border-radius:50%; filter:blur(48px); background:radial-gradient(circle,rgba(114,246,255,.4),rgba(255,181,71,.12) 42%,transparent 70%); }
+    .ls-phone-frame{ position:absolute; inset:5% 2% 3%; border:1px solid rgba(114,246,255,.28); clip-path:polygon(0 11%,11% 11%,11% 0,89% 0,89% 11%,100% 11%,100% 89%,89% 89%,89% 100%,11% 100%,11% 89%,0 89%); }
+    .ls-phone-frame::before,.ls-phone-frame::after{ content:""; position:absolute; width:18px; height:18px; border:3px solid var(--amber); }
+    .ls-phone-frame::before{ left:10%; top:7%; border-right:0; border-bottom:0; }.ls-phone-frame::after{ right:10%; bottom:7%; border-left:0; border-top:0; }
+    .ls-hero-render{ position:relative; z-index:2; display:block; width:min(360px,76vw); margin:0 auto; filter:drop-shadow(0 44px 50px rgba(0,0,0,.65)); transform:rotateY(-8deg) rotateX(2deg); }
+    .ls-pixel-badge{ position:absolute; z-index:5; right:-1rem; top:20%; padding:.8rem; background:#0a1b1e; border:2px solid var(--cyan); color:var(--cyan); box-shadow:6px 6px 0 rgba(0,0,0,.45); font:400 .54rem/1.55 'Press Start 2P',monospace; text-transform:uppercase; }
+    .ls-pixel-badge b{ display:block; color:var(--cream); font-size:.66rem; }
+    .ls-scrollhint{ position:relative; z-index:5; text-align:center; margin-top:1.4rem; color:#8ca7a8; font:400 .52rem/1.5 'Press Start 2P',monospace; letter-spacing:.12em; text-transform:uppercase; }
+    .ls-scrollhint span{ display:block; color:var(--amber); font-size:1rem; margin-top:.35rem; animation:ls-bob 1.2s steps(4) infinite; }
+    @keyframes ls-bob{ 50%{ transform:translateY(8px); } }
 
-    .ls-scrollhint{ text-align:center; margin-top:3.5rem; color:#5b6480; font-size:.72rem; letter-spacing:.24em; text-transform:uppercase; }
-    .ls-scrollhint span{ display:block; font-size:1.3rem; margin-top:.25rem; animation:ls-bob 1.8s ease-in-out infinite; }
-    @keyframes ls-bob{ 0%,100%{ transform:translateY(0) } 50%{ transform:translateY(6px) } }
+    /* Broadcast strip / verified product signals. */
+    .ls-fade{ padding:4.2rem 1.5rem; background:linear-gradient(180deg,#071015,#11282b 52%,#071015); border-block:1px solid rgba(114,246,255,.18); }
+    .ls-fade::before{ content:"SYSTEM BULLETIN // ALL CIRCUITS ONLINE // MAYA SIGNAL ACTIVE"; position:absolute; left:-2%; top:0; width:104%; padding:.48rem 0; white-space:nowrap; overflow:hidden; text-align:center; color:#17100a; background:var(--amber); font:400 .55rem/1 'Press Start 2P',monospace; letter-spacing:.09em; }
+    .ls-stats{ display:grid; grid-template-columns:repeat(4,1fr); gap:1px; background:rgba(114,246,255,.18); border:1px solid rgba(114,246,255,.18); box-shadow:0 24px 70px rgba(0,0,0,.28); }
+    .ls-stat{ padding:1.65rem 1rem; text-align:center; background:#09181b; }
+    .ls-stat b{ display:block; margin-bottom:.55rem; color:var(--cream); font:400 clamp(1.5rem,3vw,2.45rem)/1 'Anton',sans-serif; letter-spacing:.03em; text-transform:uppercase; }
+    .ls-stat span{ color:#84a1a3; font:400 .5rem/1.6 'Press Start 2P',monospace; text-transform:uppercase; }
 
-    /* ---- Light -> dark transition band ---- */
-    .ls-fade{ background:linear-gradient(180deg,#dfe6ff 0%, #7a80b8 26%, #23294a 60%, #070913 100%); padding:4.5rem 1.5rem; }
-    .ls-stats{ display:flex; justify-content:center; gap:clamp(1.5rem,6vw,5rem); flex-wrap:wrap; text-align:center; }
-    .ls-stat b{ font-family:'Outfit',sans-serif; font-size:2.5rem; font-weight:800; display:block;
-      background:linear-gradient(120deg,#fff,#67e8f9); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
-    .ls-stat span{ color:#c2ccdf; font-size:.85rem; }
-
-    /* ---- Dark story sections ---- */
-    .ls-dark{ background:#070913; color:#e8eefc; }
-    .ls-dark.ls-alt{ background:linear-gradient(180deg,#070913,#0a1020); }
-    .ls-orb{ position:absolute; border-radius:50%; filter:blur(90px); opacity:.45; z-index:0; pointer-events:none; }
-    .ls-kicker{ font-family:'Outfit',sans-serif; letter-spacing:.22em; text-transform:uppercase; font-size:.72rem; font-weight:700; color:var(--cyan); margin-bottom:1rem; }
-    .ls-h2{ font-family:'Outfit',sans-serif; font-weight:800; letter-spacing:-.02em; font-size:clamp(2rem,4.5vw,3.3rem); line-height:1.05; margin-bottom:1.1rem; color:#fff; }
-    .ls-lead{ color:#9fb0c9; font-size:1.08rem; line-height:1.65; max-width:34rem; }
-    .ls-split{ display:grid; grid-template-columns:1fr 1fr; gap:3.5rem; align-items:center; }
+    /* Story sections become oversized poster frames with depth on scroll. */
+    .ls-dark{ color:#e8eefc; background:#071015; border-bottom:1px solid rgba(114,246,255,.08); }
+    .ls-dark.ls-alt{ background:linear-gradient(150deg,#0b171a,#071015 58%,#0a1018); }
+    .ls-dark::after{ content:""; position:absolute; inset:0; pointer-events:none; opacity:.18; background-size:34px 34px; background-image:linear-gradient(rgba(114,246,255,.08) 1px,transparent 1px),linear-gradient(90deg,rgba(114,246,255,.08) 1px,transparent 1px); mask-image:linear-gradient(to bottom,transparent,#000 28%,#000 72%,transparent); }
+    .ls-orb{ position:absolute; border-radius:50%; filter:blur(90px); opacity:.28; z-index:0; pointer-events:none; }
+    .ls-kicker{ display:inline-flex; align-items:center; gap:.65rem; margin-bottom:1rem; color:var(--cyan); font:400 .58rem/1.4 'Press Start 2P',monospace; letter-spacing:.12em; text-transform:uppercase; }
+    .ls-kicker::before{ content:"//"; color:var(--amber); }
+    .ls-h2{ margin-bottom:1.1rem; color:var(--cream); font:400 clamp(3rem,6vw,5.8rem)/.9 'Anton',Impact,sans-serif; letter-spacing:-.02em; text-transform:uppercase; text-shadow:5px 5px 0 rgba(16,62,66,.55); }
+    .ls-lead{ color:#9fb3b4; font-size:1.06rem; line-height:1.72; max-width:35rem; }
+    .ls-split{ display:grid; grid-template-columns:1fr 1fr; gap:4.5rem; align-items:center; min-height:560px; }
     .ls-split.rev .ls-visual{ order:2; }
+    .ls-visual{ position:relative; transform-style:preserve-3d; }
+    .ls-visual::before{ content:""; position:absolute; inset:8% -5%; z-index:-1; border:1px solid rgba(114,246,255,.23); box-shadow:12px 12px 0 rgba(114,246,255,.035); clip-path:polygon(0 12px,12px 12px,12px 0,calc(100% - 12px) 0,calc(100% - 12px) 12px,100% 12px,100% calc(100% - 12px),calc(100% - 12px) calc(100% - 12px),calc(100% - 12px) 100%,12px 100%,12px calc(100% - 12px),0 calc(100% - 12px)); }
+    .ls-scene{ width:100%; max-width:390px; margin:0 auto; display:block; border:1px solid rgba(114,246,255,.2); box-shadow:14px 14px 0 rgba(6,30,33,.85),0 28px 80px rgba(0,0,0,.42); clip-path:polygon(0 16px,16px 16px,16px 0,calc(100% - 16px) 0,calc(100% - 16px) 16px,100% 16px,100% calc(100% - 16px),calc(100% - 16px) calc(100% - 16px),calc(100% - 16px) 100%,16px 100%,16px calc(100% - 16px),0 calc(100% - 16px)); }
+    .ls-feats{ list-style:none; margin:1.8rem 0 0; padding:0; display:grid; gap:.8rem; }
+    .ls-feats li{ display:flex; gap:.9rem; align-items:flex-start; padding:.78rem .9rem; color:#b8c7c8; font-size:.94rem; line-height:1.5; border-left:2px solid rgba(114,246,255,.38); background:linear-gradient(90deg,rgba(114,246,255,.07),transparent); }
+    .ls-feats li b{ color:var(--cream); }.ls-ic{ flex:0 0 auto; width:30px; height:30px; display:grid; place-items:center; border-radius:2px; background:#102f33; border:1px solid rgba(114,246,255,.35); box-shadow:3px 3px 0 #061113; font-size:.9rem; }
+    .ls-chat{ max-width:440px; padding:1.5rem; border:2px solid rgba(114,246,255,.32); border-radius:3px; background:rgba(7,20,23,.88); box-shadow:11px 11px 0 rgba(0,0,0,.35); backdrop-filter:blur(18px); }
+    .ls-chat::before{ content:"MAYA COMMS // LIVE"; display:block; margin-bottom:1rem; color:var(--amber); font:400 .5rem/1 'Press Start 2P',monospace; }
+    .ls-bub{ max-width:84%; margin-bottom:.75rem; padding:.75rem 1rem; border-radius:3px; font-size:.9rem; line-height:1.45; }
+    .ls-bub.me{ margin-left:auto; background:rgba(114,246,255,.12); border:1px solid rgba(114,246,255,.34); color:#e7fbff; }.ls-bub.maya{ background:rgba(255,181,71,.1); border:1px solid rgba(255,181,71,.32); color:#fff4d4; }
+    .ls-bub small{ display:block; margin-top:.35rem; font-size:.62rem; opacity:.58; }.ls-maya-tag{ display:flex; align-items:center; gap:.35rem; margin:.2rem 0 .35rem; color:var(--amber); font-size:.68rem; font-weight:700; }
+    /* New capabilities, framed like a giant five-stage arcade mission board. */
+    .ls-iteration-head,.ls-archive-head{ display:grid; grid-template-columns:1.05fr .95fr; gap:3rem; align-items:end; margin-bottom:3rem; }
+    .ls-roadmap{ display:grid; grid-template-columns:repeat(6,1fr); gap:1rem; }
+    .ls-road-card{ position:relative; grid-column:span 2; min-height:260px; padding:1.5rem; overflow:hidden; border:1px solid rgba(114,246,255,.2); background:linear-gradient(145deg,rgba(17,45,48,.92),rgba(7,18,21,.96)); box-shadow:8px 8px 0 rgba(0,0,0,.32); }
+    .ls-road-card::after{ content:""; position:absolute; right:-38px; bottom:-48px; width:130px; height:130px; border:1px solid rgba(114,246,255,.14); transform:rotate(45deg); box-shadow:0 0 35px rgba(114,246,255,.06); }
+    .ls-road-no{ display:block; color:rgba(244,231,195,.15); font:400 4.6rem/.8 'Anton',sans-serif; }
+    .ls-road-state{ display:inline-block; margin:.9rem 0 1.1rem; padding:.42rem .52rem; color:#17100a; background:var(--amber); font:400 .45rem/1 'Press Start 2P',monospace; text-transform:uppercase; }
+    .ls-road-card h3{ margin-bottom:.65rem; color:var(--cream); font:400 1.65rem/1 'Anton',sans-serif; letter-spacing:.02em; text-transform:uppercase; }
+    .ls-road-card p{ color:#91a9aa; font-size:.88rem; line-height:1.62; }
+    .ls-ecosystem-cta{ display:flex; align-items:center; justify-content:space-between; gap:2rem; margin-top:1.2rem; padding:1.2rem 1.35rem; border:1px solid rgba(255,181,71,.34); background:linear-gradient(90deg,rgba(255,181,71,.1),rgba(114,246,255,.05)); box-shadow:8px 8px 0 rgba(0,0,0,.3); }
+    .ls-ecosystem-cta b{ display:block; color:var(--cream); font:400 1.45rem/1.1 'Anton',sans-serif; text-transform:uppercase; }.ls-ecosystem-cta span{ display:block; margin-top:.4rem; color:#8da3a5; font-size:.78rem; }.ls-ecosystem-cta .ls-btn{ min-height:42px; padding:.8rem 1rem; font-size:.55rem; white-space:nowrap; }
 
-    model-viewer{ width:100%; height:440px; --poster-color:transparent; background:transparent; }
+    /* Video archive: all existing Maya reels, no generated replacements. */
+    .ls-reel-grid{ display:grid; grid-template-columns:repeat(2,1fr); gap:1.25rem; }
+    .ls-reel{ min-width:0; border:1px solid rgba(244,231,195,.18); background:#091518; box-shadow:9px 9px 0 rgba(0,0,0,.32); }
+    .ls-reel-featured{ grid-column:1/-1; }.ls-reel-screen{ position:relative; overflow:hidden; aspect-ratio:16/9; background:#020607; }
+    .ls-reel-featured .ls-reel-screen{ aspect-ratio:21/9; }.ls-reel-screen::after{ content:""; position:absolute; inset:0; pointer-events:none; border:1px solid rgba(255,255,255,.08); box-shadow:inset 0 0 60px rgba(0,0,0,.48); }
+    .ls-reel video{ width:100%; height:100%; display:block; object-fit:cover; }.ls-reel-count{ position:absolute; z-index:2; left:.75rem; top:.75rem; padding:.42rem .52rem; color:var(--cream); background:rgba(5,13,15,.82); border:1px solid rgba(244,231,195,.25); font:400 .45rem/1 'Press Start 2P',monospace; }
+    .ls-reel-copy{ display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:1.15rem 1.2rem; }.ls-reel-copy h3{ color:var(--cream); font:400 1.35rem/1 'Anton',sans-serif; text-transform:uppercase; }.ls-reel-copy p{ color:#718d8f; font-size:.76rem; text-align:right; }
 
-    .ls-feats{ list-style:none; margin:1.7rem 0 0; padding:0; display:grid; gap:.9rem; }
-    .ls-feats li{ display:flex; gap:.8rem; align-items:flex-start; color:#c7d2e4; font-size:.98rem; line-height:1.45; }
-    .ls-feats li b{ color:#fff; }
-    .ls-ic{ flex:0 0 auto; width:28px; height:28px; border-radius:9px; display:grid; place-items:center;
-      background:rgba(34,211,238,.12); border:1px solid rgba(34,211,238,.3); font-size:.9rem; }
-
-    /* ---- Maya chat mockup ---- */
-    .ls-chat{ background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.07); border-radius:26px; padding:1.5rem; max-width:430px; backdrop-filter:blur(20px); }
-    .ls-bub{ padding:.72rem 1rem; border-radius:16px; margin-bottom:.7rem; max-width:82%; font-size:.92rem; line-height:1.4; }
-    .ls-bub.me{ margin-left:auto; background:linear-gradient(135deg,rgba(34,211,238,.22),rgba(8,145,178,.20)); border:1px solid rgba(34,211,238,.3); color:#e7fbff; border-bottom-right-radius:5px; }
-    .ls-bub.maya{ background:rgba(139,92,246,.16); border:1px solid rgba(139,92,246,.3); color:#efeaff; border-bottom-left-radius:5px; }
-    .ls-bub small{ display:block; font-size:.62rem; opacity:.6; margin-top:.3rem; }
-    .ls-maya-tag{ font-size:.68rem; color:#a78bfa; font-weight:700; margin:.2rem 0 .35rem; display:flex; align-items:center; gap:.35rem; }
-
-    /* ---- Theme swatches ---- */
-    .ls-themes{ display:grid; grid-template-columns:repeat(3,1fr); gap:1.2rem; margin-top:2.5rem; }
-    .ls-theme{ border-radius:20px; padding:1.6rem 1.2rem; border:1px solid rgba(255,255,255,.08); background:rgba(255,255,255,.03); text-align:center; transition:transform .25s, border-color .25s; }
-    .ls-theme:hover{ transform:translateY(-5px); border-color:rgba(255,255,255,.2); }
-    .ls-theme .dot{ width:52px; height:52px; border-radius:50%; margin:0 auto .9rem; box-shadow:0 0 28px currentColor; }
-    .ls-theme b{ display:block; font-family:'Outfit',sans-serif; color:#fff; margin-bottom:.15rem; }
-    .ls-theme span{ font-size:.8rem; color:#8ea0bd; }
-
-    /* ---- Get started (auth) ---- */
-    .ls-getstarted{ display:grid; grid-template-columns:1fr 480px; gap:3rem; align-items:center; }
-    .ls-footer{ text-align:center; padding:3rem 1.5rem; color:#6b7a94; font-size:.85rem; border-top:1px solid rgba(255,255,255,.05); background:#05070d; }
-    .ls-footer a{ color:#67e8f9; text-decoration:none; }
-
-    /* ---- Reveal on scroll ---- */
-    .landing .reveal{ opacity:0; transform:translateY(32px); transition:opacity .8s cubic-bezier(.2,.7,.2,1), transform .8s cubic-bezier(.2,.7,.2,1); }
-    .landing .reveal.in{ opacity:1; transform:none; }
-
-    /* hide the app's WS connection pill on the marketing landing */
+    .ls-getstarted{ display:grid; grid-template-columns:1fr 480px; gap:4rem; align-items:center; }.ls-getstarted .auth-card{ border-radius:3px; border:1px solid rgba(114,246,255,.25); box-shadow:12px 12px 0 rgba(0,0,0,.32),0 30px 90px rgba(0,0,0,.34); }.ls-footer{ padding:3rem 1.5rem; text-align:center; color:#607c7e; background:#04090b; border-top:1px solid rgba(114,246,255,.1); font-size:.85rem; }.ls-footer a{ color:var(--cyan); text-decoration:none; }
+    .landing .reveal{ opacity:0; transform:translateY(54px); }.landing .reveal.in{ opacity:1; transform:none; transition:opacity .8s ease,transform .8s cubic-bezier(.2,.75,.2,1); }
     body:has(#view-welcome.active) #wsConnStatus{ display:none; }
+    body:has(#view-welcome.active) header{ background:rgba(4,10,12,.9); border-bottom-color:rgba(114,246,255,.16); box-shadow:0 8px 30px rgba(0,0,0,.28); }
+    body:has(#view-welcome.active) .logo-badge{ border-radius:2px; color:var(--amber); border-color:rgba(255,181,71,.35); background:rgba(255,181,71,.08); font-family:'Press Start 2P',monospace; font-size:.48rem; }
 
-    @media (max-width:860px){
-      .ls-hero-grid,.ls-split,.ls-getstarted{ grid-template-columns:1fr; }
-      .ls-split.rev .ls-visual{ order:0; }
-      .ls-getstarted .auth-card{ margin:0 auto; }
-      .landing .ls-sec{ padding:4.2rem 1.2rem; }
-      model-viewer{ height:330px; }
-      .ls-themes{ grid-template-columns:1fr; }
-    }
-    @media (prefers-reduced-motion:reduce){
-      .ls-phone,.ls-scrollhint span{ animation:none; }
-      .reveal{ transition:none; opacity:1; transform:none; }
-      html{ scroll-behavior:auto; }
-    }
+    @media (max-width:900px){ .ls-hero-grid,.ls-split,.ls-getstarted,.ls-iteration-head,.ls-archive-head{ grid-template-columns:1fr; }.ls-split.rev .ls-visual{ order:0; }.landing .ls-sec{ padding:5.3rem 1.15rem; }.ls-phone-wrap{ min-height:500px; }.ls-pixel-badge{ right:0; }.ls-stats{ grid-template-columns:1fr 1fr; }.ls-roadmap{ grid-template-columns:1fr 1fr; }.ls-road-card{ grid-column:auto; }.ls-ecosystem-cta{ align-items:flex-start; flex-direction:column; }.ls-getstarted .auth-card{ width:100%; margin:0 auto; } }
+    @media (max-width:560px){ .ls-hero{ padding-top:5.5rem; }.ls-hero h1{ font-size:clamp(3.5rem,18vw,5rem); }.ls-phone-wrap{ min-height:430px; }.ls-hero-render{ width:min(300px,84vw); }.ls-pixel-badge{ top:12%; font-size:.44rem; }.ls-stats,.ls-roadmap,.ls-reel-grid{ grid-template-columns:1fr; }.ls-reel-featured{ grid-column:auto; }.ls-reel-featured .ls-reel-screen{ aspect-ratio:16/9; }.ls-reel-copy{ align-items:flex-start; flex-direction:column; }.ls-reel-copy p{ text-align:left; }.ls-btn{ width:100%; }.ls-split{ gap:2.6rem; min-height:0; }.ls-h2{ font-size:clamp(2.8rem,14vw,4rem); } }
+    @media (prefers-reduced-motion:reduce){ html{ scroll-behavior:auto; }.ls-bulletin-track,.ls-film-scratch,.ls-eyebrow::before,.ls-signal-bars i,.ls-scrollhint span{ animation:none!important; }.landing .reveal{ opacity:1!important; transform:none!important; transition:none!important; }.ls-hero-render{ transform:none!important; } }
+
+    /* ============================================================
+       LIGHT MAYA APP THEME + PLAYABLE HOME LAB
+       Mirrors the mobile palette: white glass, lavender, teal and ink.
+       ============================================================ */
+    :root{ --maya-ink:#19213a; --maya-muted:#69718b; --maya-violet:#6254d9; --maya-cyan:#20b8c7; --maya-mint:#38d5b0; --maya-lilac:#eceafd; --maya-blue:#e9f7fb; --maya-pink:#faeaf3; --maya-surface:#ffffff; }
+    body:has(#view-welcome.active){ background:#f7f8fe; }
+    .landing{ color:var(--maya-ink); background:#f7f8fe; }
+    .landing::after,.ls-film-scratch,.ls-hero-vignette{ display:none; }
+    .landing .ls-sec{ padding:6.5rem 1.5rem; }
+    .ls-hero{ min-height:calc(100svh - 80px); color:var(--maya-ink); background:radial-gradient(circle at 78% 18%,rgba(64,211,208,.22),transparent 25%),radial-gradient(circle at 12% 18%,rgba(123,104,238,.18),transparent 26%),linear-gradient(145deg,#fff 0%,#f5f3ff 48%,#e9fbfc 100%); }
+    .ls-hero::before{ opacity:.13; background:repeating-radial-gradient(ellipse at 50% 110%,transparent 0 28px,rgba(98,84,217,.35) 29px 30px); }
+    .ls-hero-canvas{ opacity:.2; mix-blend-mode:multiply; }
+    .ls-bulletin{ top:1rem; border:1px solid rgba(98,84,217,.16); border-radius:999px; background:rgba(255,255,255,.72); color:var(--maya-violet); box-shadow:0 12px 35px rgba(76,67,151,.1); font:700 .7rem/1 'Plus Jakarta Sans',sans-serif; letter-spacing:.09em; backdrop-filter:blur(16px); }
+    .ls-hero h1{ max-width:700px; font:800 clamp(3.7rem,7.6vw,7.2rem)/.92 'Outfit',sans-serif; letter-spacing:-.055em; text-transform:none; color:var(--maya-ink); transform:none; text-shadow:none; }
+    .ls-hero h1 .ls-hot{ color:transparent; background:linear-gradient(110deg,var(--maya-violet),var(--maya-cyan)); background-clip:text; -webkit-background-clip:text; -webkit-text-fill-color:transparent; text-shadow:none; }
+    .ls-eyebrow{ border:1px solid rgba(98,84,217,.15); border-radius:999px; color:var(--maya-violet); background:rgba(255,255,255,.75); box-shadow:0 10px 30px rgba(76,67,151,.08); font:800 .7rem/1 'Plus Jakarta Sans',sans-serif; letter-spacing:.11em; }
+    .ls-eyebrow::before{ border-radius:50%; background:var(--maya-mint); box-shadow:0 0 14px var(--maya-mint); }
+    .ls-sub{ color:var(--maya-muted); font-size:1.12rem; }.ls-signal-row{ color:#7a829b; font-family:'Plus Jakarta Sans',sans-serif; font-size:.72rem; font-weight:800; letter-spacing:.08em; }
+    .ls-signal-bars i{ border-radius:2px; background:var(--maya-cyan); box-shadow:none; }
+    .ls-btn{ border-radius:15px; font:800 .82rem/1.2 'Plus Jakarta Sans',sans-serif; letter-spacing:0; }
+    .ls-btn-dark,.ls-btn-cyan{ color:#fff; background:linear-gradient(135deg,var(--maya-violet),#7d71ef); box-shadow:0 12px 28px rgba(98,84,217,.24); }
+    .ls-btn-dark:hover,.ls-btn-cyan:hover{ transform:translateY(-2px); box-shadow:0 16px 35px rgba(98,84,217,.32); }
+    .ls-btn-ghost{ color:var(--maya-ink); border:1px solid rgba(31,39,70,.1); background:rgba(255,255,255,.7); box-shadow:0 10px 24px rgba(56,61,105,.08); }.ls-btn-ghost:hover{ transform:translateY(-2px); background:#fff; }
+    .ls-phone-glow{ background:radial-gradient(circle,rgba(56,213,176,.3),rgba(98,84,217,.16) 44%,transparent 70%); }
+    .ls-phone-frame{ border-color:rgba(98,84,217,.14); }.ls-phone-frame::before,.ls-phone-frame::after{ border-color:var(--maya-cyan); }
+    .ls-hero-render{ filter:drop-shadow(0 35px 45px rgba(43,48,91,.26)); }
+    .ls-pixel-badge{ border:1px solid rgba(98,84,217,.16); border-radius:16px; color:var(--maya-cyan); background:rgba(255,255,255,.88); box-shadow:0 16px 35px rgba(43,48,91,.14); font:800 .58rem/1.55 'Plus Jakarta Sans',sans-serif; backdrop-filter:blur(14px); }.ls-pixel-badge b{ color:var(--maya-ink); }
+    .ls-scrollhint{ color:#8a90a4; font:800 .62rem/1.5 'Plus Jakarta Sans',sans-serif; }.ls-scrollhint span{ color:var(--maya-violet); }
+    .ls-fade{ padding:3.8rem 1.5rem; border:0; background:linear-gradient(180deg,#f2f0fd,#f7f8fe); }.ls-fade::before{ content:"MAYA ECOSYSTEM • LIVE HOME CONTROL • FAMILY-FIRST AI"; color:#fff; background:linear-gradient(90deg,var(--maya-violet),var(--maya-cyan)); font:800 .64rem/1 'Plus Jakarta Sans',sans-serif; }
+    .ls-stats{ gap:1rem; border:0; background:transparent; box-shadow:none; }.ls-stat{ border:1px solid rgba(98,84,217,.09); border-radius:20px; background:rgba(255,255,255,.86); box-shadow:0 18px 45px rgba(56,61,105,.08); }.ls-stat b{ color:var(--maya-ink); font:800 clamp(1.5rem,3vw,2.3rem)/1 'Outfit',sans-serif; text-transform:none; }.ls-stat span{ color:var(--maya-muted); font:700 .7rem/1.5 'Plus Jakarta Sans',sans-serif; text-transform:none; }
+    .ls-dark,.ls-dark.ls-alt{ color:var(--maya-ink); border-color:rgba(98,84,217,.08); background:#f7f8fe; }.ls-dark.ls-alt{ background:linear-gradient(155deg,#f4f2ff,#eefafb); }.ls-dark::after{ opacity:.25; background-size:42px 42px; background-image:radial-gradient(rgba(98,84,217,.16) 1px,transparent 1px); mask-image:linear-gradient(to bottom,transparent,#000 24%,#000 76%,transparent); }
+    .ls-orb{ opacity:.12; }.ls-kicker{ color:var(--maya-violet); font:800 .7rem/1.4 'Plus Jakarta Sans',sans-serif; letter-spacing:.1em; }.ls-kicker::before{ color:var(--maya-cyan); }
+    .ls-h2{ color:var(--maya-ink); font:800 clamp(2.7rem,5vw,5rem)/.96 'Outfit',sans-serif; letter-spacing:-.045em; text-transform:none; text-shadow:none; }.ls-lead{ color:var(--maya-muted); }
+    .ls-feats li{ color:#5e6781; border-left:0; border-radius:15px; background:rgba(255,255,255,.7); box-shadow:0 8px 24px rgba(56,61,105,.05); }.ls-feats li b{ color:var(--maya-ink); }.ls-ic{ border:0; border-radius:10px; color:var(--maya-violet); background:var(--maya-lilac); box-shadow:none; }
+    .ls-visual::before{ border-color:rgba(98,84,217,.14); border-radius:28px; clip-path:none; box-shadow:0 30px 70px rgba(56,61,105,.08); }
+    .ls-scene{ border:8px solid #fff; border-radius:28px; clip-path:none; box-shadow:0 28px 65px rgba(47,51,95,.18); }
+    .ls-chat{ border:1px solid rgba(98,84,217,.12); border-radius:24px; color:var(--maya-ink); background:rgba(255,255,255,.78); box-shadow:0 26px 65px rgba(56,61,105,.12); }.ls-chat::before{ color:var(--maya-violet); font-family:'Plus Jakarta Sans',sans-serif; }.ls-bub.me{ color:#fff; border:0; border-radius:18px 18px 5px 18px; background:linear-gradient(135deg,var(--maya-violet),#7e72ec); }.ls-bub.maya{ color:var(--maya-ink); border:1px solid rgba(32,184,199,.14); border-radius:18px 18px 18px 5px; background:var(--maya-blue); }.ls-maya-tag{ color:var(--maya-cyan); }
+    .ls-road-card{ min-height:245px; border:1px solid rgba(98,84,217,.09); border-radius:24px; background:rgba(255,255,255,.84); box-shadow:0 18px 45px rgba(56,61,105,.08); }.ls-road-card::after{ border-color:rgba(98,84,217,.08); border-radius:30px; }.ls-road-no{ color:rgba(98,84,217,.1); font-family:'Outfit',sans-serif; font-weight:800; }.ls-road-state{ border-radius:999px; color:var(--maya-violet); background:var(--maya-lilac); font:800 .58rem/1 'Plus Jakarta Sans',sans-serif; }.ls-road-card h3{ color:var(--maya-ink); font:800 1.45rem/1.08 'Outfit',sans-serif; text-transform:none; }.ls-road-card p{ color:var(--maya-muted); }
+    .ls-ecosystem-cta{ border:1px solid rgba(98,84,217,.1); border-radius:22px; background:linear-gradient(90deg,var(--maya-lilac),var(--maya-blue)); box-shadow:0 16px 40px rgba(56,61,105,.08); }.ls-ecosystem-cta b{ color:var(--maya-ink); font:800 1.25rem/1.1 'Outfit',sans-serif; text-transform:none; }.ls-ecosystem-cta span{ color:var(--maya-muted); }
+    .ls-reel{ border:1px solid rgba(98,84,217,.09); border-radius:24px; overflow:hidden; background:#fff; box-shadow:0 18px 45px rgba(56,61,105,.1); }.ls-reel-screen::after{ border-color:rgba(255,255,255,.3); box-shadow:inset 0 0 45px rgba(31,36,72,.16); }.ls-reel-count{ border:0; border-radius:999px; color:#fff; background:rgba(25,33,58,.72); font:800 .58rem/1 'Plus Jakarta Sans',sans-serif; backdrop-filter:blur(10px); }.ls-reel-copy h3{ color:var(--maya-ink); font:800 1.25rem/1 'Outfit',sans-serif; text-transform:none; }.ls-reel-copy p{ color:var(--maya-muted); }
+    .ls-getstarted .auth-card{ border:1px solid rgba(98,84,217,.1); border-radius:24px; background:#fff; box-shadow:0 28px 70px rgba(56,61,105,.12); }.ls-footer{ color:#7b8299; border-color:rgba(98,84,217,.08); background:#f0f1fa; }.ls-footer a{ color:var(--maya-violet); }
+    body:has(#view-welcome.active) header{ background:rgba(255,255,255,.82); border-bottom-color:rgba(98,84,217,.1); box-shadow:0 8px 30px rgba(56,61,105,.07); }.logo h1{ background:linear-gradient(135deg,var(--maya-ink),var(--maya-violet)); -webkit-background-clip:text; }.logo-badge,body:has(#view-welcome.active) .logo-badge{ border-radius:999px; color:var(--maya-violet); border-color:rgba(98,84,217,.18); background:var(--maya-lilac); font:800 .55rem/1 'Plus Jakarta Sans',sans-serif; }
+
+    /* Playable home lab */
+    .ls-playground{ background:linear-gradient(145deg,#f9faff,#eef3ff); }.ls-play-head{ display:flex; align-items:end; justify-content:space-between; gap:2rem; margin-bottom:2.5rem; }.ls-play-head .ls-lead{ max-width:31rem; }
+    .maya-lab{ display:grid; grid-template-columns:1.2fr .8fr; gap:1.25rem; padding:1rem; border:1px solid rgba(98,84,217,.1); border-radius:34px; background:rgba(255,255,255,.64); box-shadow:0 28px 80px rgba(56,61,105,.12); backdrop-filter:blur(22px); }
+    .maya-home-panel,.maya-chat-panel{ border:1px solid rgba(98,84,217,.09); border-radius:26px; background:#fff; overflow:hidden; }.maya-panel-top{ display:flex; align-items:center; justify-content:space-between; gap:1rem; padding:1.1rem 1.2rem; border-bottom:1px solid #edf0f7; }.maya-panel-title{ display:flex; align-items:center; gap:.7rem; font-weight:800; }.maya-live-dot{ width:9px; height:9px; border-radius:50%; background:var(--maya-mint); box-shadow:0 0 0 5px rgba(56,213,176,.13); }
+    .maya-role-switch{ display:flex; gap:.25rem; padding:.25rem; border-radius:12px; background:#f1f2f8; }.maya-role-btn{ padding:.55rem .7rem; border:0; border-radius:9px; color:#7a8196; background:transparent; cursor:pointer; font:800 .72rem 'Plus Jakarta Sans',sans-serif; }.maya-role-btn.active{ color:#fff; background:var(--maya-violet); box-shadow:0 5px 14px rgba(98,84,217,.25); }
+    .maya-home-stage{ position:relative; min-height:435px; padding:1.1rem; background:radial-gradient(circle at 70% 10%,rgba(32,184,199,.13),transparent 28%),linear-gradient(145deg,#f7f6ff,#edfafd); }.maya-room-tabs{ display:flex; gap:.5rem; overflow-x:auto; padding-bottom:.8rem; scrollbar-width:none; }.maya-room-tab{ flex:0 0 auto; padding:.65rem .8rem; border:1px solid rgba(98,84,217,.1); border-radius:12px; color:#72798e; background:rgba(255,255,255,.8); cursor:pointer; font:800 .72rem 'Plus Jakarta Sans',sans-serif; }.maya-room-tab.active{ color:var(--maya-violet); border-color:rgba(98,84,217,.3); background:var(--maya-lilac); }
+    .maya-room-visual{ position:relative; min-height:245px; margin-top:.25rem; padding:1.2rem; border-radius:22px; overflow:hidden; background:linear-gradient(160deg,#dfe5ff,#f8f4ff 52%,#dff8f5); }.maya-room-visual::before{ content:""; position:absolute; left:8%; right:8%; bottom:18%; height:2px; background:rgba(46,51,91,.12); box-shadow:0 35px 60px rgba(46,51,91,.08); }.maya-window{ position:absolute; right:10%; top:14%; width:28%; height:35%; border:8px solid #fff; border-radius:16px; background:linear-gradient(#8ddcf0,#f6e7fb); box-shadow:0 12px 25px rgba(67,79,135,.12); }.maya-sofa{ position:absolute; left:9%; bottom:19%; width:42%; height:27%; border-radius:24px 24px 12px 12px; background:#8d82e9; box-shadow:inset 0 10px rgba(255,255,255,.16),0 15px 25px rgba(67,61,130,.18); }.maya-lamp{ position:absolute; left:55%; bottom:19%; width:8px; height:34%; border-radius:8px; background:#4c5578; }.maya-lamp::before{ content:""; position:absolute; left:50%; top:-20px; width:55px; height:38px; transform:translateX(-50%); border-radius:50% 50% 10px 10px; background:#ffd77b; box-shadow:0 0 0 0 rgba(255,215,123,0); transition:box-shadow .3s; }.maya-room-visual.light-on .maya-lamp::before{ box-shadow:0 0 70px 35px rgba(255,215,123,.55); }.maya-tv{ position:absolute; left:12%; top:16%; width:30%; aspect-ratio:16/10; border:7px solid #303a58; border-radius:12px; background:#20283e; transition:background .25s,box-shadow .25s; }.maya-room-visual.tv-on .maya-tv{ background:linear-gradient(135deg,var(--maya-violet),var(--maya-cyan)); box-shadow:0 0 30px rgba(98,84,217,.28); }.maya-tv::after{ content:"MAYA"; position:absolute; inset:0; display:grid; place-items:center; color:rgba(255,255,255,.9); font:800 .7rem 'Outfit',sans-serif; opacity:0; }.maya-room-visual.tv-on .maya-tv::after{ opacity:1; }.maya-fan{ position:absolute; right:17%; bottom:18%; width:56px; height:56px; border:7px solid #fff; border-radius:50%; background:conic-gradient(from 15deg,var(--maya-cyan) 0 18%,transparent 18% 33%,var(--maya-cyan) 33% 51%,transparent 51% 66%,var(--maya-cyan) 66% 84%,transparent 84%); box-shadow:0 8px 20px rgba(56,61,105,.15); }.maya-room-visual.fan-on .maya-fan{ animation:maya-spin .9s linear infinite; }@keyframes maya-spin{to{transform:rotate(360deg)}}
+    .maya-device-row{ display:grid; grid-template-columns:repeat(4,1fr); gap:.65rem; margin-top:.9rem; }.maya-device{ padding:.8rem .55rem; border:1px solid rgba(98,84,217,.1); border-radius:15px; color:#6e758a; background:#fff; cursor:pointer; text-align:left; transition:.2s; }.maya-device:hover{ transform:translateY(-2px); border-color:rgba(98,84,217,.25); }.maya-device[aria-pressed="true"]{ color:var(--maya-violet); border-color:rgba(98,84,217,.28); background:var(--maya-lilac); }.maya-device.locked{ opacity:.5; }.maya-device b,.maya-device span{ display:block; }.maya-device b{ margin:.35rem 0 .2rem; color:var(--maya-ink); font-size:.72rem; }.maya-device span{ font-size:.62rem; }.maya-device-icon{ font-size:1.1rem; }
+    .maya-lab-footer{ display:flex; align-items:center; justify-content:space-between; gap:1rem; margin-top:.9rem; }.maya-energy{ color:#7a8194; font-size:.72rem; }.maya-energy b{ color:var(--maya-violet); }.maya-scenes{ display:flex; gap:.45rem; }.maya-scene-btn{ padding:.55rem .65rem; border:0; border-radius:10px; color:#5f6780; background:#eef0f7; cursor:pointer; font:800 .65rem 'Plus Jakarta Sans',sans-serif; }.maya-scene-btn:hover{ color:#fff; background:var(--maya-violet); }
+    .maya-chat-panel{ display:flex; min-height:560px; flex-direction:column; }.maya-chat-log{ flex:1; display:flex; flex-direction:column; gap:.75rem; padding:1.1rem; overflow:auto; background:linear-gradient(#fff,#fafbff); }.maya-msg{ max-width:86%; padding:.75rem .9rem; border-radius:16px; font-size:.82rem; line-height:1.45; animation:maya-pop .3s ease both; }.maya-msg.user{ align-self:flex-end; color:#fff; border-bottom-right-radius:5px; background:linear-gradient(135deg,var(--maya-violet),#7f73ec); }.maya-msg.maya{ align-self:flex-start; color:var(--maya-ink); border:1px solid rgba(32,184,199,.12); border-bottom-left-radius:5px; background:var(--maya-blue); }@keyframes maya-pop{from{opacity:0;transform:translateY(8px) scale(.97)}}
+    .maya-quick{ display:flex; gap:.45rem; padding:.8rem 1rem 0; overflow-x:auto; scrollbar-width:none; }.maya-quick button{ flex:0 0 auto; padding:.55rem .7rem; border:1px solid rgba(98,84,217,.13); border-radius:999px; color:var(--maya-violet); background:#fff; cursor:pointer; font:700 .68rem 'Plus Jakarta Sans',sans-serif; }.maya-chat-form{ display:flex; gap:.55rem; padding:1rem; }.maya-chat-form input{ min-width:0; border-radius:14px; color:var(--maya-ink); background:#f3f4fa; }.maya-chat-form button{ width:46px; border:0; border-radius:14px; color:#fff; background:linear-gradient(135deg,var(--maya-violet),var(--maya-cyan)); cursor:pointer; font-size:1rem; }.maya-permission{ margin:0 1rem 1rem; padding:.7rem .8rem; border-radius:12px; color:#6d748a; background:#f4f5fa; font-size:.72rem; }.maya-permission b{ color:var(--maya-violet); }
+    .maya-denied{ animation:maya-shake .35s ease; }@keyframes maya-shake{25%{transform:translateX(-7px)}50%{transform:translateX(6px)}75%{transform:translateX(-3px)}}
+    @media(max-width:900px){ .ls-play-head{ align-items:flex-start; flex-direction:column; }.maya-lab{ grid-template-columns:1fr; }.maya-chat-panel{ min-height:470px; } }
+    @media(max-width:620px){ .maya-home-stage{ padding:.75rem; }.maya-device-row{ grid-template-columns:1fr 1fr; }.maya-lab-footer{ align-items:flex-start; flex-direction:column; }.maya-scenes{ width:100%; }.maya-scene-btn{ flex:1; }.maya-panel-top{ align-items:flex-start; flex-direction:column; }.maya-lab{ padding:.55rem; border-radius:24px; } }
+
+    /* Source of truth: software/mobile/lib/theme/accents.dart (Plaster). */
+    :root{ --maya-ink:#1A1917; --maya-muted:#6F6A62; --maya-violet:#1A1917; --maya-cyan:#6F6A62; --maya-mint:#4A7A58; --maya-lilac:#E9E5DD; --maya-blue:#FBFAF7; --maya-pink:#F3F0EA; --maya-surface:#FBFAF7; --maya-line:#DCD6CB; --maya-warn:#A9781F; --maya-danger:#B0472F; }
+    body:has(#view-welcome.active),.landing,.ls-hero,.ls-dark{ background:#F3F0EA; }.ls-dark.ls-alt,.ls-playground{ background:#E9E5DD; }.landing::after,.ls-film-scratch,.ls-hero-vignette,.ls-dark::after{ display:none; }
+    .ls-hero::before{ inset:0; opacity:.45; transform:none; background:linear-gradient(90deg,transparent 49.8%,rgba(26,25,23,.035) 50%,transparent 50.2%),linear-gradient(transparent 49.8%,rgba(26,25,23,.035) 50%,transparent 50.2%); background-size:48px 48px; }.ls-hero-canvas{ opacity:.06; filter:grayscale(1); }
+    .ls-bulletin,.ls-eyebrow,.ls-pixel-badge{ color:var(--maya-muted); border-color:var(--maya-line); background:rgba(251,250,247,.94); box-shadow:none; backdrop-filter:none; }.ls-eyebrow{ color:var(--maya-ink); }.ls-eyebrow::before{ background:var(--maya-mint); box-shadow:none; }
+    .ls-hero h1 .ls-hot{ color:var(--maya-ink); background:none; -webkit-text-fill-color:var(--maya-ink); text-decoration:underline; text-decoration-thickness:.08em; text-underline-offset:.08em; }.ls-signal-bars i{ background:var(--maya-ink); }
+    .ls-btn-dark,.ls-btn-cyan{ color:#F3F0EA; background:var(--maya-ink); box-shadow:none; }.ls-btn-dark:hover,.ls-btn-cyan:hover{ box-shadow:0 8px 0 rgba(26,25,23,.12); }.ls-btn-ghost{ color:var(--maya-ink); border-color:var(--maya-line); background:var(--maya-surface); box-shadow:none; }
+    .ls-phone-glow{ background:radial-gradient(circle,rgba(26,25,23,.09),transparent 68%); }.ls-phone-frame,.ls-phone-frame::before,.ls-phone-frame::after{ border-color:var(--maya-line); }.ls-hero-render{ filter:grayscale(.25) drop-shadow(0 30px 35px rgba(26,25,23,.18)); }
+    .ls-fade{ background:#F3F0EA; }.ls-fade::before{ color:#F3F0EA; background:var(--maya-ink); }.ls-stat,.ls-road-card,.ls-reel,.maya-home-panel,.maya-chat-panel{ border-color:var(--maya-line); background:var(--maya-surface); box-shadow:none; }
+    .ls-kicker,.ls-lead,.ls-road-card p,.ls-reel-copy p{ color:var(--maya-muted); }.ls-kicker::before{ color:var(--maya-ink); }.ls-road-state{ color:var(--maya-ink); background:var(--maya-lilac); }.ls-road-no{ color:rgba(26,25,23,.09); }
+    .ls-ecosystem-cta{ border-color:var(--maya-line); background:var(--maya-lilac); box-shadow:none; }.ls-feats li{ color:var(--maya-muted); background:var(--maya-surface); box-shadow:none; }.ls-ic{ color:var(--maya-ink); background:var(--maya-lilac); }
+    .ls-chat{ border-color:var(--maya-line); background:var(--maya-surface); box-shadow:none; }.ls-bub.me,.maya-msg.user{ color:#F3F0EA; background:var(--maya-ink); }.ls-bub.maya,.maya-msg.maya{ color:var(--maya-ink); border-color:var(--maya-line); background:var(--maya-lilac); }.ls-maya-tag{ color:var(--maya-muted); }
+    .maya-lab{ border-color:var(--maya-line); background:#F3F0EA; box-shadow:none; backdrop-filter:none; }.maya-panel-top{ border-color:var(--maya-line); }.maya-role-switch,.maya-scene-btn,.maya-permission{ background:var(--maya-lilac); }.maya-role-btn.active,.maya-scene-btn:hover,.maya-chat-form button{ color:#F3F0EA; background:var(--maya-ink); box-shadow:none; }
+    .maya-home-stage,.maya-chat-log{ background:var(--maya-surface); }.maya-room-tab,.maya-device,.maya-quick button{ color:var(--maya-muted); border-color:var(--maya-line); background:var(--maya-surface); }.maya-room-tab.active,.maya-device[aria-pressed="true"]{ color:var(--maya-ink); border-color:var(--maya-ink); background:var(--maya-surface); }.maya-room-visual{ background:#E9E5DD; }.maya-window{ border-color:#FBFAF7; background:#DCD6CB; box-shadow:none; }.maya-sofa{ background:#6F6A62; box-shadow:none; }.maya-lamp{ background:#1A1917; }.maya-room-visual.light-on .maya-lamp::before{ background:#D9B26A; box-shadow:0 0 45px 18px rgba(217,178,106,.3); }.maya-tv{ border-color:#1A1917; background:#292724; }.maya-room-visual.tv-on .maya-tv{ background:#1A1917; box-shadow:none; }.maya-fan{ border-color:#FBFAF7; background:conic-gradient(from 15deg,#6F6A62 0 18%,transparent 18% 33%,#6F6A62 33% 51%,transparent 51% 66%,#6F6A62 66% 84%,transparent 84%); box-shadow:none; }
+    .maya-chat-form input{ color:var(--maya-ink); background:var(--maya-surface); border-color:var(--maya-line); }.maya-energy b,.maya-permission b{ color:var(--maya-ink); }.ls-footer{ color:var(--maya-muted); border-color:var(--maya-line); background:#E9E5DD; }.ls-footer a{ color:var(--maya-ink); }
+    body:has(#view-welcome.active) header{ background:rgba(243,240,234,.94); border-bottom-color:var(--maya-line); box-shadow:none; }.logo h1{ background:none; color:var(--maya-ink); -webkit-text-fill-color:var(--maya-ink); }.logo-badge,body:has(#view-welcome.active) .logo-badge{ color:var(--maya-ink); border-color:var(--maya-line); background:var(--maya-surface); }
+
+    /* Code-built current mobile preview — no legacy screenshot asset. */
+    .sr-only{ position:absolute!important; width:1px!important; height:1px!important; padding:0!important; margin:-1px!important; overflow:hidden!important; clip:rect(0,0,0,0)!important; white-space:nowrap!important; border:0!important; }
+    .maya-mini-app{ position:relative; z-index:2; width:min(330px,82vw); min-height:575px; padding:16px; border:9px solid var(--maya-ink); border-radius:42px; color:var(--maya-ink); background:#F3F0EA; box-shadow:0 28px 55px rgba(26,25,23,.2); transform:rotate(3deg); }
+    .maya-mini-status{ display:flex; justify-content:space-between; padding:2px 7px 15px; color:var(--maya-muted); font-size:.68rem; font-weight:700; }.maya-mini-status span:last-child{ color:var(--maya-mint); }
+    .maya-mini-greeting{ position:relative; display:grid; gap:2px; padding:6px 4px 18px; }.maya-mini-greeting small{ color:var(--maya-muted); font-size:.72rem; }.maya-mini-greeting b{ font-size:1.45rem; letter-spacing:-.04em; }.maya-mini-greeting i{ position:absolute; right:3px; top:4px; width:36px; height:36px; display:grid; place-items:center; border-radius:50%; color:#F3F0EA; background:var(--maya-ink); font-size:.68rem; font-style:normal; }
+    .maya-mini-all{ width:100%; display:grid; grid-template-columns:42px 1fr; grid-template-rows:auto auto; column-gap:10px; padding:14px; border:1px solid var(--maya-line); border-radius:16px; color:var(--maya-ink); background:var(--maya-surface); text-align:left; cursor:pointer; }.maya-mini-all span{ grid-row:1/3; width:40px; height:40px; display:grid; place-items:center; border-radius:12px; color:#F3F0EA; background:var(--maya-ink); font-size:1.1rem; }.maya-mini-all b{ align-self:end; font-size:.88rem; }.maya-mini-all small{ color:var(--maya-muted); }
+    .maya-mini-card{ position:relative; display:grid; gap:8px; margin-top:12px; padding:15px; border:1px solid var(--maya-line); border-radius:20px; background:var(--maya-surface); }.maya-mini-card>div{ display:grid; gap:3px; }.maya-mini-card small{ color:var(--maya-muted); font-size:.55rem; letter-spacing:.09em; }.maya-mini-card b{ font-size:1rem; }.maya-mini-pill{ position:absolute; right:12px; top:13px; padding:5px 7px; border:1px solid var(--maya-line); border-radius:999px; color:var(--maya-muted); font-size:.54rem; }.maya-mini-card label{ display:flex; align-items:center; justify-content:space-between; padding:7px 0; border-top:1px solid var(--maya-line); font-size:.73rem; font-weight:600; }.maya-mini-card label i{ position:relative; width:30px; height:18px; border-radius:999px; background:var(--maya-lilac); }.maya-mini-card label i::after{ content:""; position:absolute; top:3px; left:3px; width:12px; height:12px; border-radius:50%; background:var(--maya-muted); transition:.2s; }.maya-mini-card label i.on{ background:var(--maya-ink); }.maya-mini-card label i.on::after{ left:15px; background:#F3F0EA; }
+    .maya-mini-ask{ display:flex; justify-content:space-between; margin-top:12px; padding:13px 14px; border:1px solid var(--maya-line); border-radius:14px; color:var(--maya-muted); background:var(--maya-surface); font-size:.72rem; }.maya-mini-ask span{ color:var(--maya-ink); }.maya-mini-nav{ display:grid; grid-template-columns:repeat(4,1fr); gap:4px; margin-top:13px; padding:10px 5px 5px; border-top:1px solid var(--maya-line); }.maya-mini-nav b{ display:grid; place-items:center; gap:3px; color:var(--maya-muted); font-size:1rem; }.maya-mini-nav b:first-child{ color:var(--maya-ink); }.maya-mini-nav small{ font-size:.48rem; font-weight:600; }
   </style>
+  <link rel="stylesheet" href="maya-retro-light.css">
+  <link rel="stylesheet" href="maya-home-arcade.css">
 </head>
 <body>
   
   <header>
     <a href="#" class="logo">
-      <img class="logo-icon" src="/static/media/maya-logo.png" alt="Maya" style="object-fit:cover;background:#fff;">
+      <img class="logo-icon" src="media/maya-logo.png" alt="Maya" style="object-fit:cover;background:#fff;">
       <div>
         <h1>Maya Smart Home</h1>
       </div>
@@ -955,74 +1042,148 @@
 
         <!-- ===== HERO (light) ===== -->
         <section class="ls-sec ls-hero">
+          <canvas id="lsHeroCanvas" class="ls-hero-canvas" aria-hidden="true"></canvas>
+          <div class="ls-hero-vignette" aria-hidden="true"></div>
+          <div class="ls-film-scratch" aria-hidden="true"></div>
+          <div class="ls-bulletin" aria-hidden="true">
+            <div class="ls-bulletin-track"><span>One home &bull; Parent + child &bull; Maya AI</span><span>Open ecosystem &bull; Secure by design</span><span>One home &bull; Parent + child &bull; Maya AI</span><span>Open ecosystem &bull; Secure by design</span></div>
+          </div>
           <div class="ls-inner">
             <div class="ls-hero-grid">
-              <div>
-                <div class="ls-eyebrow">Maya &middot; Smart Home</div>
-                <h1>Your whole home,<br><em>in one tap.</em></h1>
-                <p class="ls-sub">Lights, sockets and every room &mdash; controlled in real time from one glass dashboard. Bring the family in, set permissions, and just ask Maya, your built-in AI.</p>
+              <div class="ls-hero-copy">
+                <div class="ls-eyebrow">Maya Smart Home</div>
+                <h1>A calmer home.<span class="ls-hot">One Maya.</span></h1>
+                <p class="ls-sub">Family, home and AI. Connected, on your terms.</p>
+                <div class="ls-signal-row"><span class="ls-signal-bars" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span>Live home &bull; family permissions &bull; secure access</span></div>
                 <div class="ls-cta-row">
-                  <a href="/static/app-release.apk" download="maya-smart-home.apk" class="ls-btn ls-btn-dark"><span>&#128229;</span> Download the App</a>
-                  <a href="#demo" class="ls-btn ls-btn-ghost"><span>&#9654;</span> See it in action</a>
-                  <a href="#get-started" class="ls-btn ls-btn-ghost">Sign in</a>
+                  <a href="app-release.apk" download="maya-smart-home.apk" class="ls-btn ls-btn-dark"><span>&#8595;</span> Get the app</a>
+                  <a href="#playground" class="ls-btn ls-btn-ghost"><span>&#9654;</span> Try Maya</a>
+                  <a href="#get-started" class="ls-btn ls-btn-ghost">Enter portal</a>
                 </div>
               </div>
               <div class="ls-phone-wrap">
                 <div class="ls-phone-glow"></div>
-                <img class="ls-hero-render" src="/static/media/hero-phone.png" alt="Maya Smart Home app on iPhone">
+                <div class="ls-phone-frame" aria-hidden="true"></div>
+                <div class="maya-mini-app" aria-label="Preview of the current Maya mobile interface">
+                  <div class="maya-mini-status"><span>9:41</span><span>&#9679; Live</span></div>
+                  <div class="maya-mini-greeting"><small>Good afternoon</small><b>My Home</b><i>MH</i></div>
+                  <button type="button" class="maya-mini-all" onclick="document.getElementById('playground').scrollIntoView({behavior:'smooth'})"><span>&#9211;</span><b>All off</b><small>Turn everything off</small></button>
+                  <div class="maya-mini-card"><div><small>SMART SOCKET</small><b>Living Room</b></div><span class="maya-mini-pill">3 of 3 online</span><label>TV <i class="on"></i></label><label>Lamp <i class="on"></i></label><label>Fan <i></i></label></div>
+                  <div class="maya-mini-ask">Ask Maya&hellip; <span>&#8594;</span></div>
+                  <div class="maya-mini-nav"><b>&#8962;<small>Home</small></b><b>&#9786;<small>Children</small></b><b>&#9993;<small>Chat</small></b><b>&#9881;<small>Device</small></b></div>
+                </div>
+                <div class="ls-pixel-badge"><b>Your home</b>One app.</div>
               </div>
             </div>
-            <div class="ls-scrollhint">Scroll to explore<span>&#8595;</span></div>
+            <div class="ls-scrollhint">Try the live home<span>&#8595;</span></div>
           </div>
         </section>
 
         <!-- ===== light -> dark transition band ===== -->
         <section class="ls-sec ls-fade">
           <div class="ls-inner ls-stats reveal">
-            <div class="ls-stat"><b>3&#8209;ch</b><span>relay control per socket</span></div>
-            <div class="ls-stat"><b>Real&#8209;time</b><span>WebSocket sync across devices</span></div>
-            <div class="ls-stat"><b>Maya&nbsp;AI</b><span>chat to run your home</span></div>
-            <div class="ls-stat"><b>Family</b><span>parent &amp; child dashboards</span></div>
+            <div class="ls-stat"><b>Open</b><span>Build your own</span></div>
+            <div class="ls-stat"><b>Live</b><span>Stay in sync</span></div>
+            <div class="ls-stat"><b>Maya&nbsp;AI</b><span>Just ask</span></div>
+            <div class="ls-stat"><b>Family</b><span>Everyone belongs</span></div>
           </div>
         </section>
 
-        <!-- ===== HOUSE 3D ===== -->
-        <section class="ls-sec ls-dark">
-          <div class="ls-orb" style="width:520px;height:520px;background:#0e7490;top:-120px;right:-120px;"></div>
+        <!-- ===== PLAYABLE HOME LAB ===== -->
+        <section id="playground" class="ls-sec ls-playground">
           <div class="ls-inner">
-            <div class="ls-split reveal">
-              <div>
-                <div class="ls-kicker">One home, every room</div>
-                <h2 class="ls-h2">Your house, brought to life.</h2>
-                <p class="ls-lead">Group your smart sockets by room and see the whole home at a glance. Flip a single channel, or hit &ldquo;All off&rdquo; on your way out the door.</p>
-                <ul class="ls-feats">
-                  <li><span class="ls-ic">&#127968;</span><div><b>Multi-house.</b> Switch between homes &mdash; apartment, parents&rsquo; place, the office &mdash; in a tap.</div></li>
-                  <li><span class="ls-ic">&#9889;</span><div><b>Instant.</b> Every toggle broadcasts over WebSockets, so every phone stays in sync.</div></li>
-                </ul>
+            <div class="ls-play-head reveal">
+              <div><div class="ls-kicker">Try it yourself</div><h2 class="ls-h2">Don&rsquo;t watch a demo. Run the home.</h2></div>
+              <p class="ls-lead">Your little home. Tap, rotate, explore.<br>A local simulation, in English or Malay.</p>
+            </div>
+            <div class="maya-lab reveal" id="mayaLab" data-arcade="true">
+              <div class="maya-home-panel">
+                <div class="maya-panel-top">
+                  <div class="maya-panel-title"><span class="maya-live-dot"></span><span>My Home</span></div>
+                  <div class="maya-role-switch" aria-label="Choose a demo role">
+                    <button type="button" class="maya-role-btn active" data-role="parent" aria-pressed="true">Parent</button>
+                    <button type="button" class="maya-role-btn" data-role="child" aria-pressed="false">Child</button>
+                  </div>
+                </div>
+                <div class="maya-home-stage">
+                  <div class="maya-room-tabs" aria-label="Rooms">
+                    <button type="button" class="maya-room-tab active" data-room="living">Living room</button>
+                    <button type="button" class="maya-room-tab" data-room="bedroom">Bedroom</button>
+                    <button type="button" class="maya-room-tab" data-room="study">Study</button>
+                  </div>
+                  <div class="maya-arcade" id="mayaRoomVisual">
+                    <div class="arcade-hud"><span><i></i> HOME / <b id="arcadeRoomName">LIVING ROOM</b></span><span>LOCAL PLAY</span></div>
+                    <canvas id="mayaHomeCanvas" tabindex="0" role="img" aria-label="3D interactive home. Drag to rotate. Arrow keys rotate, plus and minus zoom. Use device buttons below to switch appliances."></canvas>
+                    <div id="arcadeMarkers" class="arcade-markers"></div>
+                    <div class="arcade-controls" aria-label="3D view controls"><button type="button" data-view="left" aria-label="Rotate left">↶</button><button type="button" data-view="right" aria-label="Rotate right">↷</button><button type="button" data-view="in" aria-label="Zoom in">+</button><button type="button" data-view="out" aria-label="Zoom out">−</button><button type="button" data-view="reset">Reset view</button></div>
+                    <div class="arcade-hint">DRAG TO EXPLORE · TAP A DEVICE</div>
+                  </div>
+                  <div class="arcade-quests"><div><b>Little home, big possibilities.</b><span id="arcadeScore">0 / 3 discoveries</span></div><ol><li data-quest="scene">Set a scene</li><li data-quest="rooms">Explore all rooms</li><li data-quest="safe">Try child-safe Wi-Fi</li></ol><button type="button" id="arcadeRestart">Start again ↺</button></div>
+                  <div class="maya-device-row" id="mayaDevices">
+                    <button type="button" class="maya-device" data-device="light" aria-pressed="true"><span class="maya-device-icon">&#9728;</span><b>Light</b><span>On</span></button>
+                    <button type="button" class="maya-device" data-device="tv" aria-pressed="true"><span class="maya-device-icon">&#9645;</span><b>TV</b><span>On</span></button>
+                    <button type="button" class="maya-device" data-device="fan" aria-pressed="false"><span class="maya-device-icon">&#10042;</span><b>Fan</b><span>Off</span></button>
+                    <button type="button" class="maya-device" data-device="router" aria-pressed="true"><span class="maya-device-icon">&#9678;</span><b>Wi-Fi</b><span>On</span></button>
+                  </div>
+                  <div class="maya-lab-footer">
+                    <div class="maya-energy">Devices on: <b id="mayaDeviceCount">3 of 4</b></div>
+                    <div class="maya-scenes"><button type="button" class="maya-scene-btn" data-scene="movie">Movie night</button><button type="button" class="maya-scene-btn" data-scene="focus">Focus</button><button type="button" class="maya-scene-btn" data-scene="away">Leaving</button></div>
+                  </div>
+                </div>
               </div>
-              <div class="ls-visual">
-                <model-viewer src="/static/models/house.glb" alt="3D modern smart home" camera-controls auto-rotate rotation-per-second="16deg" interaction-prompt="none" camera-orbit="35deg 68deg 110%" min-camera-orbit="auto 45deg auto" max-camera-orbit="auto 82deg auto" field-of-view="30deg" shadow-intensity="0.7" exposure="1.05" environment-image="neutral" loading="lazy"></model-viewer>
+              <div class="maya-chat-panel">
+                <div class="maya-panel-top"><div class="maya-panel-title"><span class="maya-live-dot"></span><span>Ask Maya</span></div><small>Local simulation · no AI calls</small></div>
+                <div class="maya-chat-log" id="mayaChatLog" aria-live="polite"></div>
+                <div class="maya-quick"><button type="button" data-command="Movie night">Movie night</button><button type="button" data-command="Bukak lampu">Bukak lampu</button><button type="button" data-command="Turn everything off">All off</button></div>
+                <form class="maya-chat-form" id="mayaChatForm"><label class="sr-only" for="mayaCommand">Ask Maya</label><input id="mayaCommand" autocomplete="off" placeholder="Try: turn on the fan" maxlength="80"><button type="submit" aria-label="Send command">&#8593;</button></form>
+                <div class="maya-permission" id="mayaPermission"><b>Parent mode:</b> every demo control is available.</div>
               </div>
             </div>
           </div>
         </section>
 
-        <!-- ===== DEMO video ===== -->
-        <section id="demo" class="ls-sec ls-dark ls-alt">
+        <!-- ===== MAYA ECOSYSTEM ===== -->
+        <section id="ecosystem" class="ls-sec ls-dark ls-iteration">
+          <div class="ls-orb" style="width:560px;height:560px;background:#b55b25;top:-220px;right:-120px;"></div>
           <div class="ls-inner">
-            <div class="ls-split rev reveal">
-              <div class="ls-visual">
-                <video class="ls-scene" src="/static/media/app-demo.mp4" poster="/static/media/app-poster.jpg" autoplay muted loop playsinline></video>
-              </div>
+            <div class="ls-iteration-head reveal">
               <div>
-                <div class="ls-kicker">See it in action</div>
-                <h2 class="ls-h2">Control that feels instant.</h2>
-                <p class="ls-lead">Sign in, tap a channel, watch it flip &mdash; the socket responds and every other device updates live. No refresh, no lag.</p>
-                <ul class="ls-feats">
-                  <li><span class="ls-ic">&#128268;</span><div><b>3-channel sockets.</b> Name each outlet &mdash; &ldquo;PS5&rdquo;, &ldquo;TV&rdquo;, &ldquo;Lamp&rdquo; &mdash; and control them one by one.</div></li>
-                  <li><span class="ls-ic">&#127769;</span><div><b>All off.</b> One button cuts every active channel across the house.</div></li>
-                  <li><span class="ls-ic">&#128225;</span><div><b>Live status.</b> Online / offline and channel state, always current.</div></li>
-                </ul>
+                <div class="ls-kicker">One connected ecosystem</div>
+                <h2 class="ls-h2">The whole family. One Maya.</h2>
+              </div>
+              <p class="ls-lead">One ecosystem. Everyone gets the right access.</p>
+            </div>
+            <div class="ls-roadmap">
+              <article class="ls-road-card reveal">
+                <span class="ls-road-no">01</span><span class="ls-road-state">For parents</span>
+                <h3>Your family, connected.</h3><p>Invite, manage and check in.</p>
+              </article>
+              <article class="ls-road-card reveal">
+                <span class="ls-road-no">02</span><span class="ls-road-state">For children</span>
+                <h3>Freedom, with limits.</h3><p>Approved devices. Homework. Family chat.</p>
+              </article>
+              <article class="ls-road-card reveal">
+                <span class="ls-road-no">03</span><span class="ls-road-state">Maya AI</span>
+                <h3>Just ask Maya.</h3><p>Home help in English or Malay.</p>
+              </article>
+              <article class="ls-road-card reveal">
+                <span class="ls-road-no">04</span><span class="ls-road-state">Connected home</span>
+                <h3>Every room, in sync.</h3><p>Live controls. Shared with your family.</p>
+              </article>
+              <article class="ls-road-card reveal">
+                <span class="ls-road-no">05</span><span class="ls-road-state">Protected</span>
+                <h3>Your rules. Protected.</h3><p>Secure sign-in. Child permissions. Scoped access.</p>
+              </article>
+              <article class="ls-road-card reveal">
+                <span class="ls-road-no">06</span><span class="ls-road-state">Open source</span>
+                <h3>Make it work your way.</h3><p>Build hardware with the open-source Maya Library. Connect AI through the Open API.</p>
+              </article>
+            </div>
+            <div class="ls-ecosystem-cta reveal">
+              <div><b>Open to your ideas.</b><span>Open source. Apache 2.0.</span></div>
+              <div class="ls-cta-row">
+                <a href="/integrate" class="ls-btn ls-btn-cyan">Explore API + Library</a>
+                <a href="maya-open-api-skill.md" class="ls-btn ls-btn-ghost" download>Get AI agent skill</a>
               </div>
             </div>
           </div>
@@ -1036,60 +1197,22 @@
               <div>
                 <div class="ls-kicker">Meet Maya</div>
                 <h2 class="ls-h2">Just ask.</h2>
-                <p class="ls-lead">Maya is your household&rsquo;s AI assistant, right inside the chat. Ask in plain language &mdash; English or Malay &mdash; and she runs it. The whole family shares one house conversation.</p>
+                <p class="ls-lead">Your home listens. English or Malay.</p>
                 <ul class="ls-feats">
-                  <li><span class="ls-ic">&#128172;</span><div><b>Natural language.</b> &ldquo;bukak tv&rdquo;, &ldquo;turn everything off&rdquo; &mdash; Maya understands.</div></li>
-                  <li><span class="ls-ic">@</span><div><b>Mentions.</b> Tag <b>@Maya</b> or a family member in the shared house chat.</div></li>
+                  <li><span class="ls-ic">&#128172;</span><div>&ldquo;Bukak tv.&rdquo; Done.</div></li>
+                  <li><span class="ls-ic">@</span><div>Maya + family. One chat.</div></li>
                 </ul>
               </div>
               <div class="ls-visual">
                 <div class="ls-chat">
                   <div class="ls-bub me">@Maya bukak tv <small>13:31</small></div>
                   <div class="ls-maya-tag">&#10022; Maya</div>
-                  <div class="ls-bub maya">Done &mdash; the TV is on. Anything else? <small>13:31</small></div>
-                  <div class="ls-bub me">turn everything off when we leave <small>13:32</small></div>
+                  <div class="ls-bub maya">TV is on. <small>13:31</small></div>
+                  <div class="ls-bub me">turn everything off <small>13:32</small></div>
                   <div class="ls-maya-tag">&#10022; Maya</div>
-                  <div class="ls-bub maya">All channels are off. Safe travels! <small>13:32</small></div>
+                  <div class="ls-bub maya">All off. <small>13:32</small></div>
                 </div>
               </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- ===== HARDWARE ESP32 3D ===== -->
-        <section class="ls-sec ls-dark ls-alt">
-          <div class="ls-inner">
-            <div class="ls-split rev reveal">
-              <div class="ls-visual">
-                <model-viewer id="espModel" src="/static/models/esp32.glb" alt="ESP32 controller board" camera-controls interaction-prompt="none" camera-orbit="0deg 75deg 105%" field-of-view="28deg" exposure="1.35" shadow-intensity="0.9" tone-mapping="aces" environment-image="neutral" loading="lazy"></model-viewer>
-              </div>
-              <div>
-                <div class="ls-kicker">Real hardware</div>
-                <h2 class="ls-h2">Powered by ESP32.</h2>
-                <p class="ls-lead">Every Maya socket runs on an ESP32 &mdash; provisioned over Bluetooth in seconds, then online over Wi-Fi. Open firmware, open API, yours to build on.</p>
-                <ul class="ls-feats">
-                  <li><span class="ls-ic">&#128225;</span><div><b>BLE provisioning.</b> Scan, set Wi-Fi, done &mdash; no cloud-account juggling.</div></li>
-                  <li><span class="ls-ic">&#128275;</span><div><b>Open API.</b> Wire Maya into your own automations.</div></li>
-                </ul>
-                <div class="ls-cta-row" style="margin-top:1.6rem;">
-                  <a href="/store" class="ls-btn ls-btn-cyan">Get the hardware &rarr;</a>
-                  <a href="/integrate" class="ls-btn ls-btn-ghost" style="background:rgba(255,255,255,.05);color:#d7e9ff;border-color:rgba(255,255,255,.14);">API &amp; Docs</a>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- ===== THEMES ===== -->
-        <section class="ls-sec ls-dark">
-          <div class="ls-inner reveal" style="text-align:center;">
-            <div class="ls-kicker" style="display:inline-block;">Make it yours</div>
-            <h2 class="ls-h2">One glass. Your colour.</h2>
-            <p class="ls-lead" style="margin:0 auto;">Glassmorphism is the brand &mdash; the accent is yours. Pick a mood and the whole app re-tints instantly.</p>
-            <div class="ls-themes">
-              <div class="ls-theme"><div class="dot" style="background:#22d3ee;color:#22d3ee;"></div><b>Aurora</b><span>Cyan &middot; default</span></div>
-              <div class="ls-theme"><div class="dot" style="background:#bef264;color:#bef264;"></div><b>Obsidian</b><span>Lime</span></div>
-              <div class="ls-theme"><div class="dot" style="background:#f0569e;color:#f0569e;"></div><b>Spectrum</b><span>Magenta</span></div>
             </div>
           </div>
         </section>
@@ -1101,9 +1224,9 @@
             <div class="ls-gs-copy">
               <div class="ls-kicker">Start now</div>
               <h2 class="ls-h2">Bring your home online.</h2>
-              <p class="ls-lead">Create an account, add your first socket, and invite the family. Free to start.</p>
+              <p class="ls-lead">Get Maya. Invite the family. Feel at home.</p>
               <div class="ls-cta-row" style="margin-top:1.6rem;">
-                <a href="/static/app-release.apk" download="maya-smart-home.apk" class="ls-btn ls-btn-cyan"><span>&#128229;</span> Download Android App</a>
+                <a href="app-release.apk" download="maya-smart-home.apk" class="ls-btn ls-btn-cyan"><span>&#128229;</span> Download Android App</a>
               </div>
             </div>
         
@@ -1171,7 +1294,7 @@
       </section>
 
       <footer class="ls-footer">
-        <div>&#9889; Maya Smart Home &mdash; your home, your family, and Maya AI in one glass dashboard.</div>
+        <div>Maya. Home, together.</div>
         <div style="margin-top:.6rem; opacity:.75;">&copy; 2026 Maya Smart Home &middot; <a href="/store">Store</a> &middot; <a href="/integrate">API &amp; Docs</a></div>
       </footer>
       </div>
@@ -1221,7 +1344,7 @@
         </div>
         <div style="display: flex; align-items: center; gap: 0.75rem;">
           <button onclick="openModal('modal-house-settings')" class="btn btn-secondary" style="width: auto; padding: 0.5rem 1rem; font-size: 0.8rem; border-radius: 8px;">⚙️ House Settings</button>
-          <a href="/static/app-release.apk" download="maya-smart-home.apk" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.5rem; width: auto; padding: 0.5rem 1.2rem; border-radius: 8px; text-decoration: none; font-size: 0.85rem; font-weight: 600;">
+          <a href="app-release.apk" download="maya-smart-home.apk" class="btn btn-primary" style="display: inline-flex; align-items: center; gap: 0.5rem; width: auto; padding: 0.5rem 1.2rem; border-radius: 8px; text-decoration: none; font-size: 0.85rem; font-weight: 600;">
             <span>📥</span> Download APK
           </a>
         </div>
@@ -2317,18 +2440,86 @@
     checkSession();
   </script>
 
-  <!-- 3D model viewer (Google) for the scroll landing -->
-  <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/4.0.0/model-viewer.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/ScrollTrigger.min.js"></script>
   <script>
-    // Reveal-on-scroll for the marketing landing.
-    // Rect-based check (not IntersectionObserver): reveals anything whose top
-    // crosses 88% of the viewport, on load / scroll / resize. Cannot leave a
-    // section permanently hidden regardless of scroll speed.
+    // Cinematic landing animation. GSAP adds choreography when available;
+    // every important element has a dependency-free reveal fallback.
     (function () {
       var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       var reveals = [].slice.call(document.querySelectorAll('.landing .reveal'));
+
+      // Low-resolution Canvas scene scaled with hard pixels: city, moon,
+      // windows, searchlights and an energy beam. No image/monster asset.
+      var canvas = document.getElementById('lsHeroCanvas');
+      var ctx = canvas && canvas.getContext('2d');
+      var raf = 0;
+      var city = [];
+      var stars = [];
+      function hash(n) { var x = Math.sin(n * 127.1) * 43758.5453; return x - Math.floor(x); }
+      function sizePixelScene() {
+        if (!canvas || !ctx) return;
+        var scale = Math.max(3, Math.min(6, Math.round(window.devicePixelRatio || 1) * 3));
+        canvas.width = Math.max(240, Math.round(canvas.clientWidth / scale));
+        canvas.height = Math.max(180, Math.round(canvas.clientHeight / scale));
+        ctx.imageSmoothingEnabled = false;
+        city = []; stars = [];
+        var x = -4; var i = 0;
+        while (x < canvas.width + 10) {
+          var w = 8 + Math.floor(hash(i + 4) * 18);
+          city.push({ x:x, w:w, h:24 + Math.floor(hash(i + 31) * 58), seed:i });
+          x += w + 2 + Math.floor(hash(i + 9) * 4); i++;
+        }
+        for (i = 0; i < 70; i++) stars.push({ x:Math.floor(hash(i + 80) * canvas.width), y:Math.floor(hash(i + 170) * canvas.height * .6), s:hash(i + 290) > .82 ? 2 : 1 });
+      }
+      function drawPixelScene(ms) {
+        if (!ctx || !canvas) return;
+        var w = canvas.width, h = canvas.height, t = ms / 1000;
+        ctx.clearRect(0,0,w,h);
+        ctx.fillStyle = '#071015'; ctx.fillRect(0,0,w,h);
+        ctx.fillStyle = '#d9d5b7'; ctx.beginPath(); ctx.arc(w * .78,h * .22,Math.max(12,w * .055),0,Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#071015'; ctx.fillRect(Math.floor(w*.795),Math.floor(h*.16),Math.floor(w*.045),Math.floor(h*.11));
+        stars.forEach(function(star, i){ ctx.globalAlpha = .22 + ((Math.floor(t * 3 + i) % 4) * .12); ctx.fillStyle = i % 7 === 0 ? '#72f6ff' : '#f4e7c3'; ctx.fillRect(star.x,star.y,star.s,star.s); });
+        ctx.globalAlpha = .15; ctx.fillStyle = '#72f6ff';
+        var sweep = Math.sin(t * .55) * w * .18;
+        ctx.beginPath(); ctx.moveTo(w*.2,h); ctx.lineTo(w*.56+sweep,h*.08); ctx.lineTo(w*.61+sweep,h*.08); ctx.closePath(); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(w*.86,h); ctx.lineTo(w*.48-sweep,h*.12); ctx.lineTo(w*.43-sweep,h*.12); ctx.closePath(); ctx.fill();
+        ctx.globalAlpha = 1;
+        city.forEach(function(b){
+          var top = h - b.h;
+          ctx.fillStyle = b.seed % 3 === 0 ? '#102c30' : '#0b2024'; ctx.fillRect(b.x,top,b.w,b.h);
+          ctx.fillStyle = '#061113'; ctx.fillRect(b.x+2,top+4,Math.max(2,b.w-4),3);
+          for(var yy=top+10; yy<h-5; yy+=8){ for(var xx=b.x+3; xx<b.x+b.w-3; xx+=6){ var on = hash(b.seed*91+xx*7+yy) > .46; if(on){ ctx.fillStyle = ((Math.floor(t*2)+b.seed+xx+yy)%11===0) ? '#72f6ff' : '#ffb547'; ctx.fillRect(xx,yy,2,3); } } }
+        });
+        ctx.fillStyle = '#030708'; ctx.fillRect(0,h-5,w,5);
+        var beamY = Math.floor(h * (.34 + Math.sin(t*.8)*.035));
+        var beamW = Math.floor((.5 + .5*Math.sin(t*.95)) * w*.28);
+        var grad = ctx.createLinearGradient(w*.38,beamY,w*.38+beamW,beamY);
+        grad.addColorStop(0,'rgba(114,246,255,0)'); grad.addColorStop(.3,'rgba(114,246,255,.72)'); grad.addColorStop(1,'rgba(255,181,71,0)');
+        ctx.fillStyle = grad; ctx.fillRect(Math.floor(w*.34),beamY,Math.max(1,beamW),2);
+        if (!reduce && !document.hidden) raf = requestAnimationFrame(drawPixelScene);
+      }
+      if (canvas && ctx) { sizePixelScene(); drawPixelScene(0); window.addEventListener('resize', sizePixelScene, {passive:true}); }
+
       if (reduce) {
         reveals.forEach(function (el) { el.classList.add('in'); });
+      } else if (window.gsap && window.ScrollTrigger) {
+        gsap.registerPlugin(ScrollTrigger);
+        reveals.forEach(function(el){
+          gsap.fromTo(el,{autoAlpha:0,y:70},{autoAlpha:1,y:0,duration:1,ease:'power3.out',scrollTrigger:{trigger:el,start:'top 86%',once:true},onStart:function(){el.classList.add('in');}});
+        });
+        var heroTl = gsap.timeline({defaults:{ease:'power4.out'}});
+        heroTl.from('.ls-bulletin',{y:-40,autoAlpha:0,duration:.55})
+          .from('.ls-eyebrow',{x:-35,autoAlpha:0,duration:.5},'-.18')
+          .from('.ls-hero h1',{y:90,autoAlpha:0,skewX:-10,duration:1},'-.25')
+          .from('.ls-sub,.ls-signal-row',{y:28,autoAlpha:0,duration:.65,stagger:.12},'-.55')
+          .from('.ls-cta-row .ls-btn',{y:24,autoAlpha:0,duration:.5,stagger:.1},'-.4')
+          .from('.ls-phone-wrap',{x:120,rotationY:-18,autoAlpha:0,duration:1.15},'-.9');
+        gsap.to('.ls-phone-wrap',{yPercent:18,ease:'none',scrollTrigger:{trigger:'.ls-hero',start:'top top',end:'bottom top',scrub:1}});
+        gsap.to('.ls-hero-copy',{yPercent:-12,ease:'none',scrollTrigger:{trigger:'.ls-hero',start:'top top',end:'bottom top',scrub:1}});
+        gsap.utils.toArray('.ls-orb').forEach(function(orb){ gsap.fromTo(orb,{yPercent:-18},{yPercent:28,ease:'none',scrollTrigger:{trigger:orb.parentElement,start:'top bottom',end:'bottom top',scrub:1.2}}); });
+        gsap.utils.toArray('.ls-road-card').forEach(function(card,i){ gsap.from(card,{scale:.82,rotation:(i%2?2:-2),duration:.8,ease:'back.out(1.5)',scrollTrigger:{trigger:card,start:'top 88%',once:true}}); });
+        gsap.from('.ls-stats .ls-stat',{y:50,autoAlpha:0,stagger:.12,duration:.75,ease:'power3.out',scrollTrigger:{trigger:'.ls-stats',start:'top 88%',once:true}});
       } else {
         var rTick = false;
         var check = function () {
@@ -2350,31 +2541,19 @@
         window.addEventListener('load', check);
       }
 
-      // Scroll-driven spin for the ESP32 board: map its section's scroll
-      // progress to camera azimuth so it turns as you read.
-      var esp = document.getElementById('espModel');
-      if (esp && !reduce) {
-        var ticking = false;
-        function spin() {
-          ticking = false;
-          var sec = esp.closest('.ls-sec');
-          if (!sec) return;
-          var r = sec.getBoundingClientRect();
-          var vh = window.innerHeight || 1;
-          // progress 0..1 as the section travels through the viewport
-          var p = 1 - (r.top + r.height / 2) / (vh + r.height / 2);
-          p = Math.max(0, Math.min(1, p));
-          var theta = -60 + p * 300; // sweep ~300deg across the scroll
-          esp.setAttribute('camera-orbit', theta.toFixed(1) + 'deg 75deg 105%');
-        }
-        window.addEventListener('scroll', function () {
-          if (!ticking) { ticking = true; requestAnimationFrame(spin); }
-        }, { passive: true });
-        // model-viewer needs the src loaded before orbit sticks
-        esp.addEventListener('load', spin);
-        spin();
+      // Small pointer tilt makes the pixel cards feel physical without
+      // competing with scroll. It is disabled for touch and reduced motion.
+      if (!reduce && window.matchMedia('(pointer:fine)').matches) {
+        document.querySelectorAll('.ls-road-card,.ls-reel').forEach(function(card){
+          card.addEventListener('pointermove',function(e){ var r=card.getBoundingClientRect(); var rx=((e.clientY-r.top)/r.height-.5)*-5; var ry=((e.clientX-r.left)/r.width-.5)*7; card.style.transform='perspective(800px) rotateX('+rx+'deg) rotateY('+ry+'deg) translateZ(4px)'; });
+          card.addEventListener('pointerleave',function(){ card.style.transform=''; });
+        });
       }
+
+
+      window.addEventListener('beforeunload',function(){ if(raf) cancelAnimationFrame(raf); });
     })();
   </script>
+  <script src="maya-home-arcade.js"></script>
 </body>
 </html>

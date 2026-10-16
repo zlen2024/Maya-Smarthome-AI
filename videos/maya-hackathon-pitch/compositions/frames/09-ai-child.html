@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <title>F9 · The child app: screen time, location, permissions</title>
+  </head>
+  <body>
+    <template>
+      <style>
+        #root[data-composition-id="f09-ai-child"] { position: absolute; inset: 0; overflow: hidden; }
+        [data-composition-id="f09-ai-child"] .stage { position: absolute; inset: 0; overflow: hidden; background: #E5E4E2; font-family: "Montserrat", sans-serif; color: #0A0A0A; }
+        [data-composition-id="f09-ai-child"] .haze { position: absolute; left: -80px; top: -80px; width: 2080px; height: 1240px; background: radial-gradient(42% 48% at 96% -6%, rgba(10, 10, 10, 0.38) 0%, rgba(10, 10, 10, 0) 70%), radial-gradient(62% 62% at 80% 0%, rgba(83, 104, 120, 0.48) 0%, rgba(83, 104, 120, 0) 72%), radial-gradient(55% 60% at 0% 100%, rgba(255, 255, 255, 0.75) 0%, rgba(255, 255, 255, 0) 70%); }
+        [data-composition-id="f09-ai-child"] .label { font-family: "JetBrains Mono", monospace; font-size: 24px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: #3E4F5C; }
+        [data-composition-id="f09-ai-child"] .card { background: rgba(255, 255, 255, 0.6); border: 3px solid rgba(10, 10, 10, 0.12); border-radius: 24px; box-shadow: 0 24px 60px rgba(10, 10, 10, 0.1); box-sizing: border-box; }
+        [data-composition-id="f09-ai-child"] .pad { position: absolute; inset: 0; padding: 90px 120px; box-sizing: border-box; display: flex; flex-direction: column; gap: 24px; }
+        [data-composition-id="f09-ai-child"] .row { display: flex; gap: 48px; flex: 1; align-items: center; }
+        [data-composition-id="f09-ai-child"] .phone { position: relative; width: 400px; height: 800px; flex: none; border: 12px solid #0A0A0A; border-radius: 56px; overflow: hidden; background: #0A0A0A; box-shadow: 0 30px 70px rgba(10, 10, 10, 0.25); box-sizing: border-box; }
+        [data-composition-id="f09-ai-child"] .phone img { position: absolute; left: 0; top: 0; width: 766px; height: auto; display: block; }
+        [data-composition-id="f09-ai-child"] .child { flex: 1; padding: 40px 44px; display: flex; flex-direction: column; gap: 22px; align-self: stretch; }
+        [data-composition-id="f09-ai-child"] .cols { display: flex; gap: 44px; flex: 1; }
+        [data-composition-id="f09-ai-child"] .left { width: 430px; flex: none; display: flex; flex-direction: column; gap: 22px; justify-content: center; }
+        [data-composition-id="f09-ai-child"] .right { flex: 1; display: flex; flex-direction: column; gap: 18px; justify-content: center; }
+        [data-composition-id="f09-ai-child"] .ringrow { display: flex; align-items: center; gap: 28px; }
+        [data-composition-id="f09-ai-child"] .ring { width: 200px; height: 200px; flex: none; }
+        [data-composition-id="f09-ai-child"] .ring circle { fill: none; stroke-width: 20; }
+        [data-composition-id="f09-ai-child"] .ring .bg { stroke: rgba(10, 10, 10, 0.1); }
+        [data-composition-id="f09-ai-child"] .ring .fg { stroke: #536878; stroke-linecap: round; }
+        [data-composition-id="f09-ai-child"] .time { font-size: 60px; font-weight: 900; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; line-height: 1; }
+        [data-composition-id="f09-ai-child"] .lim { font-size: 27px; font-weight: 700; color: rgba(10, 10, 10, 0.72); margin-top: 8px; }
+        [data-composition-id="f09-ai-child"] .loc { display: flex; align-items: center; gap: 18px; padding: 18px 22px; border-radius: 18px; background: rgba(255, 255, 255, 0.6); border: 2px solid rgba(10, 10, 10, 0.1); }
+        [data-composition-id="f09-ai-child"] .loc svg { width: 48px; height: 48px; flex: none; }
+        [data-composition-id="f09-ai-child"] .loc b { display: block; font-size: 30px; font-weight: 700; }
+        [data-composition-id="f09-ai-child"] .perm { display: flex; align-items: center; justify-content: space-between; padding: 12px 4px; border-top: 2px solid rgba(10, 10, 10, 0.08); }
+        [data-composition-id="f09-ai-child"] .perm b { font-size: 30px; font-weight: 700; flex: 1; }
+        [data-composition-id="f09-ai-child"] .perm .st { font-family: "JetBrains Mono", monospace; font-size: 20px; font-weight: 700; color: rgba(10, 10, 10, 0.64); margin-right: 16px; }
+        [data-composition-id="f09-ai-child"] .tg { position: relative; width: 76px; height: 42px; border-radius: 21px; background: #536878; flex: none; }
+        [data-composition-id="f09-ai-child"] .knob { position: absolute; left: 38px; top: 4px; width: 34px; height: 34px; border-radius: 50%; background: #FFFFFF; }
+      </style>
+      <div data-hf-id="hf-0cr6" id="root" data-composition-id="f09-ai-child" data-width="1920" data-height="1080">
+        <div data-hf-id="hf-tan6" class="stage">
+          <div data-hf-id="hf-s723" class="haze" data-layout-allow-overflow=""></div>
+          <div data-hf-id="hf-tjp3" class="pad">
+            <div data-hf-id="hf-q2i5" class="label">The other half · the child companion app</div>
+            <div data-hf-id="hf-thy4" class="row">
+              <div data-hf-id="hf-kda4" class="phone">
+                <img data-hf-id="hf-z18s" data-layout-allow-overflow="" src="assets/media/ui-dashboard.png" alt="Maya app home dashboard">
+              </div>
+              <div data-hf-id="hf-rkgw" class="child card">
+                <div data-hf-id="hf-s2tq" class="label">Child app · Ali</div>
+                <div data-hf-id="hf-6ra9" class="cols">
+                  <div data-hf-id="hf-i0dv" class="left">
+                    <div data-hf-id="hf-ji2a" class="ringrow">
+                      <svg data-hf-id="hf-0a5e" class="ring" viewBox="0 0 200 200"><circle data-hf-id="hf-s8es" class="bg" cx="100" cy="100" r="86" /><circle data-hf-id="hf-j02z" class="fg" cx="100" cy="100" r="86" transform="rotate(-90 100 100)" /></svg>
+                      <div data-hf-id="hf-yeow"><div data-hf-id="hf-eqms" class="time">0h 00m</div><div data-hf-id="hf-wq3k" class="lim">of a 2h daily limit</div></div>
+                    </div>
+                    <div data-hf-id="hf-8l3m" class="loc">
+                      <svg data-hf-id="hf-e7ft" viewBox="0 0 48 48"><path data-hf-id="hf-koj8" d="M24 44s-14-13-14-24a14 14 0 0 1 28 0c0 11-14 24-14 24z" fill="none" stroke="#0A0A0A" stroke-width="4" stroke-linejoin="round" /><circle data-hf-id="hf-0s0b" cx="24" cy="20" r="5" fill="#536878" /></svg>
+                      <div data-hf-id="hf-y7yw"><div data-hf-id="hf-nw90" class="label">Last known location</div><b data-hf-id="hf-1j7d">Home · 3:02 PM</b></div>
+                    </div>
+                  </div>
+                  <div data-hf-id="hf-8dr2" class="right">
+                    <div data-hf-id="hf-pj8f" class="label perm-label">Outlet permissions · set by the parent</div>
+                    <div data-hf-id="hf-c0lj" class="perm p1"><b data-hf-id="hf-nhan">Tv</b><span data-hf-id="hf-fkh4" class="st">ALLOWED</span><div data-hf-id="hf-tk6r" class="tg"><div data-hf-id="hf-0pvg" class="knob"></div></div></div>
+                    <div data-hf-id="hf-3cpo" class="perm p2"><b data-hf-id="hf-3vjn">Ps5</b><span data-hf-id="hf-w6zk" class="st">ALLOWED</span><div data-hf-id="hf-2vo3" class="tg"><div data-hf-id="hf-860k" class="knob"></div></div></div>
+                    <div data-hf-id="hf-44dh" class="perm p3"><b data-hf-id="hf-sbxp">Channel 3</b><span data-hf-id="hf-v02h" class="st">ALLOWED</span><div data-hf-id="hf-2hd2" class="tg"><div data-hf-id="hf-6z3h" class="knob"></div></div></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <script>
+        (function () {
+          var ID = "f09-ai-child";
+          var DUR = 11.12;
+          var all = document.querySelectorAll('[data-composition-id="' + ID + '"]');
+          var R = all[all.length - 1];
+          function q(s) { return R.querySelector(s); }
+          function qa(s) { return Array.prototype.slice.call(R.querySelectorAll(s)); }
+          var tl = gsap.timeline({ paused: true });
+          function rise(el, at, o) {
+            o = o || {};
+            tl.fromTo(el, { opacity: 0, x: o.x || 0, y: o.y == null ? 36 : o.y, scale: o.s || 1 }, { opacity: 1, x: 0, y: 0, scale: 1, duration: o.d || 0.5, ease: o.e || "power3.out" }, at);
+          }
+          function clamp(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+
+          tl.fromTo(q(".stage"), { opacity: 0, filter: "blur(10px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.45, ease: "power2.out" }, 0);
+          tl.fromTo(q(".haze"), { x: 0, y: 0 }, { x: -60, y: 30, duration: DUR, ease: "none" }, 0);
+
+          // "That was Maya's own voice assistant."
+          rise(q(".label"), 0.15, { x: -24, y: 0, d: 0.45 });
+          rise(q(".phone"), 0.4, { x: -60, y: 0, d: 0.6 });
+
+          // "The child app adds the other half…"
+          rise(q(".child"), 3.1, { x: 60, y: 0, d: 0.6 });
+
+          // "…screen time, last known location…"
+          var ring = q(".ring .fg");
+          var RLEN = ring.getTotalLength();
+          ring.style.strokeDasharray = RLEN;
+          var timeEl = q(".time");
+          var eOut = gsap.parseEase("power3.out");
+          var perms = qa(".perm");
+          var stEls = perms.map(function (p) { return p.querySelector(".st"); });
+          var offAt = [8.75, 9.05];
+          var drv = { t: 0 };
+          function render(t) {
+            var p = eOut(clamp((t - 5.4) / 1.6));
+            var mins = Math.round(102 * p);
+            timeEl.textContent = Math.floor(mins / 60) + "h " + (mins % 60 < 10 ? "0" : "") + (mins % 60) + "m";
+            ring.style.strokeDashoffset = RLEN * (1 - 0.85 * p);
+            stEls[0].textContent = t >= offAt[0] ? "BLOCKED" : "ALLOWED";
+            stEls[1].textContent = t >= offAt[1] ? "BLOCKED" : "ALLOWED";
+          }
+          render(0);
+          tl.fromTo(drv, { t: 0 }, { t: DUR, duration: DUR, ease: "none", onUpdate: function () { render(drv.t); } }, 0);
+          rise(q(".ringrow"), 5.2, { y: 24, d: 0.5 });
+          rise(q(".loc"), 6.8, { y: 20, d: 0.45 });
+
+          // "…and the outlet permissions parents set."
+          rise(q(".perm-label"), 8.3, { x: 20, y: 0, d: 0.4 });
+          perms.forEach(function (el, i) { rise(el, 8.45 + i * 0.16, { x: 24, y: 0, d: 0.4 }); });
+          [0, 1].forEach(function (i) {
+            tl.fromTo(perms[i].querySelector(".knob"), { x: 0 }, { x: -34, duration: 0.3, ease: "power3.inOut", immediateRender: false }, offAt[i]);
+            tl.fromTo(perms[i].querySelector(".tg"), { backgroundColor: "#536878" }, { backgroundColor: "rgba(10,10,10,0.22)", duration: 0.3, ease: "none", immediateRender: false }, offAt[i]);
+          });
+
+          window.__timelines["f09-ai-child"] = tl;
+        })();
+      </script>
+    </template>
+  </body>
+</html>

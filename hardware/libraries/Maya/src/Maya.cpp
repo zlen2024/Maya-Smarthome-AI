@@ -261,6 +261,8 @@ class GenericWriteCallback : public BLECharacteristicCallbacks {
     String s = String(pChar->getValue().c_str());   // std::string on core 2.x, String on 3.x
     s = sanitizeBleText(s);
     String uuid = pChar->getUUID().toString().c_str();
+    // The length only, never the value: two of these are the WiFi password and the PIN.
+    Serial.printf("BLE write received: %s (%d bytes)\n", uuid.c_str(), (int)s.length());
 
     if      (uuid == SSID_UUID)   { recvSSID = s; haveSSID = true; }
     else if (uuid == PASS_UUID)   { recvPASS = s; havePASS = true; }
@@ -287,7 +289,46 @@ bool isAcceptablePin(const String& p) {
   return true;
 }
 
+// The BLE library of core 2.0.x does NOT start advertising again when a phone
+// disconnects (its own comment says it should). Without this, one dropped or
+// refused connection leaves the board silent until it is rebooted, and the app
+// reports that it cannot find the device.
+class ProvisionServerCallbacks : public BLEServerCallbacks {
+  void onConnect(BLEServer*) override {
+    Serial.println("BLE: phone connected.");
+  }
+  void onDisconnect(BLEServer*) override {
+    Serial.println("BLE: phone disconnected. Advertising again.");
+    BLEDevice::startAdvertising();
+  }
+};
+
+// Why a WiFi attempt failed, in the serial log. Reason codes are the ESP-IDF
+// ones: 201 no AP found (wrong name, or a 5 GHz-only network - the C3 is
+// 2.4 GHz only), 202/15/204 auth or handshake failed (wrong password), 205
+// connection failed, 2 auth expired.
+void onWifiDisconnected(WiFiEvent_t, WiFiEventInfo_t info) {
+  Serial.printf("WiFi: disconnected, reason %d\n", (int)info.wifi_sta_disconnected.reason);
+}
+
+// What the board can actually hear. If the network is not in this list, no
+// password will help: it is out of range or on 5 GHz.
+void logVisibleNetworks(const String& wanted) {
+  int n = WiFi.scanNetworks(false, true);   // blocking, include hidden
+  Serial.printf("WiFi scan: %d networks.\n", n);
+  bool found = false;
+  for (int i = 0; i < n; i++) {
+    bool match = WiFi.SSID(i) == wanted;
+    if (match) found = true;
+    Serial.printf("  %s '%s'  %d dBm  ch %d\n", match ? "->" : "  ",
+                  WiFi.SSID(i).c_str(), (int)WiFi.RSSI(i), (int)WiFi.channel(i));
+  }
+  Serial.println(found ? "WiFi scan: the network was found." : "WiFi scan: the network was NOT found (name differs, out of range, or 5 GHz only).");
+  WiFi.scanDelete();
+}
+
 void startBLEProvisioning() {
+  WiFi.onEvent(onWifiDisconnected, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   String advName = "Maya-" + String(DEVICE_ID);
   Serial.printf("Starting BLE provisioning mode. Advertising as '%s'...\n", advName.c_str());
   Serial.printf("PIN protection: %s\n", ble_pin == "" ? "unclaimed (first owner sets the PIN)" : "enabled");
@@ -295,6 +336,7 @@ void startBLEProvisioning() {
   BLEDevice::setMTU(517);
   BLEDevice::init(advName.c_str());
   pServer  = BLEDevice::createServer();
+  pServer->setCallbacks(new ProvisionServerCallbacks());
   pService = pServer->createService(SERVICE_UUID);
 
   ssidChar   = pService->createCharacteristic(SSID_UUID,   BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
@@ -359,6 +401,14 @@ void startBLEProvisioning() {
         WiFi.mode(WIFI_STA);
         WiFi.disconnect(true);
         delay(150);
+#if CONFIG_IDF_TARGET_ESP32C3
+        // Many C3 boards (SuperMini and clones) have an antenna that cannot take
+        // full transmit power: they hear the router and never complete the
+        // handshake. A lower TX power is the usual cure.
+        WiFi.mode(WIFI_STA);
+        WiFi.setTxPower(WIFI_POWER_8_5dBm);
+#endif
+        if (r == 0) logVisibleNetworks(recvSSID);
         WiFi.begin(recvSSID.c_str(), recvPASS.c_str());
 
         int attempts = 0;

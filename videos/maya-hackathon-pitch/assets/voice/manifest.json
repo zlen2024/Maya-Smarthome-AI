@@ -64,103 +64,49 @@
       "seconds": 10.691
     },
     {
-      "id": "08-ai-child",
-      "frame": 8,
+      "id": "08-demo-lead",
+      "frame": "08-demo",
       "voice": "Puck",
-      "text": "Just say, 'Maya, turn off the TV' \u2014 the AI agent finds the right outlet and switches it. The child app shares screen time and location, and parents set which outlets each child may use.",
-      "path": "assets/voice/08-ai-child.wav",
-      "model": "gemini-2.5-flash-preview-tts",
-      "seconds": 10.451
-    },
-    {
-      "id": "09-benefits",
-      "frame": 9,
-      "voice": "Sulafat",
-      "text": "One app instead of many. Hands-free control. Peace of mind at work. Less wasted power \u2014 and no rewiring.",
-      "path": "assets/voice/09-benefits.wav",
+      "text": "Here it is on the real hardware \u2014 one spoken command, one outlet.",
+      "path": "assets/voice/08-demo-lead.wav",
       "model": "gemini-3.1-flash-tts-preview",
-      "seconds": 9.96
+      "seconds": 4.48
     },
     {
-      "id": "10a-sdg",
-      "frame": 10,
-      "voice": "Puck",
-      "text": "Maya delivers on four S-D-Gs: eleven, safer communities; three, well-being; seven, clean energy; and twelve, responsible consumption.",
-      "path": "assets/voice/10a-sdg.wav",
-      "model": "gemini-2.5-flash-preview-tts",
-      "seconds": 10.731
-    },
-    {
-      "id": "10b-esg",
-      "frame": 10,
+      "id": "09-child",
+      "frame": "09-ai-child",
       "voice": "Sulafat",
-      "text": "And on all three E-S-G pillars: Environmental, less standby waste; Social, safer children; Governance, secure and open by design.",
-      "path": "assets/voice/10b-esg.wav",
-      "model": "gemini-2.5-flash-preview-tts",
-      "seconds": 12.211
+      "text": "That was Maya's own voice assistant. The child app adds the other half: screen time, last known location, and the outlet permissions parents set.",
+      "path": "assets/voice/09-child.wav",
+      "model": "gemini-3.1-flash-tts-preview",
+      "seconds": 10.52
     },
     {
-      "id": "11-market",
-      "frame": 11,
+      "id": "11a-sdg",
+      "frame": "11-sdg-esg",
       "voice": "Puck",
-      "text": "The market is ready. Smart homes are heading to four hundred and fifty billion US dollars by twenty thirty-two, smart plugs to thirty billion, and parental-control software to over four billion.",
-      "path": "assets/voice/11-market.wav",
-      "model": "gemini-2.5-flash-preview-tts",
-      "seconds": 11.051
+      "text": "Maya delivers on four S-D-Gs: safer communities, well-being, clean energy, responsible consumption.",
+      "path": "assets/voice/11a-sdg.wav",
+      "model": "gemini-3.1-flash-tts-preview",
+      "seconds": 7.24
     },
     {
-      "id": "12-evidence",
-      "frame": 12,
-      "voice": "Puck",
-      "text": "Eighty-four percent of parents find smart extensions useful, and eighty-two percent would install a child monitoring app. Our prototype passed all forty tests on about ninety-five ringgit of hardware \u2014 and development is active: iteration four, for sensors and hubs, is underway.",
-      "path": "assets/voice/12-evidence.wav",
-      "model": "gemini-2.5-flash-preview-tts",
-      "seconds": 16.251
-    },
-    {
-      "id": "13-ip",
-      "frame": 13,
+      "id": "11b-esg",
+      "frame": "11-sdg-esg",
       "voice": "Sulafat",
-      "text": "Maya is open source under the Apache two point zero license, built on research at Universiti Selangor.",
-      "path": "assets/voice/13-ip.wav",
-      "model": "gemini-2.5-flash-preview-tts",
-      "seconds": 7.331
+      "text": "And on all three E-S-G pillars: less standby waste, safer children, open and secure governance.",
+      "path": "assets/voice/11b-esg.wav",
+      "model": "gemini-3.1-flash-tts-preview",
+      "seconds": 8.44
     },
     {
-      "id": "14a-close",
-      "frame": 14,
-      "voice": "Sulafat",
-      "text": "Other smart homes switch things on and off.",
-      "path": "assets/voice/14a-close.wav",
-      "model": "gemini-2.5-flash-preview-tts",
-      "seconds": 2.931
-    },
-    {
-      "id": "14b-close",
-      "frame": 14,
+      "id": "13-commercial",
+      "frame": "13-commercial",
       "voice": "Puck",
-      "text": "Maya understands your family.",
-      "path": "assets/voice/14b-close.wav",
-      "model": "gemini-2.5-flash-preview-tts",
-      "seconds": 2.691
-    },
-    {
-      "id": "14c-close",
-      "frame": 14,
-      "voice": "Sulafat",
-      "text": "Affordable, intelligent and open \u2014 so every working parent can breathe easy, knowing home is in good hands.",
-      "path": "assets/voice/14c-close.wav",
-      "model": "gemini-2.5-flash-preview-tts",
-      "seconds": 7.811
-    },
-    {
-      "id": "14d-close",
-      "frame": 14,
-      "voice": "Puck",
-      "text": "Maya: home, handled.",
-      "path": "assets/voice/14d-close.wav",
-      "model": "gemini-2.5-flash-preview-tts",
-      "seconds": 1.931
+      "text": "If we take this to market, the natural buyers would be working families with school-age children. Our suggestion is a kit \u2014 the three-channel socket with the app included \u2014 at around one hundred and ninety-nine ringgit, sold through online marketplaces and school and community partners, with an optional cloud plan at ten ringgit a month, or a hundred ringgit a year.",
+      "path": "assets/voice/13-commercial.wav",
+      "model": "gemini-3.1-flash-tts-preview",
+      "seconds": 18.72
     }
   ],
   "per_frame_seconds": {
@@ -171,13 +117,10 @@
     "5": 12.251,
     "6": 8.571,
     "7": 10.691,
-    "8": 10.451,
-    "9": 9.96,
-    "10": 22.942,
-    "11": 11.051,
-    "12": 16.251,
-    "13": 7.331,
-    "14": 15.364
+    "08-demo": 4.48,
+    "09-ai-child": 10.52,
+    "11-sdg-esg": 15.68,
+    "13-commercial": 18.72
   },
-  "total_voice_seconds": 168.943
+  "total_voice_seconds": 124.993
 }

@@ -6,7 +6,7 @@
   <title>Maya — API & Integration</title>
   <link rel="icon" type="image/png" href="/static/media/favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Press+Start+2P&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -66,6 +66,7 @@
     #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(120px); background: #111935; border: 1px solid var(--border); padding: 13px 20px; border-radius: 13px; font-weight: 600; font-size: .88rem; transition: transform .3s; z-index: 50; }
     #toast.show { transform: translateX(-50%) translateY(0); }
   </style>
+  <link rel="stylesheet" href="/static/maya-portal-light.css">
 </head>
 <body>
   <header>
@@ -77,8 +78,8 @@
   </header>
 
   <main>
-    <h1>Open API integration</h1>
-    <p>Control your Maya devices from your own apps and automations with a house-scoped API key.</p>
+    <h1>Make Maya yours.</h1>
+    <p>Connect your apps, automations and AI.</p>
 
     <section id="keysSection">
       <h2>Your API keys</h2>
@@ -88,8 +89,8 @@
     <section>
       <h2>Authentication</h2>
       <div class="card">
-        <p class="muted">Every Open API request is authenticated with your key in the <code>X-API-Key</code> header. All data is scoped to the house the key belongs to.</p>
-        <p class="muted">Each key is limited to <strong>60 requests per minute</strong>. Over that, the API answers <code>429 Too Many Requests</code> with a <code>Retry-After</code> header in seconds — wait that long rather than retrying immediately.</p>
+        <p class="muted">Use your key in <code>X-API-Key</code>. Every key belongs to one house.</p>
+        <p class="muted">60 requests a minute. A <code>429</code> response includes a retry time.</p>
         <pre id="authExample"></pre>
       </div>
     </section>
@@ -99,17 +100,17 @@
       <div class="card">
         <div class="endpoint">
           <span class="method get">GET</span><span class="path">/api/open/v1/devices</span>
-          <p class="muted" style="margin-top:6px">List every device in your house with channel states.</p>
+          <p class="muted" style="margin-top:6px">See your home.</p>
           <pre id="ep1"></pre>
         </div>
         <div class="endpoint" style="margin-top:22px">
           <span class="method get">GET</span><span class="path">/api/open/v1/devices/{device_id}</span>
-          <p class="muted" style="margin-top:6px">Get one device with its channel states.</p>
+          <p class="muted" style="margin-top:6px">See one device.</p>
           <pre id="ep2"></pre>
         </div>
         <div class="endpoint" style="margin-top:22px">
           <span class="method post">POST</span><span class="path">/api/open/v1/devices/{device_id}/command</span>
-          <p class="muted" style="margin-top:6px">Switch a channel. Body: <code>{"cmd": "on|off|all_on|all_off", "channel": 1-3}</code>.</p>
+          <p class="muted" style="margin-top:6px">Switch a channel: <code>on</code>, <code>off</code>, <code>all_on</code>, <code>all_off</code>.</p>
           <pre id="ep3"></pre>
         </div>
         <div class="row" style="margin-top:20px">
@@ -122,8 +123,7 @@
       <h2>Agent skill (SKILL.md)</h2>
       <div class="card">
         <p class="muted" style="margin-top:0">
-          Give this to your AI agent (Claude, etc.) so it can control your Maya home in plain language —
-          it teaches the agent to authenticate, list devices, and switch channels. Copy it, then paste your API key when asked.
+          Give this to your AI agent. It teaches Maya device control in plain language.
         </p>
         <div class="row" style="margin-bottom:12px">
           <button onclick="copySkill()">📋 Copy SKILL.md</button>
