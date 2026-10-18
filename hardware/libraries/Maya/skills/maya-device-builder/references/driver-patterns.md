@@ -66,7 +66,7 @@ of this; the rules, in order of how much damage skipping them does:
 
 1. **Off at boot**, in `setup()` before anything else, and a ~10 k resistor from the driver's
    gate/base to GND so the output stays off while the chip resets or is being flashed.
-2. **A hard cap on one run, enforced by a hardware timer** (`esp_timer_start_once`, armed *before* the
+2. **A hard cap on one run, enforced by an `esp_timer`** (its own high-priority task, independent of `loop()`; `esp_timer_start_once`, armed *before* the
    pin goes high), **not by `loop()`**. `maya.loop()` blocks for 10+ seconds while WiFi reconnects
    and for minutes during Bluetooth setup; a cutoff that waits for `loop()` is no cutoff. The timer
    callback only drives the pin low and sets a flag; `loop()` reports it. The cap is a constant of

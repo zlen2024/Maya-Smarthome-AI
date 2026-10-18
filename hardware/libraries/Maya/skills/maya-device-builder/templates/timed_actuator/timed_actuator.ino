@@ -9,8 +9,11 @@
 //   1. OFF at boot, and before WiFi is up (pins float while the chip resets and flashes:
 //      fit a ~10 k resistor from the driver's input to its OFF level: to GND for a
 //      transistor/MOSFET stage or any active-HIGH input, to 3.3 V for an active-LOW relay
-//      module).
-//   2. A hard cap on how long it may run, enforced by a hardware timer (esp_timer), NOT by
+//      module). The level is written BEFORE pinMode(OUTPUT) in setup(), so the pin is never
+//      an output at the wrong level; keep that order. A 5 V module that does not release
+//      from 3.3 V (see Hardware below) will also click ON during every reset: use one of the
+//      fixes listed there.
+//   2. A hard cap on how long it may run, enforced by an esp_timer (its own high-priority task), NOT by
 //      loop(): maya.loop() can block for many seconds (WiFi reconnect) or minutes (Bluetooth
 //      setup), and a cutoff that waits for loop() is no cutoff. The timer is armed and
 //      CHECKED before the output is allowed on: if it cannot be armed, the output stays off
