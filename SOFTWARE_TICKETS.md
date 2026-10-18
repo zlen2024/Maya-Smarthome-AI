@@ -20,7 +20,7 @@ how to tell it is done.**
 library version, firmware version and when it was built.
 
 **Already sent (library 0.3.0).** (Check on a real board with a BLE explorer such as nRF Connect
-that the characteristic is really present before building on it: it is the 8th on the service, and the
+that the characteristic is really present before building on it: it is one of the service's characteristics (the stack registers them in pointer order, not declaration order), and the
 library now reserves 40 attribute handles for the service instead of the default 15 to make room.)
 A new read-only BLE characteristic
 `12345678-1234-1234-1234-123456789008` on the existing service. Value (UTF-8 JSON, no secrets):

@@ -29,8 +29,8 @@ const int RELAY_ON  = HIGH;
 const int RELAY_OFF = (RELAY_ON == HIGH) ? LOW : HIGH;
 
 void setup() {
-  pinMode(OUTPUT_PIN, OUTPUT);
-  digitalWrite(OUTPUT_PIN, RELAY_OFF);      // a safe (OFF) state before WiFi comes up
+  digitalWrite(OUTPUT_PIN, RELAY_OFF);      // a safe (OFF) state before WiFi comes up: set the level
+  pinMode(OUTPUT_PIN, OUTPUT);              // FIRST, then make it an output (no glitch to the other level)
 
   maya.setName("My device");                // CHANGE: what a person would call it
 

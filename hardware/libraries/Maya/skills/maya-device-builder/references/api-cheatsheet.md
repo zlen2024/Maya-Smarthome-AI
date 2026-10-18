@@ -70,6 +70,10 @@ Logic is 3.3 V; a pin sources a few mA, not a relay coil or a bridge of strain g
 (use a transistor or load switch past ~10 mA). Power a 5 V relay module from VIN, not 3V3.
 **Most relay modules switch ON when their input is LOW** (active-low): set the polarity before
 connecting a load, and make the boot state OFF in that polarity (`templates/always_on`).
+A 5 V active-LOW module often does **not release** from a 3.3 V "off" (the optocoupler LED still
+conducts through VCC minus 3.3 V): use a module rated for 3.3 V logic, JD-VCC separation or a
+transistor stage, and test that it really switches off. Set the output level before
+`pinMode(OUTPUT)` so the pin never glitches to the ON level at boot.
 Mains: fused supply, enclosed relay and terminals, never live on a breadboard.
 
 ## Limits

@@ -32,7 +32,7 @@ driver, calibration, two power builds).
   `.confirm()` (a person must approve). Tare, calibrate, factory reset, a valve, a lock.
 - **At most 32 capabilities and 4 KB of descriptor.** `begin()` prints why if refused.
 - **Anything that moves, heats, pumps, locks or floods needs safety ON THE DEVICE**, not in
-  the app: off at boot (and a pull-down on the driver's gate: pins float while the chip
+  the app: off at boot (and a pull resistor to the OFF level on the driver's input: pins float while the chip
   resets or is flashed), a hard maximum run time enforced by a **hardware timer, not by `loop()`** (which can block for
   minutes) whatever was asked,
   a cooldown and a daily total, and the state reported back (also when the device itself
