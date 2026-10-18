@@ -191,6 +191,9 @@ class _CapabilityControlState extends State<CapabilityControl> {
 
       case 'button':
         return FilledButton.tonal(
+          // The app-wide filled-button theme is full width (infinite minimum width) for the
+          // login screen; inside this Row that is an unbounded-width layout error.
+          style: FilledButton.styleFrom(minimumSize: const Size(72, 44)),
           onPressed: widget.enabled
               ? () => _push(null, confirmText: 'Press $_label?')
               : null,

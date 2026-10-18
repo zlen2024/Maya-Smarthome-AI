@@ -55,7 +55,7 @@ class Palette extends ThemeExtension<Palette> {
   Color get onInk => base;
 
   /// Faint text — hints, disabled.
-  Color get faint => muted.withOpacity(0.6);
+  Color get faint => muted.withOpacity(0.85);   // 0.6 was ~2.6:1 on Plaster: unreadable at 11 px
 
   @override
   Palette copyWith() => this;

@@ -32,6 +32,10 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
   List<dynamic> _devices = [];
   List<dynamic> _relays = [];
   List<dynamic> _permissions = [];
+
+  /// device_id -> the descriptor payload (capabilities + state), the same read the
+  /// Devices tab makes. It lets this screen tell a 3-channel socket from anything else.
+  final Map<String, Map<String, dynamic>> _caps = {};
   bool _loading = true;
   String? _error;
   StreamSubscription? _broadcastSub;
@@ -55,9 +59,38 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
     super.dispose();
   }
 
+  /// One refresh at a time: a slow network must not let every 10 s tick start another chain
+  /// of requests, nor let an old chain finish late and overwrite newer state.
+  bool _fetching = false;
+
   Future<void> _fetchAll() async {
+    if (_fetching) return;
+    _fetching = true;
+    try {
+      await _fetchAllOnce();
+    } finally {
+      _fetching = false;
+    }
+  }
+
+  Future<void> _fetchAllOnce() async {
     try {
       final devices = await ApiService.getDevices();
+      final caps = <String, Map<String, dynamic>>{};
+      for (final d in devices) {
+        final id = d['device_id'] as String?;
+        if (id == null) continue;
+        try {
+          caps[id] = await ApiService.getCapabilities(id)
+              .timeout(const Duration(seconds: 8));
+        } catch (_) {
+          // One failed read must not turn a scale back into three "Channel" switches
+          // for ten seconds: keep what was known. A device never read before is drawn
+          // as the 3-channel socket it used to be.
+          final before = _caps[id];
+          if (before != null) caps[id] = before;
+        }
+      }
       List<dynamic> relays = [];
       List<dynamic> perms = [];
       try {
@@ -71,6 +104,9 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
       if (mounted) {
         setState(() {
           _devices = devices;
+          _caps
+            ..clear()
+            ..addAll(caps);
           _relays = relays;
           _permissions = perms;
           _loading = false;
@@ -94,14 +130,100 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
       final idx = _devices.indexWhere((d) => d['device_id'] == deviceId);
       if (idx == -1) return;
       if (data['type'] == 'device_update') {
-        _devices[idx]['ch1'] = data['ch1'];
-        _devices[idx]['ch2'] = data['ch2'];
-        _devices[idx]['ch3'] = data['ch3'];
+        // A protocol-2 board sends only the channels that changed; a protocol-1 board sends
+        // all three. Copy only what is present, or an unchanged channel is blanked.
+        for (final k in const ['ch1', 'ch2', 'ch3']) {
+          if (data.containsKey(k)) _devices[idx][k] = data[k];
+        }
         _devices[idx]['online'] = true;
+        // A protocol-2 device sends its readings as `state`; keep them for the card.
+        final reported = data['state'];
+        if (reported is Map) {
+          final entry = _caps.putIfAbsent(
+              deviceId as String, () => {'capabilities': [], 'state': {}});
+          final st = entry['state'] is Map
+              ? Map<String, dynamic>.from(entry['state'] as Map)
+              : <String, dynamic>{};
+          reported.forEach((k, v) => st[k.toString()] = v);
+          entry['state'] = st;
+        }
       } else if (data['type'] == 'device_offline') {
         _devices[idx]['online'] = false;
       }
     });
+  }
+
+  // ── Which drawing a device gets ────────────────────────────────────────
+  /// The original 3-channel board, or anything that names ch1..ch3, is drawn as three
+  /// switches. A device that says it is something else (a scale, a sensor) is drawn from
+  /// what it reports, because three "Channel" switches on it are meaningless.
+  bool _isSocketBoard(String deviceId) {
+    final raw = _caps[deviceId]?['capabilities'];
+    if (raw is! List || raw.isEmpty) return true; // not known yet: keep the old drawing
+    return raw
+        .whereType<Map>()
+        .any((c) => const ['ch1', 'ch2', 'ch3'].contains(c['key']));
+  }
+
+  String _formatReading(Map<String, dynamic> cap, dynamic v) {
+    if (v == null) return '—';
+    final kind = cap['kind'];
+    if (kind == 'switch') return (v == true || v == 'on') ? 'On' : 'Off';
+    if (v is num) {
+      final n = v == v.roundToDouble() ? v.toInt().toString() : v.toStringAsFixed(1);
+      final unit = cap['unit'];
+      return unit is String && unit.isNotEmpty ? '$n $unit' : n;
+    }
+    return v.toString();
+  }
+
+  /// One line per declared capability (reserved `_` keys are device chrome, skipped).
+  List<Widget> _readingRows(String deviceId) {
+    final raw = _caps[deviceId]?['capabilities'];
+    final state = _caps[deviceId]?['state'];
+    final st = state is Map ? state : const {};
+    final caps = (raw is List ? raw : const [])
+        .whereType<Map>()
+        .map((m) => Map<String, dynamic>.from(m))
+        // Reserved `_` keys are chrome; a button has no reading to show.
+        .where((c) => !'${c['key']}'.startsWith('_') && c['kind'] != 'button')
+        .toList();
+    final rows = <Widget>[];
+    var anyWritable = false;
+    for (final c in caps) {
+      if ((c['access'] ?? 'rw') != 'r') anyWritable = true;
+      rows.add(Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text((c['label'] ?? c['key']).toString(),
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.w600,
+                      color: context.pal.ink)),
+            ),
+            Text(_formatReading(c, st[c['key']]),
+                style: TextStyle(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w700,
+                    color: context.pal.ink)),
+          ],
+        ),
+      ));
+    }
+    if (rows.isEmpty) {
+      rows.add(Text('Waiting for this device to report.',
+          style: TextStyle(fontSize: 12.5, color: context.pal.muted)));
+    } else if (anyWritable) {
+      rows.add(Padding(
+        padding: const EdgeInsets.only(top: 6),
+        child: Text('Controls are in the Devices tab.',
+            style: TextStyle(fontSize: 12, color: context.pal.muted)),
+      ));
+    }
+    return rows;
   }
 
   // ── Channel helpers (mirror devices_tab; presentation state only) ──────
@@ -384,7 +506,7 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
                     Text(name,
                         style: TextStyle(
                             fontSize: 16, fontWeight: FontWeight.w700, color: context.pal.ink)),
-                    Text('$deviceId',
+                    Text(deviceId,
                         style: TextStyle(
                             fontSize: 11,
                             color: context.pal.faint,
@@ -425,7 +547,10 @@ class _HomeTabState extends State<HomeTab> with AutomaticKeepAliveClientMixin {
             ],
           ),
           const SizedBox(height: 14),
-          for (int ch = 1; ch <= 3; ch++) _channelRow(device, ch, accent, online),
+          if (_isSocketBoard(deviceId))
+            for (int ch = 1; ch <= 3; ch++) _channelRow(device, ch, accent, online)
+          else
+            ..._readingRows(deviceId),
         ],
       ),
     );

@@ -1,7 +1,7 @@
 name: maya_smart_home
 description: "Maya Smart Home mobile app - BLE provisioning and 3-channel relay control."
 publish_to: 'none'
-version: 1.1.0+2
+version: 1.2.0+3
 
 environment:
   sdk: '>=3.2.0 <4.0.0'

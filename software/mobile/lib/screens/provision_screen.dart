@@ -16,6 +16,9 @@ const PIN_UUID = "12345678-1234-1234-1234-123456789003";
 const WSURL_UUID = "12345678-1234-1234-1234-123456789004";
 const STATUS_UUID = "12345678-1234-1234-1234-123456789006";
 const NEWPIN_UUID = "12345678-1234-1234-1234-123456789007";
+// Read-only facts the library (0.3.0+) publishes: {"lib","id","model","fw","name","built","bin"}.
+// Optional: older firmware does not have it, and nothing here depends on it.
+const INFO_UUID = "12345678-1234-1234-1234-123456789008";
 
 class ProvisionScreen extends StatefulWidget {
   const ProvisionScreen({super.key});
@@ -251,9 +254,32 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
       }
       _deviceId = name.substring(5);
 
+      // The name the firmware suggests ("Smart Jar"), if it says one. Best effort: a
+      // missing characteristic, a failed read or bad JSON all fall back to the generic
+      // default, and the person can type any name.
+      var suggested = '';
+      try {
+        for (final c in mayaService.characteristics) {
+          if (c.uuid.toString().toLowerCase() == INFO_UUID.toLowerCase()) {
+            final raw = utf8.decode(
+                await c.read().timeout(const Duration(seconds: 6)),
+                allowMalformed: true);
+            final info = jsonDecode(raw);
+            if (info is Map && info['name'] is String) {
+              suggested = (info['name'] as String).trim();
+              if (suggested.length > 32) suggested = suggested.substring(0, 32);
+            }
+          }
+        }
+      } catch (_) {
+        suggested = '';
+      }
+
+      if (!mounted) return; // the person left while the read was in flight
       setState(() {
         _connecting = false;
-        _nameCtrl.text = 'Maya Device ${_deviceId!.split('-').last.toUpperCase()}';
+        final tail = _deviceId!.split('-').last.toUpperCase();
+        _nameCtrl.text = suggested.isNotEmpty ? suggested : 'Maya Device $tail';
       });
     } catch (e) {
       setState(() {
@@ -526,8 +552,8 @@ class _ProvisionScreenState extends State<ProvisionScreen> {
     } catch (_) {}
 
     // The device reboots, rejoins Wi-Fi, then opens the WebSocket — allow enough
-    // time (~40s) for that whole sequence before warning.
-    const maxAttempts = 20;
+    // time (~70s) for that whole sequence before warning.
+    const maxAttempts = 35; // 70 s: a boot may retry the WiFi join twice (5 s apart) before the socket opens
     Timer.periodic(const Duration(seconds: 2), (timer) async {
       attempts++;
       if (!_submitting || !mounted) {
