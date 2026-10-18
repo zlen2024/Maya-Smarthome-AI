@@ -462,8 +462,21 @@ void startBLEProvisioning() {
       // An empty stored PIN means unclaimed: the first owner's PIN is accepted
       // as-is and becomes the device's PIN. Any stored PIN is then required.
       if (ble_pin != "" && recvPIN != ble_pin) {
-        Serial.println("PIN mismatch. Rejecting.");
+        // Someone who can keep this board off its WiFi can keep it in setup mode, and a
+        // 4-digit PIN falls to a loop. So every wrong PIN costs more than the last (1 s,
+        // 2 s ... 8 s), and from the tenth on each wrong guess costs a whole setup window
+        // (5 minutes). The right PIN is never delayed. The counter is in RAM on purpose:
+        // resetting it needs a power cycle, which needs hands on the board.
+        static uint8_t pinFails = 0;
+        if (pinFails < 255) pinFails++;
+        Serial.printf("PIN mismatch (%u). Rejecting.\n", (unsigned)pinFails);
         setStatus("6");
+        if (pinFails >= 10) {
+          Serial.println("Too many wrong PINs: each further wrong guess now costs this whole setup window.");
+          delay(timeout);   // the window ends here; the caller carries on without setup
+        } else {
+          delay(1000UL * (pinFails < 8 ? pinFails : 8));   // 1 s, 2 s, ... 8 s
+        }
         havePIN = haveSSID = havePASS = haveWS = false;
         recvPIN = recvSSID = recvPASS = recvWS = recvNEWPIN = "";
         continue;
@@ -814,7 +827,10 @@ void Maya::begin() {
     Serial.println("Boot WiFi failed. Entering BLE provisioning for re-setup.");
     startBLEProvisioning();
     loadSettings();
-    connectToWiFiOnce();
+    // Without this the board has WiFi and never reaches the server: loop() starts the
+    // socket only after a RE-connect. (A router that takes minutes to boot after a
+    // power cut gets here.)
+    if (connectToWiFiOnce()) startWebSocket();
   } else {
     startWebSocket();
   }

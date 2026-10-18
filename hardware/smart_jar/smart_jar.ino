@@ -118,7 +118,7 @@ void hxPower(bool on) {
 float lastGrams = -1e9;
 
 // Weighs, and tells Maya. Returns false while uncalibrated or if the HX711 is not answering.
-// measure() runs every pass of loop(), so a standing problem must not print every pass
+// measure() runs every few seconds for as long as the jar lives, so a standing problem must not print every time
 // (it buried the Serial log, and everything useful in it, under thousands of identical lines).
 static void sayEvery(unsigned long ms, const char* msg) {
   static unsigned long lastSaid = 0;
@@ -277,7 +277,7 @@ void setup() {
 
   loadCalibration();
   declare();
-  maya.setName("Smart Jar");                      // the name for the app to offer (the app does not read it yet: SOFTWARE_TICKETS T-1); the owner can still change it
+  maya.setName("Smart Jar");                      // the name for the app to offer (the app prefills the name field with it from app 1.2.0); the owner can still change it
 
 #if JAR_BATTERY
   bool setupMode = digitalRead(CFG_PIN) == LOW || countsPerGram == 0;

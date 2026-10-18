@@ -15,6 +15,10 @@ how to tell it is done.**
 
 ## T-1  The app cannot show or prefill a device's own name, version or build time
 
+> **Done in app 1.2.0 (name only).** `provision_screen.dart` reads the INFO characteristic and
+> prefills the name field (missing characteristic, bad JSON or a slow read fall back to
+> "Maya Device XXXX"). Showing the library version and build time on the device page is not done.
+
 **Wanted.** While adding a device, the name field starts with something meaningful
 ("Smart Jar", from the firmware's `maya.setName()`), and the device's detail page shows the
 library version, firmware version and when it was built.
@@ -98,3 +102,20 @@ changes the app's flow, so it is a ticket and not something the library can do a
 **Observed.** A device whose server is asleep prints `[WS] Disconnected` for ~30 s after
 boot; the app shows it offline. Not a library bug. A cheap health ping from the app on
 open, or a longer first-connect grace in the app's "offline" label, would hide it.
+
+---
+
+## T-7  (done in app 1.2.0) The Home tab drew every device as a 3-channel socket
+
+**Was.** `home_tab.dart` drew three "Channel 1-3" switches for every device, so a Smart Jar
+looked like a Smart Socket (and a tap sent `output_on` to a scale). Only the Devices tab used
+the descriptor.
+
+**Done.** The Home tab reads each device's capabilities (the same call as the Devices tab). A
+device that names `ch1`/`ch2`/`ch3`, or whose capabilities cannot be read, is drawn exactly as
+before; anything else is drawn as read-only reading rows (label and value, buttons skipped),
+with "Controls are in the Devices tab". One refresh at a time, 8 s limit per capability read,
+a failed read keeps the previous capabilities. A protocol-2 broadcast that carries only the
+changed channels no longer blanks the others.
+
+**Not done.** Controlling a non-socket device from the Home tab (it stays in the Devices tab).

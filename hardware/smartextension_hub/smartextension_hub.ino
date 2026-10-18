@@ -59,7 +59,7 @@ void setup() {
     maya.setSwitch(KEYS[i], false);
   }
 
-  maya.setName("Smart Extension Hub");   // the name for the app to offer (the app does not read it yet: SOFTWARE_TICKETS T-1); the owner can still change it
+  maya.setName("Smart Extension Hub");   // the name for the app to offer (the app prefills the name field with it from app 1.2.0); the owner can still change it
   maya.enableHealth();   // signal strength, uptime and firmware version in the device card
   maya.enableHub();      // before begin(): identify then says "hub", and the queue is allocated
   maya.begin();          // provisioning, WiFi, server link, local link

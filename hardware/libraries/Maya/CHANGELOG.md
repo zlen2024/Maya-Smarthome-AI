@@ -33,8 +33,15 @@ The rest of the matrix is in the tool's header: rerun it on any board that will 
 - A failed join at boot is retried twice, 5 s apart, before the board asks to be set up again.
 
 ### Fixed
-- `smart_jar`: "not calibrated" / "HX711 not answering" printed on every pass of `loop()`
-  (hundreds a second), burying the log. Now at most once per 30 s.
+- `smart_jar`: "not calibrated" / "HX711 not answering" was printed on every 5 s measurement, for
+  as long as the problem lasted (a minute of waiting for provisioning was a dozen identical
+  lines, a night a few thousand). Now at most once per 30 s. (An earlier note here said "every pass of
+  loop(), hundreds a second": wrong, the always-on build measures every 5 s.)
+- A board whose boot join failed and which then went through Bluetooth setup and joined WiFi
+  never opened the server socket (loop() only did so after a RE-connect). It does now.
+- Setup PIN guesses are slowed: 1 s, 2 s ... 8 s per wrong PIN, and from the tenth wrong guess each
+  one costs the whole 5-minute window. The right PIN is never delayed. (Anyone who can keep a board
+  off its WiFi could otherwise brute-force a 4-digit PIN in setup mode.)
 
 ## [0.3.0]
 
@@ -44,7 +51,7 @@ board has done it.
 
 ### Added
 - `setName("Smart Jar")`: the name a person would call the device. It goes to Serial and to
-  the Bluetooth INFO characteristic. **The phone app does not read it yet** (it shows a fixed
+  the Bluetooth INFO characteristic. **The phone app reads it from version 1.2.0** (older versions show a fixed
   "Maya Device XXXX"): `SOFTWARE_TICKETS.md` T-1. The owner's own name still wins (PROTOCOL.md 4).
 - `printInfo()` and a boot banner on Serial: library version, model, firmware, name,
   device id, **when the sketch was built**, the first 8 characters of the running binary's MD5

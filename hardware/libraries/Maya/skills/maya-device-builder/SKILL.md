@@ -80,7 +80,7 @@ driver, calibration, two power builds).
 3. **Choose pins** with `references/api-cheatsheet.md` (board table). Check strapping and
    input-only pins before wiring, not after.
 4. **Copy a template** from `templates/` (`always_on`, `battery_sensor`, `timed_actuator`) and fill in. Set the display name:
-   `maya.setName("Hall lamp");` - it is the name an app can offer to start from, and it is printed in the Serial banner. **Today the phone app does not read it** and shows a fixed "Maya Device XXXX" in the name field until SOFTWARE_TICKETS T-1 is done; do not tell the user the phone will show it.
+   `maya.setName("Hall lamp");` - it is the name an app can offer to start from, and it is printed in the Serial banner. The phone app (1.2.0 and later) puts it in the name field when adding the device; older app versions show a fixed "Maya Device XXXX". The owner can always type another name.
 5. **Write the driver** (`references/driver-patterns.md`): non-blocking, filtered, with a
    deadband so a noisy reading does not flood the link.
 6. **Compile** with arduino-cli (below). Fix warnings in your own file.
