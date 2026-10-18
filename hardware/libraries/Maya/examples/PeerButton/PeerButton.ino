@@ -20,6 +20,7 @@ int level = 0;
 
 void setup() {
   pinMode(BUTTON, INPUT_PULLUP);
+  maya.setName("Fan button");
 
   // The answer to what we sent. A refusal arrives here: out of scope, or the
   // hardware said no. The sender does not log it again; the receiver's audit

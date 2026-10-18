@@ -18,6 +18,7 @@ Maya maya("smart_extension_hub", "1.0.0");
 const int PINS[3] = {2, 4, 5};   // GPIO2 is the on-board LED on most ESP32 boards
 
 void setup() {
+  maya.setName("Smart Extension Hub");
   for (int i = 0; i < 3; i++) {
     pinMode(PINS[i], OUTPUT);
     digitalWrite(PINS[i], LOW);

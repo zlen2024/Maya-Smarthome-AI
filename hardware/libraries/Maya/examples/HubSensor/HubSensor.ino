@@ -31,6 +31,7 @@ float readSalt() { return analogRead(SALT_PIN) * 100.0 / 4095.0; }
 float readBattery() { return analogRead(BATT_PIN) * 100.0 / 4095.0; }
 
 void setup() {
+  maya.setName("Salt jar");
   maya.addNumber("salt", "Salt left").readOnly().unit("%").history();
   maya.addReserved("_batt");          // the battery, in the card header (5.3)
 

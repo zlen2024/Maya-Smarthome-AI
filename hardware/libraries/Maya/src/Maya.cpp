@@ -166,6 +166,7 @@ void syncEspNowPeers(Maya& m) {
 #define CMD_UUID      "12345678-1234-1234-1234-123456789005"
 #define STATUS_UUID   "12345678-1234-1234-1234-123456789006"
 #define NEWPIN_UUID   "12345678-1234-1234-1234-123456789007"
+#define INFO_UUID     "12345678-1234-1234-1234-123456789008"   // read-only: library version, model, name, build time
 
 String wifi_ssid = "";
 String wifi_pass = "";
@@ -194,6 +195,7 @@ BLECharacteristic* pinChar;
 BLECharacteristic* newpinChar;
 BLECharacteristic* cmdChar;
 BLECharacteristic* statusChar;
+BLECharacteristic* infoChar;
 
 String sanitizeBleText(String s) {
   s.replace("\r", "");
@@ -293,43 +295,110 @@ bool isAcceptablePin(const String& p) {
 // disconnects (its own comment says it should). Without this, one dropped or
 // refused connection leaves the board silent until it is rebooted, and the app
 // reports that it cannot find the device.
+esp_bd_addr_t phoneAddr;        // the connected phone, kept to relax its link later
+bool havePhone = false;
+
 class ProvisionServerCallbacks : public BLEServerCallbacks {
-  void onConnect(BLEServer*) override {
+  void onConnect(BLEServer*, esp_ble_gatts_cb_param_t* param) override {
     Serial.println("BLE: phone connected.");
+    memcpy(phoneAddr, param->connect.remote_bda, sizeof phoneAddr);
+    havePhone = true;
   }
   void onDisconnect(BLEServer*) override {
     Serial.println("BLE: phone disconnected. Advertising again.");
+    havePhone = false;
     BLEDevice::startAdvertising();
   }
 };
 
-// Why a WiFi attempt failed, in the serial log. Reason codes are the ESP-IDF
-// ones: 201 no AP found (wrong name, or a 5 GHz-only network - the C3 is
-// 2.4 GHz only), 202/15/204 auth or handshake failed (wrong password), 205
-// connection failed, 2 auth expired.
-void onWifiDisconnected(WiFiEvent_t, WiFiEventInfo_t info) {
-  Serial.printf("WiFi: disconnected, reason %d\n", (int)info.wifi_sta_disconnected.reason);
+// ─── WiFi: what we ask of the radio, and why a join failed ───────────────────────
+//
+// A device that cannot say why it will not join WiFi costs hours, so every failure is
+// logged with the router's own reason code in words.
+
+volatile int lastWifiReason = 0;
+bool wifiEventsRegistered = false;
+bool txPowerChosen = false;
+wifi_power_t wifiTxPower = WIFI_POWER_19_5dBm;
+
+const char* wifiReasonText(int r) {
+  switch (r) {
+    case 2:   return "authentication expired";
+    case 8:   return "this device left the access point (also what our own disconnect between tries reports)";
+    case 15:
+    case 204: return "4-way handshake timed out (usually a wrong password)";
+    case 39:  return "timeout: the router did not answer";
+    case 200: return "beacon timeout (signal lost)";
+    case 201: return "network not found (wrong name, out of range, or 5 GHz only)";
+    case 202: return "authentication failed (usually a wrong password)";
+    case 205: return "connection failed";
+    default:  return "see wifi_err_reason_t in esp_wifi_types.h";
+  }
 }
 
-// What the board can actually hear. If the network is not in this list, no
-// password will help: it is out of range or on 5 GHz.
-void logVisibleNetworks(const String& wanted) {
-  int n = WiFi.scanNetworks(false, true);   // blocking, include hidden
-  Serial.printf("WiFi scan: %d networks.\n", n);
-  bool found = false;
-  for (int i = 0; i < n; i++) {
-    bool match = WiFi.SSID(i) == wanted;
-    if (match) found = true;
-    Serial.printf("  %s '%s'  %d dBm  ch %d\n", match ? "->" : "  ",
-                  WiFi.SSID(i).c_str(), (int)WiFi.RSSI(i), (int)WiFi.channel(i));
+void onWifiDisconnected(WiFiEvent_t, WiFiEventInfo_t info) {
+  int reason = info.wifi_sta_disconnected.reason;
+  // Reason 8 is also what our own WiFi.disconnect() between two tries reports. Do not let
+  // it overwrite the reason the router actually gave.
+  if (reason != 8 || lastWifiReason == 0) lastWifiReason = reason;
+  Serial.printf("WiFi: not joined, reason %d - %s\n", reason, wifiReasonText(reason));
+}
+
+// Call after WiFi.mode(WIFI_STA) and before WiFi.begin().
+//
+// The Arduino core only accepts a transmit power once the station has STARTED, and that
+// is reported by an event a moment after mode() returns: setTxPower() before then
+// returns false and does nothing (the 0.2.0 code did exactly that, so a C3's power was
+// never lowered). So ask until it is accepted, and say what the radio ended up with.
+void tuneWifiRadio() {
+  if (!wifiEventsRegistered) {
+    WiFi.onEvent(onWifiDisconnected, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+    wifiEventsRegistered = true;
   }
-  Serial.println(found ? "WiFi scan: the network was found." : "WiFi scan: the network was NOT found (name differs, out of range, or 5 GHz only).");
+#if CONFIG_IDF_TARGET_ESP32C3
+  // Many C3 boards (SuperMini and clones) cannot drive their antenna at full power:
+  // they hear the router and never finish joining it. 8.5 dBm is the usual cure and is
+  // the default here; setWifiTxPower() overrides it.
+  if (!txPowerChosen) { wifiTxPower = WIFI_POWER_8_5dBm; txPowerChosen = true; }
+#endif
+  const uint32_t t0 = millis();
+  bool started = false;
+  while (millis() - t0 < 1500) {
+    // esp_wifi_set_bandwidth fails until the station exists, so it doubles as the "started" probe.
+    // A 20 MHz channel is what a router in a mixed or 40 MHz mode copes with best, and a
+    // device that sends a few hundred bytes a second gains nothing from 40.
+    if (esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20) == ESP_OK) { started = true; break; }
+    delay(10);
+  }
+  bool powerOk = true;
+  if (started && txPowerChosen) {
+    powerOk = false;
+    while (millis() - t0 < 1500) {
+      if (WiFi.setTxPower(wifiTxPower)) { powerOk = true; break; }
+      delay(10);
+    }
+  }
+  Serial.printf("WiFi radio: station %s, HT20, TX power %.1f dBm%s\n", started ? "up" : "NOT up in time",
+                WiFi.getTxPower() / 4.0, (txPowerChosen && !powerOk) ? " (could NOT be set)" : "");
+}
+
+// Whether the network the person typed is audible at all, and how loudly. If it is
+// not, no password will help.
+void logTargetNetwork(const String& wanted) {
+  int n = WiFi.scanNetworks(false, true);   // blocking, includes hidden networks
+  if (n < 0) { Serial.println("WiFi scan: failed."); return; }
+  int best = -1000, ch = 0;
+  for (int i = 0; i < n; i++) {
+    if (WiFi.SSID(i) == wanted && WiFi.RSSI(i) > best) { best = WiFi.RSSI(i); ch = WiFi.channel(i); }
+  }
+  if (ch) Serial.printf("WiFi scan: '%s' heard at %d dBm on channel %d (%d networks in range).\n", wanted.c_str(), best, ch, n);
+  else    Serial.printf("WiFi scan: '%s' NOT heard among %d networks. Check the name, the distance, and that it is 2.4 GHz.\n", wanted.c_str(), n);
   WiFi.scanDelete();
 }
 
 void startBLEProvisioning() {
-  WiFi.onEvent(onWifiDisconnected, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
   String advName = "Maya-" + String(DEVICE_ID);
+  if (self) self->printInfo();
   Serial.printf("Starting BLE provisioning mode. Advertising as '%s'...\n", advName.c_str());
   Serial.printf("PIN protection: %s\n", ble_pin == "" ? "unclaimed (first owner sets the PIN)" : "enabled");
 
@@ -337,7 +406,10 @@ void startBLEProvisioning() {
   BLEDevice::init(advName.c_str());
   pServer  = BLEDevice::createServer();
   pServer->setCallbacks(new ProvisionServerCallbacks());
-  pService = pServer->createService(SERVICE_UUID);
+  // The default is 15 handles. This service needs about 22 (the service, 8 characteristics
+  // at 2 each, and a descriptor on 5 of them); with too few the stack silently leaves the
+  // last-registered characteristics out. 40 leaves room.
+  pService = pServer->createService(BLEUUID(SERVICE_UUID), 40, 0);
 
   ssidChar   = pService->createCharacteristic(SSID_UUID,   BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
   passChar   = pService->createCharacteristic(PASS_UUID,   BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_WRITE_NR);
@@ -357,6 +429,24 @@ void startBLEProvisioning() {
   statusChar->addDescriptor(new BLE2902());
 
   statusChar->setValue("0");
+
+  // Read-only facts about the device, for an app to show before the person has typed
+  // anything. Added beside the original characteristics, so an app that does not know
+  // about it is unaffected. The WiFi password and the PIN are never in here.
+  infoChar = pService->createCharacteristic(INFO_UUID, BLECharacteristic::PROPERTY_READ);
+  {
+    StaticJsonDocument<384> doc;
+    doc["lib"]   = MAYA_LIB_VERSION;
+    doc["id"]    = DEVICE_ID.c_str();
+    doc["model"] = self ? self->model() : "";
+    doc["fw"]    = self ? self->fw() : "";
+    if (self && self->name()[0]) doc["name"] = self->name();
+    if (self) doc["built"] = self->builtAt();
+    doc["bin"] = ESP.getSketchMD5().substring(0, 8);   // names the exact binary that is running
+    String out;
+    serializeJson(doc, out);
+    infoChar->setValue(out.c_str());
+  }
 
   pService->start();
   BLEDevice::startAdvertising();
@@ -393,22 +483,27 @@ void startBLEProvisioning() {
       setStatus("1");
       delay(200);
 
+      // WiFi and Bluetooth share one radio. A phone link polling every 7.5 ms (the usual
+      // default) leaves WiFi little airtime to join a router. Ask for a calmer link now,
+      // after the app has finished discovering services and writing (asking at connect
+      // time would slow that down): 60-100 ms is plenty for the status notifications left.
+      if (havePhone) pServer->updateConnParams(phoneAddr, 0x30, 0x50, 0, 400);   // 1.25 ms and 10 ms units
+
+      // Bring WiFi up ONCE and retry on it. Tearing it down and up again for every
+      // try (the first version of this did) costs ten seconds each and is the worst
+      // thing to do to a radio the phone link is also using.
+      WiFi.persistent(false);
+      WiFi.mode(WIFI_STA);
+      tuneWifiRadio();
+      logTargetNetwork(recvSSID);
+
       bool wifiOk = false;
       int connectRetries = 3;
       for (int r = 0; r < connectRetries; r++) {
         Serial.printf("Attempting WiFi connect to '%s' (try %d/%d)...\n", recvSSID.c_str(), r + 1, connectRetries);
-        WiFi.persistent(false);
-        WiFi.mode(WIFI_STA);
-        WiFi.disconnect(true);
-        delay(150);
-#if CONFIG_IDF_TARGET_ESP32C3
-        // Many C3 boards (SuperMini and clones) have an antenna that cannot take
-        // full transmit power: they hear the router and never complete the
-        // handshake. A lower TX power is the usual cure.
-        WiFi.mode(WIFI_STA);
-        WiFi.setTxPower(WIFI_POWER_8_5dBm);
-#endif
-        if (r == 0) logVisibleNetworks(recvSSID);
+        WiFi.disconnect(false);       // leaves the radio up, ends any half-made association
+        delay(300);                   // its own "left the AP" event (reason 8) lands in here
+        lastWifiReason = 0;           // so a reason recorded from now on is the router's, not ours
         WiFi.begin(recvSSID.c_str(), recvPASS.c_str());
 
         int attempts = 0;
@@ -418,8 +513,9 @@ void startBLEProvisioning() {
           attempts++;
         }
         if (wifiOk) break;
-        Serial.println("WiFi connect attempt failed.");
+        Serial.printf("WiFi connect attempt failed (last reason %d).\n", (int)lastWifiReason);
       }
+      if (!wifiOk && pServer->getConnectedCount() == 0) BLEDevice::startAdvertising();   // the phone left meanwhile: be findable for the retry
 
       if (!wifiOk) {
         Serial.println("WiFi connection failed during BLE setup.");
@@ -457,13 +553,20 @@ void startBLEProvisioning() {
       delay(100);
       ESP.restart();
     }
+    // A sign of life, so a person watching Serial can tell "waiting for the app" from
+    // "hung".
+    static unsigned long lastNote = 0;
+    if (millis() - lastNote > 15000) {
+      lastNote = millis();
+      Serial.printf("Waiting for the app over Bluetooth (%lu s left)...\n", (timeout - (millis() - start)) / 1000);
+    }
     delay(200);
   }
 
   Serial.println("Provisioning timed out.");
   BLEDevice::stopAdvertising();
   BLEDevice::deinit();
-  statusChar = ssidChar = passChar = wsChar = pinChar = newpinChar = cmdChar = nullptr;
+  statusChar = ssidChar = passChar = wsChar = pinChar = newpinChar = cmdChar = infoChar = nullptr;
 }
 
 bool connectToWiFiOnce() {
@@ -475,6 +578,9 @@ bool connectToWiFiOnce() {
   WiFi.mode(WIFI_STA);
   WiFi.disconnect(true);
   delay(150);
+  WiFi.mode(WIFI_STA);      // disconnect(true) switched the radio off; the settings below need it on
+  tuneWifiRadio();
+  lastWifiReason = 0;
   Serial.printf("Connecting to WiFi '%s'...\n", wifi_ssid.c_str());
   WiFi.begin(wifi_ssid.c_str(), wifi_pass.c_str());
 
@@ -488,7 +594,8 @@ bool connectToWiFiOnce() {
     Serial.printf("WiFi connected. IP=%s\n", WiFi.localIP().toString().c_str());
     wifiConnected = true; wifiFailCycles = 0; return true;
   }
-  Serial.printf("WiFi failed. status=%d\n", (int)WiFi.status());
+  Serial.printf("WiFi failed. status=%d, last reason %d (%s)\n", (int)WiFi.status(),
+                (int)lastWifiReason, lastWifiReason ? wifiReasonText(lastWifiReason) : "none reported");
   wifiConnected = false; return false;
 }
 
@@ -612,12 +719,55 @@ void Maya::factoryReset() {
   ESP.restart();
 }
 
+Maya& Maya::setName(const char* displayName) {
+  name_[0] = '\0';
+  if (displayName) {
+    size_t n = strlen(displayName);
+    if (n > sizeof name_ - 1) {
+      n = sizeof name_ - 1;
+      // Do not cut a multi-byte UTF-8 character in half: the name goes into JSON.
+      while (n > 0 && ((uint8_t)displayName[n] & 0xC0) == 0x80) n--;
+    }
+    memcpy(name_, displayName, n);
+    name_[n] = '\0';
+  }
+  return *this;
+}
+
+void Maya::setWifiTxPower(wifi_power_t power) {
+  wifiTxPower = power;
+  txPowerChosen = true;
+}
+
+void Maya::printInfo() {
+  Serial.println();
+  Serial.printf("[Maya] library %s | model %s | fw %s\n", MAYA_LIB_VERSION, model(), fw());
+  Serial.printf("[Maya] name '%s' | id %s\n", name_[0] ? name_ : "(not set)", DEVICE_ID.length() ? DEVICE_ID.c_str() : "(not yet known)");
+  // The MD5 names the exact binary that is running; the build time is only when the
+  // sketch file was last compiled and can lag if only the library changed.
+  Serial.printf("[Maya] sketch built %s | binary %.8s | chip %s rev %d | free heap %u\n", built_,
+                ESP.getSketchMD5().c_str(), ESP.getChipModel(), (int)ESP.getChipRevision(),
+                (unsigned)ESP.getFreeHeap());
+}
+
+// On boards where Serial is the chip's own USB port, whatever is printed before a
+// monitor attaches is lost - which is how a perfectly healthy board looks dead. Wait a
+// moment for one; give up quickly so a board on a charger boots normally.
+static void waitForSerialMonitor() {
+#if ARDUINO_USB_CDC_ON_BOOT || defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32S3)
+  const uint32_t t = millis();
+  while (!Serial && millis() - t < 2500) delay(10);
+#endif
+}
+
 void Maya::begin() {
   self = this;
   Serial.begin(115200);
+  waitForSerialMonitor();
 
   // Unique per-board id from the factory MAC (lower 32 bits).
   DEVICE_ID = "esp32-" + String((uint32_t)ESP.getEfuseMac(), HEX);
+  printInfo();
   Serial.printf("Device ID: %s\n", DEVICE_ID.c_str());
 
   if (problem()) {
@@ -750,6 +900,12 @@ void Maya::beginSensor() {
   self = this;
   Serial.begin(115200);
   DEVICE_ID = "esp32-" + String((uint32_t)ESP.getEfuseMac(), HEX);
+  // Only on a power-on or reset, never on a timer wake: a battery sensor must not
+  // spend 2.5 s per wake waiting for a monitor that is not there.
+  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_UNDEFINED) {
+    waitForSerialMonitor();
+    printInfo();
+  }
   if (problem()) Serial.printf("[Maya] Declaration problem: %s\n", problem());
 
   resetPrefsIfNewFirmware();

@@ -265,6 +265,7 @@ void setup() {
 
   loadCalibration();
   declare();
+  maya.setName("Smart Jar");                      // the name for the app to offer (the app does not read it yet: SOFTWARE_TICKETS T-1); the owner can still change it
 
 #if JAR_BATTERY
   bool setupMode = digitalRead(CFG_PIN) == LOW || countsPerGram == 0;

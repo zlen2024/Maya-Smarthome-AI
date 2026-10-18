@@ -17,11 +17,50 @@
 #pragma once
 
 #include <Arduino.h>
+#include <WiFi.h>          // wifi_power_t
 #include "MayaCore.h"
+
+// The library's own version. Keep it equal to `version=` in library.properties
+// (extras/test/check_version.py fails if they differ) and add a line to CHANGELOG.md.
+#define MAYA_LIB_VERSION "0.3.0"
 
 class Maya : public mayalib::Core {
  public:
-  Maya(const char* model, const char* fw) : mayalib::Core(model, fw) {}
+  // `model` is what kind of device this is ("smart_jar"); `fw` is the sketch's own
+  // version ("1.0.0"). Neither is what a person sees: that is setName().
+  //
+  // The build stamp is taken HERE, in the header, so it is the time the *sketch* was
+  // compiled. (Taken inside Maya.cpp it would be the time the library was last
+  // compiled, which a build cache can leave arbitrarily old.) A board has no clock
+  // that survives a reset, so "built at" is the closest honest answer to "when was
+  // this flashed"; flashing an old build later does not change it.
+  Maya(const char* model, const char* fw) : mayalib::Core(model, fw), built_(__DATE__ " " __TIME__) {}
+
+  // The name a person would call this device ("Smart Jar", "Hall lamp"). It is only
+  // a suggestion: the owner types the real name in the app when claiming the device
+  // and that name wins (PROTOCOL.md 4). The library puts it in the Bluetooth INFO
+  // characteristic and the boot banner so an app can offer it. Up to 32 bytes; longer
+  // is cut. Call before begin(). Returns *this so it chains.
+  Maya& setName(const char* displayName);
+  const char* name() const { return name_; }
+
+  // "0.3.0" - the library, not the sketch.
+  static const char* libraryVersion() { return MAYA_LIB_VERSION; }
+  // "Oct 18 2026 01:23:45" - when this sketch was compiled.
+  const char* builtAt() const { return built_; }
+
+  // One line each on Serial: library version, model, firmware, name, id, build time.
+  // begin() prints it (after waiting up to 2.5 s for a USB serial monitor to attach,
+  // on boards where Serial is the USB port) and again when Bluetooth setup starts.
+  // Call it yourself from a serial command if you want it on request.
+  void printInfo();
+
+  // Transmit power for the WiFi radio, set before begin(). Many ESP32-C3 SuperMini
+  // clones hear a router but never finish joining it at full power; for those the
+  // library already defaults to 8.5 dBm. Pass WIFI_POWER_19_5dBm to put it back, or a
+  // lower step if joining still fails. Other boards keep the core's default unless
+  // you call this.
+  void setWifiTxPower(wifi_power_t power);
 
   // Declares the health keys of PROTOCOL.md 5.3 the library can fill in itself
   // (_rssi, _uptime, _fw) and keeps them current. Call before begin(). _batt is
@@ -94,6 +133,8 @@ class Maya : public mayalib::Core {
   void factoryReset();
 
  private:
+  const char* built_;
+  char name_[33] = "";
   bool health_ = false;
   unsigned long lastFlush_ = 0;
   unsigned long lastFull_ = 0;

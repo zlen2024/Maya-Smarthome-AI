@@ -173,6 +173,10 @@ class Core {
  public:
   Core(const char* model, const char* fw) : model_(model), fw_(fw) {}
 
+  // What the sketch said it is. Read-only; the library prints and advertises them.
+  const char* model() const { return model_; }
+  const char* fw() const { return fw_; }
+
   // declaring capabilities
   // `key` and `label` are kept as pointers, not copied: pass string literals.
   Cap& addSwitch(const char* key, const char* label, std::function<bool(bool)> fn = nullptr);

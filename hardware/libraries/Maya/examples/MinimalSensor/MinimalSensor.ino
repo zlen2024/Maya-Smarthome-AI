@@ -17,6 +17,12 @@ void setup() {
   ledcAttachPin(FAN_PIN, 0);
   ledcSetup(0, 5000, 8);
 
+  // What a person would call this. It is printed in the Serial banner (with the library
+  // version and the time this sketch was built) and sits in the Bluetooth INFO
+  // characteristic for an app to offer as the starting name. The current app does not
+  // read it yet; the owner types the real name anyway.
+  maya.setName("Lamp and fan");
+
   maya.addSwitch("lamp", "Lamp", [](bool on) { digitalWrite(LAMP_PIN, on); return true; });
 
   // A range is something the user drags between limits you know.

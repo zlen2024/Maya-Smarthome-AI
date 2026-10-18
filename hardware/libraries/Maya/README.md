@@ -1,6 +1,6 @@
 # Maya — the Arduino library
 
-Make an ESP32 board a Maya device. You say what the hardware can do; the library
+**Version 0.3.0** ([CHANGELOG](CHANGELOG.md)). Make an ESP32 board a Maya device. You say what the hardware can do; the library
 speaks [the Maya Device Protocol v2](../../../PROTOCOL.md) for you — BLE
 provisioning, WiFi, the server link, the capability descriptor, and the answers
 to `set` — and the app and Maya draw and control it **without anyone editing
@@ -29,6 +29,42 @@ sketches are in `examples/`: `MinimalSensor` (the one to copy), `SmartExtension3
 (the existing 3-relay board, on the library), `PeerButton` (a button that drives another
 device directly), `SmartExtensionHub` (the same board, also carrying other devices'
 readings) and `HubSensor` (a battery sensor that reports through a hub). A complete device built on the library, with its own driver and calibration, is `hardware/smart_jar/`.
+
+## Building your own device, with or without an AI agent
+
+`skills/` has two skills written for an agent and readable by a person:
+[`maya-device-builder`](skills/maya-device-builder/SKILL.md) (build any hardware on this
+library: API cheat sheet, driver patterns, a troubleshooting table, two compile-tested
+templates) and [`maya-library-maintainer`](skills/maya-library-maintainer/SKILL.md) (change
+the library without breaking the app, the server or devices already flashed).
+See [`skills/README.md`](skills/README.md).
+
+## Name, version and build time
+
+```cpp
+maya.setName("Smart Jar");        // the name for an app to offer; the owner can change it
+```
+
+On every boot Serial (115200) shows which library and sketch you are running:
+
+```
+[Maya] library 0.3.0 | model smart_jar | fw 1.0.0
+[Maya] name 'Smart Jar' | id esp32-9fc13de8
+[Maya] sketch built Oct 18 2026 01:23:45 | binary 3f9a1c2e | chip ESP32-C3 rev 4 | free heap 214532
+```
+
+- **library** is `MAYA_LIB_VERSION` (`Maya::libraryVersion()`), kept equal to `library.properties`.
+- **sketch built** is when *your sketch* was compiled, not when the library was. There is no
+  clock on the board that survives a reset, so this is the closest honest answer to "when was
+  this flashed": it is when the code you flashed was compiled. **binary** is the first 8
+  characters of the running firmware's MD5 and names the exact image (the build time can lag if
+  only the library changed, because the sketch file is not recompiled). `maya.builtAt()` returns it;
+  `maya.printInfo()` prints the banner on demand.
+- On a board whose Serial is its USB port (ESP32-C3/S3), `begin()` waits up to 2.5 s for a
+  serial monitor before printing, so opening the monitor a moment late no longer looks like a
+  dead board. A battery sensor skips that wait on a timer wake.
+- The same facts are in a read-only Bluetooth characteristic (`...9008`) as JSON, for an app to
+  read before the person has typed anything. No WiFi password and no PIN are in it.
 
 ## Install
 
@@ -180,6 +216,35 @@ hardware now reads. A changed value goes out within 250 ms; an unchanged one is
 never re-sent, so calling them every `loop()` is fine. Each returns `false` for an
 unknown key or the wrong kind rather than guessing.
 
+## Joining WiFi, and when it does not
+
+Bluetooth setup is the original flow, unchanged on the wire: the app writes the network,
+password, server URL and PIN, and reads status codes back. What the library does now to make
+the join dependable, and says on Serial:
+
+- It scans first and logs whether the network was **heard at all** (`'name' heard at -64 dBm
+  on channel 11`, or `NOT heard among 23 networks`). A network that is not heard cannot be
+  fixed with a password.
+- Every failure prints the router's reason in words (`WiFi: not joined, reason 202 -
+  authentication failed (usually a wrong password)`).
+- WiFi is brought up once and retried (not torn down for every try), and just before the join
+  the phone link is relaxed to 60-100 ms, because WiFi and Bluetooth share one radio.
+- The station asks for a 20 MHz channel. On an ESP32-C3 the transmit power defaults to 8.5 dBm
+  (many SuperMini clones cannot drive their antenna at full power); `setWifiTxPower()` changes
+  it. The core only accepts a power once the station has started, so the library waits for that
+  and prints `WiFi radio: station up, HT20, TX power 8.5 dBm` (or says it could not set it).
+  (The 0.2.0 code asked too early and the request was silently ignored.)
+- The Bluetooth service now reserves 40 attribute handles instead of the default 15; it needs
+  about 22, and with too few the stack can leave the last-registered characteristics out.
+- If a phone disconnects, advertising restarts (core 2.0.x does not do this by itself).
+
+**These changes compile and are unverified on a board.** In one bench session a C3 failed to
+join a 2.4 GHz router while a phone was connected over Bluetooth and joined first try in a bare
+WiFi sketch, which points at the shared radio; the changes above are the mitigation, not a
+proven fix. If your board still fails, the Serial line says which of the causes it is
+(`skills/maya-device-builder/references/troubleshooting.md`), and
+[`SOFTWARE_TICKETS.md`](../../../SOFTWARE_TICKETS.md) T-5 describes the app-side fix.
+
 ## Rules worth knowing
 
 - **Keys are permanent.** `[a-z0-9_]`, 1–24 characters. The key is what a parent's
@@ -242,6 +307,11 @@ could not build the driver, which is **not** a pass.
   reported, revoking leaves the sensor nowhere to report. Twenty deliberate bugs each fail
   it. It found one real bug: the JSON pool for incoming frames was too small for a
   `relay_ack` with 16 results, which would have been dropped without a word.
+- **Version 0.3.0 additions are compiled and unrun on a board:** the Bluetooth INFO
+  characteristic, the advertising restart and connection-parameter request, the WiFi
+  tuning (20 MHz, C3 transmit power), the retry-on-one-radio-session change, and the
+  serial-monitor wait. The version, `setName`, and banner logic have no hardware
+  dependency beyond Serial. `extras/test/check_version.py` checks the three version strings.
 - **ESP-NOW acknowledgement and deep sleep are untested.** `Maya.cpp`'s `radioSend` (the
   MAC layer's acknowledgement is what makes a sensor give up on a hub), `beginSensor`,
   `reportNow` and `sleepFor` compile for ESP32 and have never run: they need a hub and a
