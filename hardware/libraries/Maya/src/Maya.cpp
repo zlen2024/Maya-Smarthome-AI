@@ -550,7 +550,13 @@ void startBLEProvisioning() {
       delay(1500);
 
       BLEDevice::stopAdvertising();
-      delay(100);
+      // Leave the router properly before the reset. A reset straight after joining never
+      // tells the access point, which can keep the old association and answer the next join
+      // (a moment later, from the same address) with silence: "authentication expired",
+      // reason 2. That is what the first boot after provisioning looked like on a C3 that
+      // joined fine a few seconds earlier. Unverified as the cause; it is harmless either way.
+      WiFi.disconnect(true);
+      delay(500);
       ESP.restart();
     }
     // A sign of life, so a person watching Serial can tell "waiting for the app" from
@@ -795,7 +801,16 @@ void Maya::begin() {
     loadSettings();
   }
 
-  if (!connectToWiFiOnce()) {
+  // One failed join at boot is not a reason to ask the owner to set the board up again: a
+  // router that still remembers the previous association answers late, a neighbour's
+  // channel is busy for a moment. Try twice more, 5 s apart, before giving up.
+  bool joined = connectToWiFiOnce();
+  for (int again = 0; !joined && wifi_ssid.length() && again < 2; again++) {
+    Serial.println("WiFi join failed at boot. Trying again in 5 s...");
+    delay(5000);
+    joined = connectToWiFiOnce();
+  }
+  if (!joined) {
     Serial.println("Boot WiFi failed. Entering BLE provisioning for re-setup.");
     startBLEProvisioning();
     loadSettings();

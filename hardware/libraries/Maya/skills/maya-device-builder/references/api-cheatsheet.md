@@ -45,7 +45,7 @@ An unchanged value is never re-sent, so calling them every `loop()` is fine. Eac
 
 | Call | What |
 |---|---|
-| `Maya::libraryVersion()` | "0.3.0" |
+| `Maya::libraryVersion()` | "0.3.1" |
 | `maya.builtAt()` | when this sketch was compiled ("Oct 18 2026 01:23:45") |
 | `maya.printInfo()` | the banner line(s) on Serial, on demand |
 | `maya.id()`, `maya.connected()` | device id, server link up |

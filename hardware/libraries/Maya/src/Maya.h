@@ -22,7 +22,7 @@
 
 // The library's own version. Keep it equal to `version=` in library.properties
 // (extras/test/check_version.py fails if they differ) and add a line to CHANGELOG.md.
-#define MAYA_LIB_VERSION "0.3.0"
+#define MAYA_LIB_VERSION "0.3.1"
 
 class Maya : public mayalib::Core {
  public:
@@ -44,7 +44,7 @@ class Maya : public mayalib::Core {
   Maya& setName(const char* displayName);
   const char* name() const { return name_; }
 
-  // "0.3.0" - the library, not the sketch.
+  // "0.3.1" - the library, not the sketch.
   static const char* libraryVersion() { return MAYA_LIB_VERSION; }
   // "Oct 18 2026 01:23:45" - when this sketch was compiled.
   const char* builtAt() const { return built_; }

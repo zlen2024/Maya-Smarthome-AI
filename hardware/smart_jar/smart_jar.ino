@@ -118,14 +118,26 @@ void hxPower(bool on) {
 float lastGrams = -1e9;
 
 // Weighs, and tells Maya. Returns false while uncalibrated or if the HX711 is not answering.
+// measure() runs every pass of loop(), so a standing problem must not print every pass
+// (it buried the Serial log, and everything useful in it, under thousands of identical lines).
+static void sayEvery(unsigned long ms, const char* msg) {
+  static unsigned long lastSaid = 0;
+  static const char* lastMsg = nullptr;
+  if (msg != lastMsg || millis() - lastSaid >= ms) {
+    lastSaid = millis();
+    lastMsg = msg;
+    Serial.println(msg);
+  }
+}
+
 bool measure(bool force) {
   if (countsPerGram == 0) {
-    Serial.println("[jar] not calibrated: tare with the jar empty, then calibrate with a known weight");
+    sayEvery(30000, "[jar] not calibrated: tare with the jar empty, then calibrate with a known weight");
     return false;
   }
   long raw;
   if (!hxMedian(raw)) {
-    Serial.println("[jar] HX711 not answering: check DT/SCK/power (WIRING.md)");
+    sayEvery(30000, "[jar] HX711 not answering: check DT/SCK/power (WIRING.md)");
     return false;
   }
   float g = (raw - zeroRaw) / countsPerGram;

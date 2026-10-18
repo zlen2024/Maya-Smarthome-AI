@@ -1,6 +1,6 @@
 # Maya — the Arduino library
 
-**Version 0.3.0** ([CHANGELOG](CHANGELOG.md)). Make an ESP32 board a Maya device. You say what the hardware can do; the library
+**Version 0.3.1** ([CHANGELOG](CHANGELOG.md)). Make an ESP32 board a Maya device. You say what the hardware can do; the library
 speaks [the Maya Device Protocol v2](../../../PROTOCOL.md) for you — BLE
 provisioning, WiFi, the server link, the capability descriptor, and the answers
 to `set` — and the app and Maya draw and control it **without anyone editing
@@ -48,7 +48,7 @@ maya.setName("Smart Jar");        // the name for an app to offer; the owner can
 On every boot Serial (115200) shows which library and sketch you are running:
 
 ```
-[Maya] library 0.3.0 | model smart_jar | fw 1.0.0
+[Maya] library 0.3.1 | model smart_jar | fw 1.0.0
 [Maya] name 'Smart Jar' | id esp32-9fc13de8
 [Maya] sketch built Oct 18 2026 01:23:45 | binary 3f9a1c2e | chip ESP32-C3 rev 4 | free heap 214532
 ```

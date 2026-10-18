@@ -9,7 +9,7 @@ is not held open by another program (the upload will then fail with "port does n
 
 | You see | Meaning | Do |
 |---|---|---|
-| `[Maya] library 0.3.0 \| model ... \| fw ...` then `name`, `sketch built ...` | healthy start | note the library version and build time when reporting any bug |
+| `[Maya] library 0.3.1 \| model ... \| fw ...` then `name`, `sketch built ...` | healthy start | note the library version and build time when reporting any bug |
 | `New firmware build detected. Settings wiped` | every flash resets WiFi + PIN, by design | provision again |
 | `[Maya] Declaration problem: ...` | the descriptor would be refused (bad key, duplicate, > 32) | fix the declaration |
 | `No WiFi config. Entering BLE provisioning.` | a fresh board | provision from the app |
@@ -42,6 +42,13 @@ is not held open by another program (the upload will then fail with "port does n
 
 `WiFi scan: '<name>' heard at -64 dBm on channel 11` - the board hears it; the password or
 radio is the problem. `NOT heard among N networks` - nothing to do with the password.
+
+**Joins fine in one sketch, fails in another? Measure, do not guess.** Flash
+`hardware/tools/wifitest` (type the network name and password in the Serial monitor): it joins the
+same router with 9 radio settings, 4 tries each, and prints a table. Real result on an ESP32-C3
+SuperMini: 8.5 dBm joined 20/20, 11 and 13 dBm joined 0/16 (always reason 2). If your board joins
+only at low power, `maya.setWifiTxPower(WIFI_POWER_8_5dBm)` (the C3 default) is the fix; if
+reason 2 appears only on the first boot right after Bluetooth setup, see CHANGELOG 0.3.1.
 
 Rules of thumb: -67 dBm or better joins reliably, -80 does not. A hotspot on a phone is often
 5 GHz: turn on "Maximize Compatibility" (iPhone) or choose 2.4 GHz (Android).

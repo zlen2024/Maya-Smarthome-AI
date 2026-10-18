@@ -10,6 +10,32 @@ repository `maya-lib-v<version>` so a sketch's "library 0.3.0" in its Serial ban
 can be traced to an exact commit. (The library lives inside the Maya repository on
 purpose; a second git repository inside it would hide its history from the project's.)
 
+## [0.3.1]
+
+First change made with a board on the bench. Compiled (jar and hub, both chips); the changes
+below have **not yet been seen working on a board** and are called hypotheses where they are.
+
+### Measured (ESP32-C3 SuperMini, `hardware/tools/wifitest`)
+A bare WiFi sketch with no Bluetooth joined the same 2.4 GHz router with 9 radio configurations,
+4 tries each: **8.5 dBm joined 20 of 20 tries** (with or without tearing WiFi down first, with or
+without a scan first, with modem sleep on or off), **11 and 13 dBm joined 0 of 16**, always
+`reason 2 - authentication expired`. So on this board transmit power is the deciding factor,
+not the join sequence, and the library's 8.5 dBm default for the C3 is right. A fixed
+8.5 dBm is therefore what to keep; `setWifiTxPower()` exists for boards that behave otherwise.
+The rest of the matrix is in the tool's header: rerun it on any board that will not join.
+
+### Changed
+- Before the reset that follows a successful Bluetooth setup the library now leaves the router
+  properly (`WiFi.disconnect(true)`), instead of resetting while still associated. Hypothesis:
+  a router that still holds the old association can answer the very next join from the same
+  address with silence (reason 2). Seen once: a C3 joined during setup, reset, and failed three
+  joins in a row at the same 8.5 dBm that worked in the bare sketch. Harmless if wrong.
+- A failed join at boot is retried twice, 5 s apart, before the board asks to be set up again.
+
+### Fixed
+- `smart_jar`: "not calibrated" / "HX711 not answering" printed on every pass of `loop()`
+  (hundreds a second), burying the log. Now at most once per 30 s.
+
 ## [0.3.0]
 
 The protocol tests (`extras/test/`) were re-run and pass. **Not run on
