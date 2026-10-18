@@ -16,3 +16,7 @@ wiki/graph/graph.json
 
 # Obsidian vault config (wiki/ opens as a vault) — local editor state
 wiki/.obsidian/
+
+# Third-party agent skills installed by tooling (regenerable; see skills-lock.json)
+/.agents/
+/.claude/skills/
