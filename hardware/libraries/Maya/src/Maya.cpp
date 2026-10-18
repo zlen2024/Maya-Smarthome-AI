@@ -361,25 +361,26 @@ void tuneWifiRadio() {
   // the default here; setWifiTxPower() overrides it.
   if (!txPowerChosen) { wifiTxPower = WIFI_POWER_8_5dBm; txPowerChosen = true; }
 #endif
-  const uint32_t t0 = millis();
-  bool started = false;
-  while (millis() - t0 < 1500) {
-    // esp_wifi_set_bandwidth fails until the station exists, so it doubles as the "started" probe.
-    // A 20 MHz channel is what a router in a mixed or 40 MHz mode copes with best, and a
-    // device that sends a few hundred bytes a second gains nothing from 40.
-    if (esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20) == ESP_OK) { started = true; break; }
-    delay(10);
-  }
-  bool powerOk = true;
-  if (started && txPowerChosen) {
-    powerOk = false;
+  // A 20 MHz channel is what a router in a mixed or 40 MHz mode copes with best, and a
+  // device that sends a few hundred bytes a second gains nothing from 40. This only needs
+  // the driver to be initialised, which WiFi.mode(WIFI_STA) has already done.
+  const bool htOk = esp_wifi_set_bandwidth(WIFI_IF_STA, WIFI_BW_HT20) == ESP_OK;
+
+  // setTxPower() is the call that waits for the station-started event (see above), so it
+  // is the real gate. One shared 1.5 s budget; the loop cannot spin because of the delay.
+  bool powerOk = !txPowerChosen;
+  if (txPowerChosen) {
+    const uint32_t t0 = millis();
     while (millis() - t0 < 1500) {
       if (WiFi.setTxPower(wifiTxPower)) { powerOk = true; break; }
       delay(10);
     }
   }
-  Serial.printf("WiFi radio: station %s, HT20, TX power %.1f dBm%s\n", started ? "up" : "NOT up in time",
-                WiFi.getTxPower() / 4.0, (txPowerChosen && !powerOk) ? " (could NOT be set)" : "");
+  char power[40];
+  if (!txPowerChosen)  snprintf(power, sizeof power, "TX power left at the core default");
+  else if (powerOk)    snprintf(power, sizeof power, "TX power %.1f dBm", WiFi.getTxPower() / 4.0);
+  else                 snprintf(power, sizeof power, "TX power COULD NOT be set");
+  Serial.printf("WiFi radio: %s, %s\n", htOk ? "HT20" : "HT20 refused", power);
 }
 
 // Whether the network the person typed is audible at all, and how loudly. If it is
@@ -515,7 +516,6 @@ void startBLEProvisioning() {
         if (wifiOk) break;
         Serial.printf("WiFi connect attempt failed (last reason %d).\n", (int)lastWifiReason);
       }
-      if (!wifiOk && pServer->getConnectedCount() == 0) BLEDevice::startAdvertising();   // the phone left meanwhile: be findable for the retry
 
       if (!wifiOk) {
         Serial.println("WiFi connection failed during BLE setup.");

@@ -61,14 +61,19 @@ regulator and power LED can draw 100 times the chip.
 ## Timed actuators (pumps, valves, heaters, locks)
 
 Whatever can hurt something gets its limits in firmware, because the firmware is the only
-part still running when WiFi drops or an agent asks twice. `templates/timed_actuator` does all
+part still running when WiFi drops or an agent asks twice. [`templates/timed_actuator/timed_actuator.ino`](../templates/timed_actuator/timed_actuator.ino) does all
 of this; the rules, in order of how much damage skipping them does:
 
 1. **Off at boot**, in `setup()` before anything else, and a ~10 k resistor from the driver's
    gate/base to GND so the output stays off while the chip resets or is being flashed.
-2. **A hard cap on one run**, checked in `loop()` with `millis()` (never `delay()` the run). The
-   cap is a constant of the *hardware*; the declared `addDuration` maximum should equal it.
-3. **A cooldown and a daily total**, or ten polite 10-second requests are a flood.
+2. **A hard cap on one run, enforced by a hardware timer** (`esp_timer_start_once`, armed *before* the
+   pin goes high), **not by `loop()`**. `maya.loop()` blocks for 10+ seconds while WiFi reconnects
+   and for minutes during Bluetooth setup; a cutoff that waits for `loop()` is no cutoff. The timer
+   callback only drives the pin low and sets a flag; `loop()` reports it. The cap is a constant of
+   the *hardware*; the declared `addDuration` maximum should equal it.
+3. **A cooldown and a daily total**, or ten polite 10-second requests are a flood. In RAM they
+   reset on a reboot (brown-out, crash loop, server reboot): persist the total in your own
+   Preferences namespace if a reboot loop would hurt, and fuse the load's supply.
 4. **Report the state back**, including when the device ended the run itself (`setSwitch`).
 5. **`.confirm()`** on the control so Maya asks a person; **`.agentDeny()`** if no automation
    should ever start it.

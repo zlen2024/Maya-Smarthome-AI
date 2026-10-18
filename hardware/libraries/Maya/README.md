@@ -34,8 +34,8 @@ readings) and `HubSensor` (a battery sensor that reports through a hub). A compl
 
 `skills/` has two skills written for an agent and readable by a person:
 [`maya-device-builder`](skills/maya-device-builder/SKILL.md) (build any hardware on this
-library: API cheat sheet, driver patterns, a troubleshooting table, two compile-tested
-templates) and [`maya-library-maintainer`](skills/maya-library-maintainer/SKILL.md) (change
+library: API cheat sheet, driver patterns, a troubleshooting table, three
+templates: always-on, battery sensor, timed actuator) and [`maya-library-maintainer`](skills/maya-library-maintainer/SKILL.md) (change
 the library without breaking the app, the server or devices already flashed).
 See [`skills/README.md`](skills/README.md).
 
@@ -232,7 +232,7 @@ the join dependable, and says on Serial:
 - The station asks for a 20 MHz channel. On an ESP32-C3 the transmit power defaults to 8.5 dBm
   (many SuperMini clones cannot drive their antenna at full power); `setWifiTxPower()` changes
   it. The core only accepts a power once the station has started, so the library waits for that
-  and prints `WiFi radio: station up, HT20, TX power 8.5 dBm` (or says it could not set it).
+  and prints `WiFi radio: HT20, TX power 8.5 dBm` (or says it could not set it).
   (The 0.2.0 code asked too early and the request was silently ignored.)
 - The Bluetooth service now reserves 40 attribute handles instead of the default 15; it needs
   about 22, and with too few the stack can leave the last-registered characteristics out.

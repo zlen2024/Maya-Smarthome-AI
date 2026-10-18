@@ -17,7 +17,7 @@ Maya maya("my_sensor", "1.0.0");            // CHANGE
 // CHANGE: pins. ADC1 only (WiFi switches ADC2 off): GPIO 0-4 on a C3, 32-39 on an ESP32.
 #if CONFIG_IDF_TARGET_ESP32C3
 const int SENSOR_PIN = 3;
-const int BATT_PIN   = 2;                   // battery divider midpoint, or remove _batt
+const int BATT_PIN   = 1;                   // battery divider midpoint, or remove _batt (not GPIO 2: strapping)
 #else
 const int SENSOR_PIN = 34;                  // input only
 const int BATT_PIN   = 35;                  // input only

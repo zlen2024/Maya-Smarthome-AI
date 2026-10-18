@@ -19,7 +19,7 @@ void loop() { maya.loop(); }              // sensor: empty, you sleep instead
 
 | Call | Kind | Handler |
 |---|---|---|
-| `addSwitch(key, label[, fn(bool)])` | switch | on/off (no `fn` = a read-only state) |
+| `addSwitch(key, label[, fn(bool)])` | switch | on/off. **No `fn` does NOT make it read-only**: add `.readOnly()` for a state, or the app draws a control that accepts a value and does nothing |
 | `addRange(key, label, min, max, step, fn(double))` | range | number |
 | `addNumber(key, label[, fn(double)])` | number | none = read-only |
 | `addText(key, label, maxChars[, fn(const char*)])` | text | string |
@@ -63,7 +63,7 @@ An unchanged value is never re-sent, so calling them every `loop()` is fine. Eac
 | Board | Avoid / know |
 |---|---|
 | ESP32 (classic) | GPIO 6-11 are the flash. 0, 2, 12, 15 are strapping (boot state matters; 12 high at reset = 1.8 V flash, board will not boot). 34-39 are input only, no pull-ups. ADC2 pins do not work while WiFi is on: read analog on ADC1 (32-39). GPIO 2 is the on-board LED. |
-| ESP32-C3 | GPIO 0-5 are the only deep-sleep wake pins; GPIO 0-4 are ADC1 (GPIO5 is ADC2, which does not work while WiFi is on). 8 and 9 are strapping; **GPIO 9 low at reset = download mode** (the BOOT button). 18/19 are the USB; 20/21 the UART. No ext0/ext1, no ULP. |
+| ESP32-C3 | GPIO 0-5 are the only deep-sleep wake pins; GPIO 0-4 are ADC1 (GPIO5 is ADC2, which does not work while WiFi is on). 2, 8 and 9 are strapping (GPIO 2 must not be pulled low at reset); **GPIO 9 low at reset = download mode** (the BOOT button). 18/19 are the USB; 20/21 the UART. No ext0/ext1, no ULP. |
 
 Logic is 3.3 V; a pin sources a few mA, not a relay coil or a bridge of strain gauges
 (use a transistor or load switch past ~10 mA). Power a 5 V relay module from VIN, not 3V3.

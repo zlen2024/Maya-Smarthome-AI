@@ -6,7 +6,7 @@ with it and carry its version.
 
 | Skill | Use it to |
 |---|---|
-| [`maya-device-builder`](maya-device-builder/SKILL.md) | build any new hardware device on the library: a lamp, a scale, a valve, a sensor, a hub. Has an API cheat sheet, driver patterns, a troubleshooting table (Serial line -> cause) and two compile-tested templates. |
+| [`maya-device-builder`](maya-device-builder/SKILL.md) | build any new hardware device on the library: a lamp, a scale, a valve, a sensor, a hub. Has an API cheat sheet, driver patterns, a troubleshooting table (Serial line -> cause) and three templates (always-on, battery sensor, timed actuator with on-device safety limits). |
 | [`maya-library-maintainer`](maya-library-maintainer/SKILL.md) | change the library itself without breaking the app, the server or devices already flashed. What is frozen, what is additive, how to test and release. |
 
 ## Installing a skill into an agent

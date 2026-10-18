@@ -85,7 +85,8 @@ failed board - which is why the library does not send new codes on its own). The
 **Observed.** With a phone connected over Bluetooth, a C3 failed to join a 2.4 GHz router (reasons
 39, 8, 202 in turn) with the right password; a bare WiFi sketch with no Bluetooth joined
 first try. The library now relaxes the phone link just before the join and lowers transmit
-power (a first version of that power change was silently ignored by the core and is fixed). **None of that has been tested on a board** and may not be enough.
+power (a first version of that power change was silently ignored by the core; the library now waits
+for the station and prints the power it got, which should make it apply - unverified). **None of that has been tested on a board** and may not be enough.
 
 **If it is not enough (mobile).** The robust fix is for the app to disconnect Bluetooth
 after sending the credentials and learn the result by polling the server (the app already has

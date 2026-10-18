@@ -47,7 +47,7 @@ Rules of thumb: -67 dBm or better joins reliably, -80 does not. A hotspot on a p
 5 GHz: turn on "Maximize Compatibility" (iPhone) or choose 2.4 GHz (Android).
 
 **Fails only while a phone is connected over Bluetooth, joins fine in a bare WiFi sketch:**
-the two share one radio. The library pauses advertising and relaxes the link during a join; if
+the two share one radio. The library relaxes the phone link just before a join and lowers C3 transmit power; if
 it still fails, tell the owner to retry, and file a ticket with the Serial log.
 
 ## Server link
