@@ -22,17 +22,24 @@ float readSensor() {
   return analogRead(SENSOR_PIN) * 100.0f / 4095.0f;
 }
 
+// CHANGE: which level turns the load ON. A transistor or MOSFET driver is HIGH. Most cheap
+// relay MODULES are the opposite: they energise when the input is LOW, so with HIGH here a
+// mains relay would switch ON at boot and every command would be inverted.
+const int RELAY_ON  = HIGH;
+const int RELAY_OFF = (RELAY_ON == HIGH) ? LOW : HIGH;
+
 void setup() {
   pinMode(OUTPUT_PIN, OUTPUT);
-  digitalWrite(OUTPUT_PIN, LOW);            // a safe state before WiFi comes up
+  digitalWrite(OUTPUT_PIN, RELAY_OFF);      // a safe (OFF) state before WiFi comes up
 
   maya.setName("My device");                // CHANGE: what a person would call it
 
   // CHANGE: say what this device can do. Keys are permanent: [a-z0-9_], up to 24 chars.
   maya.addSwitch("power", "Power", [](bool on) {
-    digitalWrite(OUTPUT_PIN, on ? HIGH : LOW);
+    digitalWrite(OUTPUT_PIN, on ? RELAY_ON : RELAY_OFF);
     return true;                            // true only if the hardware did it
   });
+  maya.setSwitch("power", false);           // the first report must say what the pin really is
   maya.addNumber("level", "Level").readOnly().unit("%").limits(0, 100).history();
   maya.addText("note", "Status", 60).readOnly();   // the device's own sentence about itself
   maya.enableHealth();                      // signal strength, uptime, firmware in the card

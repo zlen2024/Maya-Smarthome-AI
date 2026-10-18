@@ -193,6 +193,10 @@ bool Core::setSwitch(const char* key, bool on) {
 bool Core::setNumber(const char* key, double v) {
   Cap* c = find(key);
   if (!c || (c->kind_ != NUMBER && c->kind_ != RANGE && c->kind_ != DURATION)) return false;
+  // A failed sensor read is NaN (a DHT22 does this). NaN is never equal to itself, so it
+  // would be re-sent on every flush, and JSON has no way to write it. Refuse it and keep
+  // the last good value; the sketch decides what to say about the fault.
+  if (!isfinite(v)) return false;
   if (!c->hasValue_ || c->cur_.n != v) c->dirty_ = true;
   c->cur_.n = v; c->hasValue_ = true;
   return true;

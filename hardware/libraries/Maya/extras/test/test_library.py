@@ -272,6 +272,13 @@ def test_state_reports(exe):
     d.run("setnum temp 21.5")
     assert d.run("flush")[0] == [], "an unchanged value must not be re-sent"
 
+    # A failed sensor read (NaN, or infinity) is refused, keeps the last good value, and is
+    # never sent: NaN != NaN would otherwise make it "changed" on every flush, and JSON
+    # cannot carry it.
+    for bad in ("nan", "inf", "-inf"):
+        assert d.run(f"setnum temp {bad}")[2] == ["SET 0"], f"{bad} must be refused"
+    assert d.run("flush")[0] == [], "a refused reading must not be reported"
+
     # a whole number goes out as one
     d.run("setnum temp 22")
     tx, _, _ = d.run("flush")

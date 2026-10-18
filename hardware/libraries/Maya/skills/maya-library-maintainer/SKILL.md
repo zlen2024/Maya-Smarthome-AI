@@ -44,22 +44,33 @@ Put logic in the Core files where a test can reach it. Anything in `Maya.cpp` ne
 
 ## After every change
 
-1. Compile **all** of: the five `examples/`, `hardware/smart_jar` (both `JAR_BATTERY` values),
-   `hardware/smartextension`, `hardware/smartextension_hub`, for the classic ESP32 **and** the
-   C3 where the sketch allows. A change that only builds for one chip is a change that
-   breaks the other.
+1. Compile **all** of: the five `examples/`, the three `skills/maya-device-builder/templates/`,
+   `hardware/smart_jar` (both `JAR_BATTERY` values: add
+   `--build-property "compiler.cpp.extra_flags=-DJAR_BATTERY=1"`), `hardware/smartextension`,
+   `hardware/smartextension_hub` - each for the classic ESP32 **and** the C3. A change that only
+   builds for one chip is a change that breaks the other.
    ```
    arduino-cli compile --fqbn esp32:esp32:esp32:PartitionScheme=huge_app --libraries hardware/libraries <sketch>
+   arduino-cli compile --fqbn esp32:esp32:esp32c3:PartitionScheme=huge_app,CDCOnBoot=cdc --libraries hardware/libraries <sketch>
    ```
+   **Give every compile its own `--build-path`** (e.g. `--build-path C:/mac/bp/<chip>-<sketch>`) if
+   you run two at once or two chips in a row from a script: arduino-cli's default build folder is
+   keyed by the sketch path only, so two chips building the same sketch overwrite each other's
+   objects and the link fails with "file in wrong format" - a harness error, not a library bug.
 2. Re-run `extras/test/` (needs g++ or `pip install ziglang`, ArduinoJson headers, the
    server's test dependencies). Exit `3` = could not build the driver = **not a pass**.
-3. Bump the version in **three** places - `library.properties`, `MAYA_LIB_VERSION` in
+3. **Update `skills/` in the same change** whenever an API, a Serial line, a default or a rule
+   changes: `api-cheatsheet.md` (calls and defaults), `troubleshooting.md` (every Serial string it
+   quotes), `driver-patterns.md`, the three templates (they must still compile and obey the
+   rules they teach), and `maya-device-builder/SKILL.md`. A skill that contradicts the code
+   misleads the next agent more than no skill. Grep the old string across `skills/`.
+4. Bump the version in **three** places - `library.properties`, `MAYA_LIB_VERSION` in
    `src/Maya.h`, the newest heading in `CHANGELOG.md` - and run `check_version.py`.
-4. Update `README.md`'s "What is and is not verified". **Never write "works" for something
+5. Update `README.md`'s "What is and is not verified". **Never write "works" for something
    that was only compiled.** The honest line is "compiles; not run on a board".
-5. Copy the library into the Arduino IDE's `libraries/Maya` if the human uses the IDE, or they
+6. Copy the library into the Arduino IDE's `libraries/Maya` if the human uses the IDE, or they
    will keep flashing the old one and report the old bug.
-6. Commit, then tag `maya-lib-v<version>` (only when the human asks for the tag).
+7. Commit, then tag `maya-lib-v<version>` (only when the human asks for the tag).
 
 ## Style
 

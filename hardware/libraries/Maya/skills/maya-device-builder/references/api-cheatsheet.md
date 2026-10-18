@@ -38,7 +38,8 @@ Modifiers chain off any of them: `.unit("g")` `.group("Setup")` `.readOnly()` `.
 
 `setSwitch(key, bool)` `setNumber(key, double)` `setText(key, const char*)` `setLocation(...)`.
 An unchanged value is never re-sent, so calling them every `loop()` is fine. Each returns
-`false` for an unknown key or the wrong kind.
+`false` for an unknown key or the wrong kind, and `setNumber` also for **NaN or infinity**
+(a failed sensor read): the last good value stays. Check the return.
 
 ## Library facts and settings
 
@@ -67,6 +68,9 @@ An unchanged value is never re-sent, so calling them every `loop()` is fine. Eac
 
 Logic is 3.3 V; a pin sources a few mA, not a relay coil or a bridge of strain gauges
 (use a transistor or load switch past ~10 mA). Power a 5 V relay module from VIN, not 3V3.
+**Most relay modules switch ON when their input is LOW** (active-low): set the polarity before
+connecting a load, and make the boot state OFF in that polarity (`templates/always_on`).
+Mains: fused supply, enclosed relay and terminals, never live on a breadboard.
 
 ## Limits
 

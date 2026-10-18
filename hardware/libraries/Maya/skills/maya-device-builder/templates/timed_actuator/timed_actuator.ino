@@ -10,7 +10,10 @@
 //      fit a ~10 k pull-down from the transistor gate to GND).
 //   2. A hard cap on how long it may run, enforced by a hardware timer (esp_timer), NOT by
 //      loop(): maya.loop() can block for many seconds (WiFi reconnect) or minutes (Bluetooth
-//      setup), and a cutoff that waits for loop() is no cutoff. loop() only reports it.
+//      setup), and a cutoff that waits for loop() is no cutoff. The timer is armed and
+//      CHECKED before the output is allowed on: if it cannot be armed, the output stays off
+//      and the run is refused. loop() also checks a deadline as a backup and reports what
+//      the timer did.
 //   3. A cooldown and a daily total, so repeated "start" requests cannot add up. These live
 //      in RAM, so a reboot (brown-out, crash loop, server reboot) resets them: if a reboot
 //      loop would be dangerous for your hardware, persist the total (a Preferences
@@ -22,7 +25,11 @@
 //
 // Hardware: drive a logic-level N-MOSFET or a transistor from OUT_PIN (never the pump from
 // the pin); a flyback diode across the pump; the pump on its own supply with a common
-// ground; the supply must not sag the 3.3 V rail when it starts.
+// ground; the supply must not sag the 3.3 V rail when it starts. If you drive a relay
+// MODULE instead, check its polarity: most cheap boards switch ON when the input is LOW
+// (see always_on.ino for RELAY_ON) and the "off at boot" line below must then drive it HIGH.
+// Mains: fused supply, the relay and its terminals in an enclosure, nothing live on a
+// breadboard.
 //
 // Always-on class (it has a writable control), so it needs power all the time. A battery
 // pack is fine; deep sleep is not (a sleeping device cannot be told anything, and the
@@ -47,25 +54,27 @@ const uint32_t MAX_PER_DAY_S  = 120;        // total per 24 hours
 
 volatile bool running = false;              // written by the cutoff timer and by loop()
 volatile bool timerFired = false;           // the timer switched it off; loop() reports it
-unsigned long lastStop = 0;                 // millis() of the end of the last run (cooldown)
+volatile unsigned long lastStop = 0;        // millis() of the end of the last run (cooldown); the timer sets it too
+unsigned long runUntil = 0;                 // backup deadline, checked in loop()
 uint32_t ranToday = 0;                      // seconds run since dayStart
 unsigned long dayStart = 0;
-esp_timer_handle_t cutoff = nullptr;
+esp_timer_handle_t cutoff = nullptr;        // stays nullptr if it could not be created: then NO run starts
 
 // Runs in the esp_timer task, independent of loop(): the pin goes low no matter what
 // maya.loop() is doing. Nothing here may block or call into Maya.
 static void onCutoff(void*) {
   digitalWrite(OUT_PIN, LOW);
+  lastStop = millis();                      // the cooldown starts when the pump stopped, not when loop() noticed
   running = false;
   timerFired = true;
 }
 
 // Called from loop() or a handler (never from the timer): output low, state reported.
-void finishRun(const char* why) {
+void finishRun(const char* why, bool fromTimer) {
   digitalWrite(OUT_PIN, LOW);
   if (cutoff) esp_timer_stop(cutoff);       // harmless if it is not running
   running = false;
-  lastStop = millis();
+  if (!fromTimer) lastStop = millis();      // (the timer already recorded when it cut the output)
   maya.setSwitch("running", false);         // tell Maya and the app, also when WE decided
   maya.setNumber("run_for", 0);             // the app should not keep showing "10 s"
   maya.setText("note", why);
@@ -74,11 +83,16 @@ void finishRun(const char* why) {
 
 // Asked to run for `seconds`. Returns true only if it actually started (or was a stop).
 bool startRun(double seconds) {
+  // A handler runs inside maya.loop(), which loop() calls BEFORE it looks at timerFired:
+  // settle what the timer did first, or this request would see a stale cooldown.
+  if (timerFired) { timerFired = false; finishRun("time is up", true); }
   if (millis() - dayStart > 86400000UL) { dayStart = millis(); ranToday = 0; }
+
   if (seconds <= 0) {                       // a stop request: not a "run", so no cooldown starts
-    if (running) finishRun("stopped on request");
+    if (running) finishRun("stopped on request", false);
     return true;
   }
+  if (!cutoff) { maya.setText("note", "Cutoff timer unavailable"); return false; }
   if (running) { maya.setText("note", "Already running"); return false; }
   if (lastStop && millis() - lastStop < COOLDOWN_S * 1000UL) {
     char b[48];
@@ -86,13 +100,24 @@ bool startRun(double seconds) {
     maya.setText("note", b);
     return false;
   }
-  uint32_t s = (uint32_t)seconds;
+
+  // Round UP to a whole second: the library accepts 0.5, and (uint32_t)0.5 is 0, a timer that
+  // would fire immediately and could race the pin going high.
+  uint32_t s = (uint32_t)ceil(seconds);
+  if (s < 1) s = 1;
   if (s > MAX_RUN_S) s = MAX_RUN_S;         // the device's own cap, whatever the app allowed
   if (ranToday + s > MAX_PER_DAY_S) { maya.setText("note", "Daily limit reached"); return false; }
+
+  // Arm the cutoff FIRST and check that it took. Only then is the output allowed on.
+  timerFired = false;
+  if (esp_timer_start_once(cutoff, (uint64_t)s * 1000000ULL) != ESP_OK) {
+    digitalWrite(OUT_PIN, LOW);
+    maya.setText("note", "Cutoff timer unavailable");
+    return false;                           // nothing was started and nothing is counted
+  }
   ranToday += s;
   running = true;
-  timerFired = false;
-  esp_timer_start_once(cutoff, (uint64_t)s * 1000000ULL);   // the cutoff is armed BEFORE the pin goes high
+  runUntil = millis() + s * 1000UL;
   digitalWrite(OUT_PIN, HIGH);
   maya.setSwitch("running", true);
   maya.setText("note", "Watering");
@@ -105,7 +130,10 @@ void setup() {
   digitalWrite(OUT_PIN, LOW);               // 1. off before anything else
 
   const esp_timer_create_args_t args = { onCutoff, nullptr, ESP_TIMER_TASK, "pump_cutoff", true };
-  esp_timer_create(&args, &cutoff);
+  if (esp_timer_create(&args, &cutoff) != ESP_OK) {
+    cutoff = nullptr;                       // startRun() refuses every run without a cutoff
+    Serial.println("[pump] cutoff timer could not be created: the pump is disabled");
+  }
 
   maya.setName("Plant pump");               // CHANGE
   maya.enableHealth();
@@ -128,16 +156,24 @@ void setup() {
 void loop() {
   maya.loop();
 
-  if (timerFired) { timerFired = false; finishRun("time is up"); }   // report what the timer did
-  // Belt and braces: if the timer somehow did not fire, loop() still ends the run.
-  // (It cannot be the ONLY cutoff: see the header.)
+  if (timerFired) { timerFired = false; finishRun("time is up", true); }   // report what the timer did
+  // Backup: if the timer somehow did not stop it, loop() does. It cannot be the ONLY
+  // cutoff (loop() may be blocked, see the header), only a second one.
+  if (running && (long)(millis() - runUntil) >= 0) finishRun("time is up (backup)", false);
 
   static unsigned long last = 0;
+  static int lastKind = -1;
   if (millis() - last >= 5000) {
     last = millis();
     // CHANGE: a real two-point calibration (reading in air = dry, in water = wet) maps this.
     float pct = 100.0f - analogRead(SENSOR_PIN) * 100.0f / 4095.0f;
-    maya.setNumber("moisture", pct);
-    if (!running) maya.setText("note", pct < 25 ? "Soil is dry" : "Soil is fine");
+    maya.setNumber("moisture", pct);        // a NaN from a failed read is refused by the library
+    // Say something about the soil only when it CHANGES, so a refusal or "time is up" in
+    // the note is not overwritten five seconds later.
+    int kind = pct < 25 ? 0 : 1;
+    if (!running && kind != lastKind) {
+      lastKind = kind;
+      maya.setText("note", kind == 0 ? "Soil is dry" : "Soil is fine");
+    }
   }
 }

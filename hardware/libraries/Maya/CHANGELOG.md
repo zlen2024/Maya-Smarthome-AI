@@ -21,7 +21,10 @@ board has done it.
   the Bluetooth INFO characteristic. **The phone app does not read it yet** (it shows a fixed
   "Maya Device XXXX"): `SOFTWARE_TICKETS.md` T-1. The owner's own name still wins (PROTOCOL.md 4).
 - `printInfo()` and a boot banner on Serial: library version, model, firmware, name,
-  device id, **when the sketch was built**, chip, free heap. Printed after waiting up to
+  device id, **when the sketch was built**, the first 8 characters of the running binary's MD5
+  (`binary`, also `bin` in the INFO characteristic), chip, free heap. The line
+  `New firmware build detected. Settings wiped` right after it is the only "this board was
+  just flashed" signal the chip has (it has no clock that survives a reset). Printed after waiting up to
   2.5 s for a USB serial monitor, so a board whose Serial is its USB port is not silent
   just because the monitor opened late; printed again when Bluetooth setup starts.
 - `Maya::libraryVersion()`, `builtAt()`, `name()`, `model()`, `fw()`.
@@ -35,20 +38,26 @@ board has done it.
 - `skills/`: two skills for an agent or a person building a Maya device, or changing the
   library. See `skills/README.md`.
 - `extras/test/check_version.py`.
+- `setNumber()` now refuses NaN and infinity (a failed sensor read) and keeps the last good
+  value; before, NaN looked "changed" on every flush and could not be written as JSON. Host
+  test added in `test_library.py`.
 
 ### Changed
 - Bluetooth provisioning no longer leaves the board silent after a phone disconnects:
-  advertising restarts. (The BLE library of core 2.0.x says it does this and does not.)
+  advertising restarts. (The BLE library of core 2.0.x says it does this and does not.) The
+  original library commit (5d385d1) did not have this; it was first committed in 587fefb,
+  before this version number was cut, so it is listed here.
 - Just before the WiFi join in provisioning the phone link is asked for a 60-100 ms interval, to
   give WiFi airtime on the shared radio (asked then, not at connect, so service discovery stays fast).
 - The Bluetooth service reserves 40 attribute handles (default 15; it needs ~22).
 - WiFi is brought up once and retried on, not torn down and rebuilt on every try.
 - The station asks for a 20 MHz channel.
 - ESP32-C3: 8.5 dBm transmit power unless the sketch says otherwise. Many SuperMini
-  clones hear a router and never finish joining it at full power. **Fixed a real bug:** the
-  0.2.0 code asked for a lower power before the station had started, and the core ignores
-  that silently, so it was never applied. The library now waits for the station and prints
-  the power it got.
+  clones hear a router and never finish joining it at full power. **A bug found by reading
+  core 2.0.17's `WiFiGeneric.cpp`:** `setTxPower()` returns false and does nothing until the
+  station has started, and the 0.2.0-era code asked before that, so a lower power was never
+  applied. The library now waits for the station and prints the power it got. That it compiles
+  is verified; that it makes a C3 join has **not been seen on a board**.
 - WiFi reason 8 (our own disconnect between tries) no longer overwrites the router's real reason.
 - A sensor (`beginSensor()`) prints the banner and waits for a monitor only after a
   power-on or reset, never after a timer wake.

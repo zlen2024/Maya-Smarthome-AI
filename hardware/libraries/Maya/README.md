@@ -237,6 +237,9 @@ the join dependable, and says on Serial:
 - The Bluetooth service now reserves 40 attribute handles instead of the default 15; it needs
   about 22, and with too few the stack can leave the last-registered characteristics out.
 - If a phone disconnects, advertising restarts (core 2.0.x does not do this by itself).
+- `setNumber()` refuses NaN and infinity, so a failed sensor read cannot be reported as a value.
+- The line `New firmware build detected. Settings wiped` follows the banner on the first boot
+  after a flash: it is the only "just flashed" signal the board has.
 
 **These changes compile and are unverified on a board.** In one bench session a C3 failed to
 join a 2.4 GHz router while a phone was connected over Bluetooth and joined first try in a bare

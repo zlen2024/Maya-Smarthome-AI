@@ -39,6 +39,20 @@ driver, calibration, two power builds).
   switched off). Use `addDuration(key, label, maxSeconds, fn)` so the library refuses a
   longer request, and `.confirm()` so Maya asks a person. Start from
   `templates/timed_actuator`, and read "Timed actuators" in `references/driver-patterns.md`.
+- **A failed read is a fault, not a number.** A DHT22 returns NaN when a read fails. The library
+  refuses a non-finite `setNumber` (returns `false`, keeps the last good value); check the
+  return, count consecutive failures, and say what is wrong in a `note` text ("sensor not
+  answering"). Never push a made-up number to hide a failure.
+- **Relay modules are usually active-LOW.** Most cheap relay boards energise when the input is
+  LOW, so "off at boot" must drive HIGH and every command inverts. Use a `RELAY_ON` constant
+  (see `templates/always_on`) and test with the load disconnected. Mains work: fused supply,
+  relay and terminals in an enclosure, nothing live on a breadboard, and only if you are
+  qualified to do it.
+- **Third-party part libraries** (DHT, OneWire, HX711...) are installed for the build you use:
+  `arduino-cli lib install "DHT sensor library"` (it also needs "Adafruit Unified Sensor"),
+  or the IDE's Library Manager for the IDE. A part that disables interrupts while it reads (the
+  DHT22 for ~5 ms) must be read no more often than its datasheet says (every 2 s for a DHT22)
+  and will occasionally fail while WiFi is busy: treat that as the fault case above.
 - **Do not use `_`-prefixed keys** except through `enableHealth()` / `addReserved("_batt")`.
 - **Every flash wipes WiFi and the PIN** (by design: the first owner sets a new PIN, 4 digits,
   not 0000/1111/1234). Re-provision after each upload. Keep your own settings (calibration)
